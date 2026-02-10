@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meinopoly - Monopoly Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+    }
+
+    .game-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 10px;
+    }
+
+    .header {
+      text-align: center;
+      padding: 10px 0;
+    }
+    .header h1 {
+      font-size: 2rem;
+      color: #f0c040;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+      letter-spacing: 6px;
+    }
+
+    .main-layout {
+      display: flex;
+      gap: 15px;
+      align-items: flex-start;
+    }
+
+    .left-panel {
+      width: 240px;
+      flex-shrink: 0;
+    }
+    .right-panel {
+      width: 260px;
+      flex-shrink: 0;
+    }
+    .board-wrapper {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+    }
+
+    /* ---- BOARD ---- */
+    .board {
+      display: grid;
+      grid-template-columns: 90px repeat(9, 68px) 90px;
+      grid-template-rows: 90px repeat(9, 68px) 90px;
+      gap: 1px;
+      background: #2d5016;
+      border: 3px solid #000;
+      border-radius: 6px;
+      padding: 2px;
+    }
+
+    .cell {
+      background: #c8e6c0;
+      border: 1px solid #3a7d2a;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+      cursor: default;
+    }
+    .cell.corner {
+      background: #b0d8a0;
+    }
+    .cell.empty {
+      background: transparent;
+      border: none;
+    }
+
+    .color-bar {
+      position: absolute;
+      z-index: 1;
+    }
+    .side-bottom .color-bar {
+      top: 0; left: 0; right: 0; height: 10px;
+    }
+    .side-top .color-bar {
+      bottom: 0; left: 0; right: 0; height: 10px;
+    }
+    .side-left .color-bar {
+      top: 0; right: 0; bottom: 0; width: 10px;
+    }
+    .side-right .color-bar {
+      top: 0; left: 0; bottom: 0; width: 10px;
+    }
+
+    .cell-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .space-name {
+      font-size: 0.55rem;
+      font-weight: 600;
+      text-align: center;
+      color: #222;
+      line-height: 1.1;
+      word-wrap: break-word;
+    }
+    .corner .space-name {
+      font-size: 0.65rem;
+    }
+
+    .price {
+      font-size: 0.5rem;
+      color: #444;
+      margin-top: 1px;
+    }
+
+    .owner-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      border: 1px solid #333;
+      margin-top: 2px;
+    }
+
+    .tokens {
+      display: flex;
+      gap: 2px;
+      margin-top: 2px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .player-token {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 0.6rem;
+      font-weight: bold;
+      border: 2px solid #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+      animation: tokenPulse 2s ease-in-out infinite;
+    }
+
+    @keyframes tokenPulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.15); }
+    }
+
+    /* ---- CENTER LOGO ---- */
+    .center-area {
+      background: #2d5016;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+    }
+    .center-logo {
+      text-align: center;
+    }
+    .logo-text {
+      font-size: 2.2rem;
+      font-weight: bold;
+      color: #f0c040;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.6);
+      letter-spacing: 4px;
+      font-family: Georgia, serif;
+    }
+    .logo-sub {
+      font-size: 0.85rem;
+      color: #aed581;
+      margin-top: 4px;
+    }
+
+    /* ---- PLAYER INFO ---- */
+    #player-info h2 {
+      color: #f0c040;
+      margin-bottom: 10px;
+      font-size: 1.1rem;
+    }
+    .player-card {
+      background: #16213e;
+      border: 2px solid #333;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 10px;
+      transition: all 0.3s;
+    }
+    .player-card.active {
+      border-color: #f0c040;
+      box-shadow: 0 0 12px rgba(240, 192, 64, 0.3);
+    }
+    .player-card.bankrupt {
+      opacity: 0.5;
+    }
+    .player-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    .player-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 2px solid #fff;
+    }
+    .turn-badge {
+      color: #f0c040;
+      font-size: 0.75rem;
+      font-weight: bold;
+    }
+    .bankrupt-badge {
+      color: #e74c3c;
+      font-size: 0.7rem;
+      font-weight: bold;
+    }
+    .player-money {
+      font-size: 1.4rem;
+      font-weight: bold;
+      color: #2ecc71;
+      margin: 4px 0;
+    }
+    .player-position {
+      font-size: 0.8rem;
+      color: #aaa;
+    }
+    .jail-badge {
+      color: #e74c3c;
+      font-size: 0.8rem;
+      font-weight: bold;
+      margin-top: 4px;
+    }
+    .player-props {
+      font-size: 0.7rem;
+      color: #888;
+      margin-top: 6px;
+    }
+    .prop-badge {
+      display: inline-block;
+      border: 2px solid;
+      border-radius: 3px;
+      padding: 1px 4px;
+      margin: 2px;
+      font-size: 0.6rem;
+      color: #ccc;
+      background: rgba(255,255,255,0.05);
+    }
+
+    /* ---- DICE ---- */
+    .dice-display {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      margin: 10px 0;
+    }
+    .dice {
+      width: 55px;
+      height: 55px;
+      background: #fff;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      color: #222;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+    }
+    .dice-total {
+      text-align: center;
+      font-size: 0.9rem;
+      color: #f0c040;
+      font-weight: bold;
+    }
+
+    /* ---- BUTTONS ---- */
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 10px 16px;
+      margin: 6px 0;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s;
+      color: #fff;
+    }
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+    }
+    .btn:active {
+      transform: translateY(0);
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #3498db, #2980b9);
+    }
+    .btn-success {
+      background: linear-gradient(135deg, #2ecc71, #27ae60);
+    }
+    .btn-secondary {
+      background: linear-gradient(135deg, #95a5a6, #7f8c8d);
+    }
+    .btn-warning {
+      background: linear-gradient(135deg, #f39c12, #d68910);
+    }
+    .btn-end {
+      background: linear-gradient(135deg, #8e44ad, #6c3483);
+    }
+
+    /* ---- MESSAGES ---- */
+    #messages h3 {
+      color: #f0c040;
+      margin-bottom: 8px;
+      font-size: 0.95rem;
+    }
+    .message-list {
+      max-height: 250px;
+      overflow-y: auto;
+      background: #16213e;
+      border-radius: 8px;
+      padding: 8px;
+    }
+    .message {
+      padding: 4px 8px;
+      margin: 3px 0;
+      font-size: 0.8rem;
+      color: #ccc;
+      border-left: 3px solid #3498db;
+      background: rgba(255,255,255,0.03);
+    }
+
+    /* ---- GAME OVER ---- */
+    .game-over {
+      text-align: center;
+      padding: 20px;
+      background: linear-gradient(135deg, #f0c040, #d4a017);
+      border-radius: 10px;
+      color: #1a1a2e;
+    }
+    .game-over h2 {
+      font-size: 1.5rem;
+    }
+
+    /* ---- SCROLLBAR ---- */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #16213e; }
+    ::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+
+    /* ---- RESPONSIVE ---- */
+    @media (max-width: 1200px) {
+      .main-layout {
+        flex-direction: column;
+        align-items: center;
+      }
+      .left-panel, .right-panel {
+        width: 100%;
+        max-width: 600px;
+      }
+      .board {
+        grid-template-columns: 80px repeat(9, 58px) 80px;
+        grid-template-rows: 80px repeat(9, 58px) 80px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="./src/App.js"></script>
+</body>
+</html>

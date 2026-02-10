@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.cache/
+.parcel-cache/
+.venv/
+__pycache__/
+*.pyc
+.env
