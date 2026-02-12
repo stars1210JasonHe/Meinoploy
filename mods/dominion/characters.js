@@ -10,6 +10,7 @@ import sophiaEmberHead from './portraits/Sophia-Ember.png';
 import cassianEchoHead from './portraits/Cassian-Echo.png';
 import miraDawnlightHead from './portraits/Mira-Dawnlight.png';
 import rennChainbreakerHead from './portraits/Renn-Chainbreaker.png';
+import opheliaNightveilHead from './portraits/Ophelia-Nightveil.png';
 
 export const CHARACTERS = [
   {
@@ -139,7 +140,7 @@ export const CHARACTERS = [
       name: 'Shadow Veil',
       description: 'Hide true money amount from other players. Can trigger hidden victory.',
     },
-    portrait: null, // Portrait not yet created
+    portrait: opheliaNightveilHead,
     color: '#3d3d5c',
   },
 ];

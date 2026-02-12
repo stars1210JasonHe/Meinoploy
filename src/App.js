@@ -1,7 +1,7 @@
 import { Client } from 'boardgame.io/client';
 import { Monopoly } from './Game';
 import { PLAYER_COLORS, BUILDING_ICONS, BUILDING_NAMES, UPGRADE_COST_MULTIPLIERS, RENT_MULTIPLIERS, SEASONS } from './constants';
-import { BOARD_SPACES, COLOR_GROUPS, CHARACTERS } from '../mods/dominion';
+import { BOARD_SPACES, COLOR_GROUPS, CHARACTERS, getLoreById } from '../mods/dominion';
 
 const BOARD_SIZE = 11; // 11x11 grid
 
@@ -42,6 +42,23 @@ function getSpaceTypeIcon(space) {
     case 'goToJail': return '\u{1F6A8}';
     default: return '';
   }
+}
+
+// Render Chinese lore text: paragraphs + bold markers
+function renderLoreText(text) {
+  if (!text) return '';
+  return text
+    .split('\n\n')
+    .map(p => {
+      let html = p.replace(/\n/g, '<br/>');
+      html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      if (html.startsWith('&gt; ') || html.startsWith('> ')) {
+        html = html.replace(/^(&gt; |> )/, '');
+        return `<blockquote>${html}</blockquote>`;
+      }
+      return `<p>${html}</p>`;
+    })
+    .join('');
 }
 
 // Simple stats bar renderer
@@ -88,6 +105,12 @@ class MonopolyBoard {
             <div id="messages"></div>
           </div>
         </div>
+        <div id="lore-modal" class="lore-modal">
+          <div class="lore-modal-content">
+            <button class="lore-close">&times;</button>
+            <div id="lore-body"></div>
+          </div>
+        </div>
       </div>
     `;
     this.charSelectEl = document.getElementById('character-select');
@@ -98,6 +121,15 @@ class MonopolyBoard {
     this.diceAreaEl = document.getElementById('dice-area');
     this.actionsEl = document.getElementById('actions');
     this.messagesEl = document.getElementById('messages');
+    this.loreModalEl = document.getElementById('lore-modal');
+    this.loreBodyEl = document.getElementById('lore-body');
+
+    // Close lore modal on backdrop or X click
+    this.loreModalEl.addEventListener('click', (e) => {
+      if (e.target.classList.contains('lore-modal') || e.target.classList.contains('lore-close')) {
+        this.hideLoreModal();
+      }
+    });
   }
 
   update(state) {
@@ -167,6 +199,7 @@ class MonopolyBoard {
             <div class="char-passive">${char.passive.name}: ${char.passive.description}</div>
             <div class="char-money">Starting: $${startMoney}</div>
             ${taken ? `<div class="char-taken">TAKEN${takenLabel}</div>` : ''}
+            <button class="char-lore-btn" data-char-id="${char.id}">View Lore</button>
           </div>
         </div>`;
     });
@@ -194,6 +227,82 @@ class MonopolyBoard {
         this.client.moves.selectCharacter(charId);
       };
     });
+
+    // Lore button handlers
+    this.charSelectEl.querySelectorAll('.char-lore-btn').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        this.showLoreModal(btn.dataset.charId);
+      };
+    });
+  }
+
+  showLoreModal(charId) {
+    const char = CHARACTERS.find(c => c.id === charId);
+    const lore = getLoreById(charId);
+    if (!char || !lore) return;
+
+    this.loreBodyEl.innerHTML = `
+      <div class="lore-header">
+        <div class="lore-portrait" style="border-color: ${char.color}">
+          ${char.portrait
+            ? `<img src="${char.portrait}" alt="${char.name}" />`
+            : `<div class="char-placeholder">${char.name[0]}</div>`
+          }
+        </div>
+        <div class="lore-title-block">
+          <div class="lore-name" style="color: ${char.color}">${lore.nameZh}（${char.name}）</div>
+          <div class="lore-title-zh">${lore.titleZh}</div>
+          <div class="lore-identity">${lore.identity}</div>
+          <div class="lore-alignment">${lore.alignment}</div>
+        </div>
+      </div>
+
+      <div class="lore-section">
+        <h3>角色背景故事</h3>
+        ${renderLoreText(lore.background)}
+      </div>
+
+      ${lore.noticed ? `<div class="lore-section">
+        <h3>被议会注意到的原因</h3>
+        ${renderLoreText(lore.noticed)}
+      </div>` : ''}
+
+      <div class="lore-section">
+        <h3>加入维度议会</h3>
+        ${renderLoreText(lore.joining)}
+      </div>
+
+      <div class="lore-section">
+        <h3>行事风格</h3>
+        ${lore.styleIntro ? renderLoreText(lore.styleIntro) : ''}
+        <ol class="lore-beliefs">
+          ${lore.style.map(s => `<li>${s.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</li>`).join('')}
+        </ol>
+        ${lore.styleOutro ? renderLoreText(lore.styleOutro) : ''}
+      </div>
+
+      <div class="lore-section">
+        <h3>与其他代理人的关系</h3>
+        <ul class="lore-relations">
+          ${lore.relationships.map(r =>
+            `<li><strong>${r.target}</strong>：${r.description}</li>`
+          ).join('')}
+        </ul>
+      </div>
+
+      <div class="lore-quote">
+        <blockquote>${lore.themeSummary.replace(/\n/g, '<br/>')}</blockquote>
+      </div>
+    `;
+
+    this.loreModalEl.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+
+  hideLoreModal() {
+    this.loreModalEl.style.display = 'none';
+    document.body.style.overflow = '';
   }
 
   renderSeason(G) {
