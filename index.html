@@ -31,6 +31,25 @@
       letter-spacing: 6px;
     }
 
+    .season-display {
+      display: none;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 0;
+      font-size: 0.9rem;
+    }
+    .season-icon { font-size: 1.3rem; }
+    .season-name { font-weight: bold; color: #f0c040; }
+    .season-turn { color: #999; font-size: 0.8rem; }
+    .season-effect {
+      background: rgba(255,255,255,0.1);
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.75rem;
+      color: #ff9;
+    }
+
     .main-layout {
       display: flex;
       gap: 15px;
@@ -345,6 +364,263 @@
       color: #ccc;
       border-left: 3px solid #3498db;
       background: rgba(255,255,255,0.03);
+    }
+
+    /* ---- CHARACTER SELECT ---- */
+    .character-select {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 10px;
+    }
+    .char-select-header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .char-select-header h2 {
+      color: #f0c040;
+      font-size: 1.6rem;
+    }
+    .char-select-sub {
+      color: #aaa;
+      font-size: 0.9rem;
+      margin-top: 4px;
+    }
+    .char-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 12px;
+    }
+    .char-card {
+      background: #16213e;
+      border: 2px solid #333;
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      gap: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .char-card:hover:not(.taken) {
+      border-color: #f0c040;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(240, 192, 64, 0.2);
+    }
+    .char-card.taken {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .char-portrait {
+      width: 80px;
+      height: 80px;
+      border-radius: 10px;
+      border: 3px solid;
+      overflow: hidden;
+      flex-shrink: 0;
+      background: #0a0a1a;
+    }
+    .char-portrait img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .char-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      color: #555;
+      font-weight: bold;
+    }
+    .char-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .char-name {
+      font-weight: bold;
+      font-size: 1rem;
+    }
+    .char-title {
+      font-size: 0.75rem;
+      color: #aaa;
+      margin-bottom: 4px;
+    }
+    .char-stats {
+      margin: 4px 0;
+    }
+    .stat-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin: 1px 0;
+    }
+    .stat-label {
+      font-size: 0.6rem;
+      color: #888;
+      width: 26px;
+      text-align: right;
+    }
+    .stat-bar {
+      flex: 1;
+      height: 6px;
+      background: #333;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .stat-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #3498db, #2ecc71);
+      border-radius: 3px;
+      transition: width 0.3s;
+    }
+    .stat-val {
+      font-size: 0.6rem;
+      color: #ccc;
+      width: 14px;
+    }
+    .char-passive {
+      font-size: 0.65rem;
+      color: #f0c040;
+      margin: 4px 0;
+      line-height: 1.2;
+    }
+    .char-money {
+      font-size: 0.7rem;
+      color: #2ecc71;
+      font-weight: bold;
+    }
+    .char-taken {
+      font-size: 0.75rem;
+      color: #e74c3c;
+      font-weight: bold;
+      margin-top: 4px;
+    }
+    .char-selected-list {
+      text-align: center;
+      margin-top: 16px;
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    .char-selected-badge {
+      display: inline-block;
+      border: 2px solid;
+      border-radius: 20px;
+      padding: 6px 16px;
+      font-size: 0.85rem;
+      color: #eee;
+      background: #16213e;
+    }
+
+    /* ---- PLAYER AVATAR ---- */
+    .player-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 6px;
+      object-fit: cover;
+      border: 2px solid #555;
+    }
+    .player-title {
+      font-size: 0.65rem;
+      color: #888;
+    }
+    .player-abilities {
+      font-size: 0.7rem;
+      color: #3498db;
+      margin-top: 4px;
+    }
+    .player-passive {
+      font-size: 0.65rem;
+      color: #f0c040;
+      font-style: italic;
+      margin-top: 2px;
+    }
+    .money-hidden {
+      color: #888 !important;
+      font-style: italic;
+    }
+
+    /* ---- BUILDINGS & MORTGAGE ---- */
+    .building-icon {
+      font-size: 0.6rem;
+      line-height: 1;
+    }
+    .mortgage-badge {
+      font-size: 0.5rem;
+      font-weight: bold;
+      color: #fff;
+      background: #e74c3c;
+      border-radius: 2px;
+      padding: 0 2px;
+    }
+    .cell.mortgaged {
+      opacity: 0.55;
+    }
+    .prop-mortgaged {
+      opacity: 0.5;
+      text-decoration: line-through;
+    }
+
+    /* ---- PROPERTY MANAGEMENT PANEL ---- */
+    .prop-management {
+      background: #16213e;
+      border-radius: 8px;
+      padding: 8px;
+      margin-top: 10px;
+    }
+    .prop-management h4 {
+      color: #f0c040;
+      font-size: 0.85rem;
+      margin-bottom: 6px;
+    }
+    .prop-mgmt-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+      padding: 3px 0;
+      border-bottom: 1px solid #2a2a4a;
+    }
+    .prop-mgmt-row:last-child {
+      border-bottom: none;
+    }
+    .prop-mgmt-name {
+      font-size: 0.7rem;
+      color: #ccc;
+      padding-left: 6px;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .prop-mgmt-actions {
+      display: flex;
+      gap: 3px;
+      flex-shrink: 0;
+    }
+    .btn-small {
+      padding: 2px 6px;
+      font-size: 0.6rem;
+      font-weight: bold;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      color: #fff;
+      white-space: nowrap;
+    }
+    .btn-small:hover {
+      opacity: 0.85;
+    }
+    .btn-upgrade {
+      background: #2ecc71;
+    }
+    .btn-mortgage {
+      background: #e67e22;
+    }
+    .btn-unmortgage {
+      background: #3498db;
     }
 
     /* ---- GAME OVER ---- */

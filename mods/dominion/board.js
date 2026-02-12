@@ -1,5 +1,5 @@
-// All 40 Monopoly board spaces
-// Types: go, property, community, tax, railroad, chance, jail, utility, parking, goToJail
+// Dominion Mod — Board layout (40 spaces, classic Monopoly map)
+
 export const BOARD_SPACES = [
   { id: 0,  name: 'GO',                  type: 'go',         color: null,       price: 0,   rent: 0 },
   { id: 1,  name: 'Mediterranean Ave',   type: 'property',   color: '#8B4513',  price: 60,  rent: 4 },
@@ -43,31 +43,14 @@ export const BOARD_SPACES = [
   { id: 39, name: 'Boardwalk',           type: 'property',   color: '#0000CC',  price: 400, rent: 100 },
 ];
 
-export const CHANCE_CARDS = [
-  { text: 'Advance to GO! Collect $200.', action: 'moveTo', value: 0 },
-  { text: 'Advance to Illinois Ave.', action: 'moveTo', value: 24 },
-  { text: 'Advance to St. Charles Place.', action: 'moveTo', value: 11 },
-  { text: 'Bank pays you dividend of $50.', action: 'gain', value: 50 },
-  { text: 'Go to Jail. Do not pass GO.', action: 'goToJail', value: 0 },
-  { text: 'Make general repairs: Pay $25.', action: 'pay', value: 25 },
-  { text: 'Speeding fine: Pay $15.', action: 'pay', value: 15 },
-  { text: 'You won a crossword competition! Collect $100.', action: 'gain', value: 100 },
-  { text: 'Your building loan matures. Collect $150.', action: 'gain', value: 150 },
-  { text: 'You have been elected chairman. Pay $50.', action: 'pay', value: 50 },
-];
-
-export const COMMUNITY_CARDS = [
-  { text: 'Advance to GO! Collect $200.', action: 'moveTo', value: 0 },
-  { text: 'Bank error in your favor. Collect $200.', action: 'gain', value: 200 },
-  { text: 'Doctor\'s fee. Pay $50.', action: 'pay', value: 50 },
-  { text: 'From sale of stock you get $50.', action: 'gain', value: 50 },
-  { text: 'Go to Jail. Do not pass GO.', action: 'goToJail', value: 0 },
-  { text: 'Holiday fund matures. Collect $100.', action: 'gain', value: 100 },
-  { text: 'Income tax refund. Collect $20.', action: 'gain', value: 20 },
-  { text: 'Life insurance matures. Collect $100.', action: 'gain', value: 100 },
-  { text: 'School fees. Pay $50.', action: 'pay', value: 50 },
-  { text: 'You inherit $100.', action: 'gain', value: 100 },
-];
-
-export const PLAYER_COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12'];
-export const PLAYER_TOKENS = ['\u{1F534}', '\u{1F535}', '\u{1F7E2}', '\u{1F7E1}'];
+// Color groups: maps color hex to array of space IDs in that group
+export const COLOR_GROUPS = {
+  '#8B4513': [1, 3],          // Brown
+  '#87CEEB': [6, 8, 9],      // Light Blue
+  '#FF69B4': [11, 13, 14],   // Pink
+  '#FFA500': [16, 18, 19],   // Orange
+  '#FF0000': [21, 23, 24],   // Red
+  '#FFFF00': [26, 27, 29],   // Yellow
+  '#00AA00': [31, 32, 34],   // Green
+  '#0000CC': [37, 39],       // Dark Blue
+};
