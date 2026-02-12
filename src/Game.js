@@ -1,16 +1,10 @@
 import { INVALID_MOVE } from 'boardgame.io/core';
-import { UPGRADE_COST_MULTIPLIERS, RENT_MULTIPLIERS, BUILDING_NAMES, SEASONS, SEASON_CHANGE_INTERVAL } from './constants';
-import { BOARD_SPACES, CHANCE_CARDS, COMMUNITY_CARDS, COLOR_GROUPS, getCharacterById, getStartingMoney } from '../mods/dominion';
-
-const BASE_STARTING_MONEY = 1500;
-const GO_SALARY = 200;
-const JAIL_POSITION = 10;
-const JAIL_FINE = 50;
+import { BOARD_SPACES, CHANCE_CARDS, COMMUNITY_CARDS, COLOR_GROUPS, getCharacterById, getStartingMoney, RULES } from '../mods/dominion';
 
 function createPlayer(id) {
   return {
     id,
-    money: BASE_STARTING_MONEY,
+    money: RULES.core.baseStartingMoney,
     position: 0,
     properties: [],
     inJail: false,
@@ -47,13 +41,13 @@ function getEffectiveBuyPrice(G, player, space) {
 
   if (!player.character) return Math.floor(price);
 
-  // Negotiation stat: -1% per point (max -10%)
-  const negDiscount = Math.min(player.character.stats.negotiation * 0.01, 0.10);
+  // Negotiation stat discount
+  const negDiscount = Math.min(player.character.stats.negotiation * RULES.stats.negotiation.buyDiscountPerPoint, RULES.stats.negotiation.buyDiscountMax);
   price *= (1 - negDiscount);
 
-  // Albert Victor passive: property price -10%
+  // Albert Victor passive: property price discount
   if (getPassive(player) === 'financier') {
-    price *= 0.90;
+    price *= (1 - RULES.passives.financier.buyDiscount);
   }
 
   return Math.floor(price);
@@ -62,18 +56,18 @@ function getEffectiveBuyPrice(G, player, space) {
 // --- Upgrade cost ---
 
 function getUpgradeCost(G, player, space, targetLevel) {
-  let cost = space.price * UPGRADE_COST_MULTIPLIERS[targetLevel - 1];
+  let cost = space.price * RULES.buildings.upgradeCostMultipliers[targetLevel - 1];
 
   // Season price modifier affects upgrade cost
   cost *= getSeasonPriceMod(G);
 
   if (player.character) {
-    // Tech stat: -2% per point (max -20%)
-    const techDiscount = Math.min(player.character.stats.tech * 0.02, 0.20);
+    // Tech stat discount
+    const techDiscount = Math.min(player.character.stats.tech * RULES.stats.tech.upgradeDiscountPerPoint, RULES.stats.tech.upgradeDiscountMax);
     cost *= (1 - techDiscount);
-    // Lia Startrace passive: -20% upgrade cost
+    // Lia Startrace passive: upgrade cost discount
     if (getPassive(player) === 'pioneer') {
-      cost *= 0.80;
+      cost *= (1 - RULES.passives.pioneer.upgradeCostDiscount);
     }
   }
   return Math.floor(cost);
@@ -82,7 +76,7 @@ function getUpgradeCost(G, player, space, targetLevel) {
 // --- Season helpers ---
 
 function getCurrentSeason(G) {
-  return SEASONS[G.seasonIndex];
+  return RULES.seasons.list[G.seasonIndex];
 }
 
 function getSeasonPriceMod(G) {
@@ -100,8 +94,8 @@ function getSeasonTaxMod(G) {
 // --- Dice & cards ---
 
 function rollTwoDice(ctx) {
-  const d1 = Math.floor(ctx.random.Number() * 6) + 1;
-  const d2 = Math.floor(ctx.random.Number() * 6) + 1;
+  const d1 = Math.floor(ctx.random.Number() * RULES.core.diceSides) + 1;
+  const d2 = Math.floor(ctx.random.Number() * RULES.core.diceSides) + 1;
   return { d1, d2, total: d1 + d2, isDoubles: d1 === d2 };
 }
 
@@ -134,20 +128,20 @@ function calculateRent(G, space, diceTotal, visitor) {
   let rent;
   if (space.type === 'railroad') {
     const count = countOwnedRailroads(G, owner);
-    rent = 25 * Math.pow(2, count - 1);
+    rent = RULES.rent.railroadBase * Math.pow(RULES.rent.railroadExponent, count - 1);
   } else if (space.type === 'utility') {
     const count = countOwnedUtilities(G, owner);
-    rent = count === 1 ? diceTotal * 4 : diceTotal * 10;
+    rent = count === 1 ? diceTotal * RULES.rent.utilityMultiplierSingle : diceTotal * RULES.rent.utilityMultiplierBoth;
   } else {
     const buildingLevel = G.buildings[space.id] || 0;
     if (buildingLevel > 0) {
       // Building rent replaces monopoly bonus
-      rent = space.rent * RENT_MULTIPLIERS[buildingLevel];
+      rent = space.rent * RULES.buildings.rentMultipliers[buildingLevel];
     } else {
       rent = space.rent;
       // Monopoly bonus: double rent if owner has full color group (no buildings)
       if (space.color && ownsColorGroup(G, owner, space.color)) {
-        rent *= 2;
+        rent *= RULES.core.monopolyRentMultiplier;
       }
     }
   }
@@ -157,19 +151,19 @@ function calculateRent(G, space, diceTotal, visitor) {
 
   // Character effects only apply if visitor has a character
   if (visitor && visitor.character) {
-    // Charisma stat: -1% per point (max -10%)
-    const chaDiscount = Math.min(visitor.character.stats.charisma * 0.01, 0.10);
+    // Charisma stat discount
+    const chaDiscount = Math.min(visitor.character.stats.charisma * RULES.stats.charisma.rentDiscountPerPoint, RULES.stats.charisma.rentDiscountMax);
     rent *= (1 - chaDiscount);
 
-    // Knox regulated property: +20% rent
+    // Knox regulated property: bonus rent
     const ownerPlayer = G.players[owner];
     if (ownerPlayer.regulatedProperty === space.id) {
-      rent *= 1.20;
+      rent *= (1 + RULES.passives.enforcer.regulatedRentBonus);
     }
 
-    // Renn anti-monopoly: -25% rent on full color set properties
+    // Renn anti-monopoly: reduced rent on full color set properties
     if (getPassive(visitor) === 'breaker' && space.color && ownsColorGroup(G, owner, space.color)) {
-      rent *= 0.75;
+      rent *= (1 - RULES.passives.breaker.monopolyRentReduction);
     }
   }
 
@@ -200,11 +194,11 @@ function handleBankruptcy(G, ctx, player, creditorId) {
   }
   player.properties = [];
 
-  // Sophia Ember passive: gain $100 when any player goes bankrupt
+  // Sophia Ember passive: gain bonus when any player goes bankrupt
   G.players.forEach(p => {
     if (p.id !== player.id && !p.bankrupt && getPassive(p) === 'arbitrageur') {
-      p.money += 100;
-      G.messages.push(`${playerName(p)} gains $100 from crisis arbitrage!`);
+      p.money += RULES.passives.arbitrageur.bankruptcyBonus;
+      G.messages.push(`${playerName(p)} gains $${RULES.passives.arbitrageur.bankruptcyBonus} from crisis arbitrage!`);
     }
   });
 }
@@ -255,9 +249,9 @@ function handleLanding(G, ctx) {
       let taxAmount = space.rent;
       // Season tax modifier (Winter: double tax)
       taxAmount = Math.floor(taxAmount * getSeasonTaxMod(G));
-      // Albert Victor passive: financial negative event losses -20%
+      // Albert Victor passive: financial negative event loss reduction
       if (getPassive(player) === 'financier') {
-        taxAmount = Math.floor(taxAmount * 0.80);
+        taxAmount = Math.floor(taxAmount * (1 - RULES.passives.financier.negativeEventReduction));
         messages.push(`Financial expertise reduces tax to $${taxAmount}.`);
       }
       player.money -= taxAmount;
@@ -300,7 +294,7 @@ function handleLanding(G, ctx) {
     }
 
     case 'goToJail':
-      player.position = JAIL_POSITION;
+      player.position = RULES.core.jailPosition;
       player.inJail = true;
       player.jailTurns = 0;
       messages.push('Go to Jail!');
@@ -322,7 +316,7 @@ function getTotalAssets(G, player) {
     total += BOARD_SPACES[pid].price;
     const level = G.buildings[pid] || 0;
     for (let i = 1; i <= level; i++) {
-      total += Math.floor(BOARD_SPACES[pid].price * UPGRADE_COST_MULTIPLIERS[i - 1]);
+      total += Math.floor(BOARD_SPACES[pid].price * RULES.buildings.upgradeCostMultipliers[i - 1]);
     }
   });
   return total;
@@ -335,9 +329,9 @@ function applyCard(G, ctx, player, card) {
       break;
     case 'pay': {
       let amount = card.value;
-      // Albert Victor passive: financial negative event losses -20%
+      // Albert Victor passive: financial negative event loss reduction
       if (getPassive(player) === 'financier') {
-        amount = Math.floor(amount * 0.80);
+        amount = Math.floor(amount * (1 - RULES.passives.financier.negativeEventReduction));
         G.messages.push(`Financial expertise reduces loss to $${amount}.`);
       }
       player.money -= amount;
@@ -349,12 +343,12 @@ function applyCard(G, ctx, player, card) {
     case 'moveTo': {
       const oldPos = player.position;
       player.position = card.value;
-      if (card.value < oldPos && card.value !== JAIL_POSITION) {
-        let goBonus = GO_SALARY;
-        // Mira Dawnlight passive: +$50 GO bonus
+      if (card.value < oldPos && card.value !== RULES.core.jailPosition) {
+        let goBonus = RULES.core.goSalary;
+        // Mira Dawnlight passive: GO bonus
         if (getPassive(player) === 'idealist') {
-          goBonus += 50;
-          G.messages.push('Growth vision: extra $50 from GO!');
+          goBonus += RULES.passives.idealist.goBonus;
+          G.messages.push(`Growth vision: extra $${RULES.passives.idealist.goBonus} from GO!`);
         }
         player.money += goBonus;
         G.messages.push(`Passed GO! Collect $${goBonus}.`);
@@ -363,7 +357,7 @@ function applyCard(G, ctx, player, card) {
       break;
     }
     case 'goToJail':
-      player.position = JAIL_POSITION;
+      player.position = RULES.core.jailPosition;
       player.inJail = true;
       player.jailTurns = 0;
       break;
@@ -375,7 +369,7 @@ function applyCard(G, ctx, player, card) {
       const assets = getTotalAssets(G, player);
       let amount = Math.floor(assets * card.value / 100);
       if (getPassive(player) === 'financier') {
-        amount = Math.floor(amount * 0.80);
+        amount = Math.floor(amount * (1 - RULES.passives.financier.negativeEventReduction));
         G.messages.push(`Financial expertise reduces loss to $${amount}.`);
       }
       player.money -= amount;
@@ -414,7 +408,7 @@ function applyCard(G, ctx, player, card) {
           if (sp.type !== 'property' || !sp.color) return false;
           if (!ownsColorGroup(G, player.id, sp.color)) return false;
           const level = G.buildings[pid] || 0;
-          if (level >= 4) return false;
+          if (level >= RULES.core.maxBuildingLevel) return false;
           const groupIds = COLOR_GROUPS[sp.color];
           if (groupIds.some(id => G.mortgaged[id])) return false;
           const minLevel = Math.min(...groupIds.map(id => G.buildings[id] || 0));
@@ -426,7 +420,7 @@ function applyCard(G, ctx, player, card) {
         const pid = upgradeable[0];
         const level = (G.buildings[pid] || 0) + 1;
         G.buildings[pid] = level;
-        G.messages.push(`Free upgrade! ${BOARD_SPACES[pid].name} upgraded to ${BUILDING_NAMES[level]}!`);
+        G.messages.push(`Free upgrade! ${BOARD_SPACES[pid].name} upgraded to ${RULES.buildings.names[level]}!`);
       } else {
         G.messages.push('No properties eligible for free upgrade.');
       }
@@ -444,7 +438,7 @@ function applyCard(G, ctx, player, card) {
         G.buildings[pid]--;
         if (G.buildings[pid] === 0) delete G.buildings[pid];
         const newLevel = G.buildings[pid] || 0;
-        G.messages.push(`Market Crash! ${BOARD_SPACES[pid].name} downgraded to ${BUILDING_NAMES[newLevel]}.`);
+        G.messages.push(`Market Crash! ${BOARD_SPACES[pid].name} downgraded to ${RULES.buildings.names[newLevel]}.`);
       } else {
         G.messages.push('No buildings to downgrade.');
       }
@@ -500,6 +494,52 @@ function checkGameOver(G) {
   return undefined;
 }
 
+// --- Auction helpers ---
+
+function advanceAuction(G) {
+  const auction = G.auction;
+  let nextIndex = auction.currentBidderIndex;
+  const total = auction.bidders.length;
+
+  for (let i = 0; i < total; i++) {
+    nextIndex = (nextIndex + 1) % total;
+    const bidder = auction.bidders[nextIndex];
+    if (!bidder.passed) {
+      // Check if this is the current highest bidder (auction complete)
+      if (bidder.playerId === auction.currentBidder) {
+        resolveAuction(G);
+        return;
+      }
+      auction.currentBidderIndex = nextIndex;
+      const player = G.players[bidder.playerId];
+      G.messages.push(`${playerName(player)}'s turn to bid.`);
+      return;
+    }
+  }
+
+  // All passed
+  if (auction.currentBidder !== null) {
+    resolveAuction(G);
+  } else {
+    G.messages.push(`No bids. ${BOARD_SPACES[auction.propertyId].name} remains unowned.`);
+    G.auction = null;
+    G.turnPhase = 'done';
+  }
+}
+
+function resolveAuction(G) {
+  const auction = G.auction;
+  const winner = G.players[auction.currentBidder];
+  const space = BOARD_SPACES[auction.propertyId];
+
+  winner.money -= auction.currentBid;
+  winner.properties.push(auction.propertyId);
+  G.ownership[auction.propertyId] = auction.currentBidder;
+  G.messages.push(`${playerName(winner)} wins the auction for ${space.name} at $${auction.currentBid}!`);
+  G.auction = null;
+  G.turnPhase = 'done';
+}
+
 // --- Game definition ---
 
 export const Monopoly = {
@@ -534,6 +574,8 @@ export const Monopoly = {
       doublesCount: 0,
       seasonIndex: 0,
       totalTurns: 0,
+      trade: null,
+      auction: null,
     };
   },
 
@@ -550,17 +592,17 @@ export const Monopoly = {
 
       // Track total turns and advance season
       G.totalTurns++;
-      const newSeasonIndex = Math.floor(G.totalTurns / SEASON_CHANGE_INTERVAL) % SEASONS.length;
+      const newSeasonIndex = Math.floor(G.totalTurns / RULES.seasons.changeInterval) % RULES.seasons.list.length;
       if (newSeasonIndex !== G.seasonIndex) {
         G.seasonIndex = newSeasonIndex;
-        const season = SEASONS[G.seasonIndex];
+        const season = RULES.seasons.list[G.seasonIndex];
         G.messages.push(`${season.icon} Season changed to ${season.name}!`);
       }
 
       const player = G.players[ctx.currentPlayer];
       if (player.bankrupt) return;
       if (player.inJail) {
-        G.messages.push(`${playerName(player)} is in jail. Pay $${JAIL_FINE} or try to roll doubles.`);
+        G.messages.push(`${playerName(player)} is in jail. Pay $${RULES.core.jailFine} or try to roll doubles.`);
       }
     },
   },
@@ -582,17 +624,17 @@ export const Monopoly = {
       player.character = char;
       player.money = getStartingMoney(char);
 
-      // Luck stat ≥ 8: 1 free card redraw per game
-      if (char.stats.luck >= 8) {
-        player.luckRedraws = 1;
+      // Luck stat threshold: free card redraws
+      if (char.stats.luck >= RULES.stats.luck.redrawThreshold) {
+        player.luckRedraws = RULES.stats.luck.redrawCount;
       }
-      // Evelyn Zero passive: additional redraw
+      // Evelyn Zero passive: additional redraws
       if (char.passive.id === 'speculator') {
-        player.luckRedraws += 1;
+        player.luckRedraws += RULES.passives.speculator.extraRedraws;
       }
-      // Stamina stat ≥ 7: 1 free reroll per game
-      if (char.stats.stamina >= 7) {
-        player.rerollsLeft = 1;
+      // Stamina stat threshold: free rerolls
+      if (char.stats.stamina >= RULES.stats.stamina.rerollThreshold) {
+        player.rerollsLeft = RULES.stats.stamina.rerollCount;
       }
 
       G.messages.push(`${playerName(player)} joins the game! ($${player.money})`);
@@ -623,8 +665,8 @@ export const Monopoly = {
       // Triple doubles rule
       if (dice.isDoubles) {
         G.doublesCount++;
-        if (G.doublesCount >= 3) {
-          player.position = JAIL_POSITION;
+        if (G.doublesCount >= RULES.core.doublesJailThreshold) {
+          player.position = RULES.core.jailPosition;
           player.inJail = true;
           player.jailTurns = 0;
           G.messages.push('Triple doubles! Go to Jail!');
@@ -642,18 +684,18 @@ export const Monopoly = {
           G.messages.push('Doubles! You\'re free from jail!');
         } else {
           player.jailTurns++;
-          if (player.jailTurns >= 3) {
-            player.money -= JAIL_FINE;
+          if (player.jailTurns >= RULES.core.jailMaxTurns) {
+            player.money -= RULES.core.jailFine;
             player.inJail = false;
             player.jailTurns = 0;
-            G.messages.push(`3 turns in jail. Paid $${JAIL_FINE} fine.`);
+            G.messages.push(`${RULES.core.jailMaxTurns} turns in jail. Paid $${RULES.core.jailFine} fine.`);
             if (player.money <= 0) {
               handleBankruptcy(G, ctx, player, null);
               G.turnPhase = 'done';
               return;
             }
           } else {
-            G.messages.push(`Still in jail. Turn ${player.jailTurns}/3.`);
+            G.messages.push(`Still in jail. Turn ${player.jailTurns}/${RULES.core.jailMaxTurns}.`);
             G.turnPhase = 'done';
             return;
           }
@@ -661,14 +703,14 @@ export const Monopoly = {
       }
 
       const oldPos = player.position;
-      player.position = (player.position + dice.total) % 40;
+      player.position = (player.position + dice.total) % RULES.core.boardSize;
 
       if (player.position < oldPos && BOARD_SPACES[player.position].type !== 'goToJail') {
-        let goBonus = GO_SALARY;
-        // Mira Dawnlight passive: +$50 GO bonus
+        let goBonus = RULES.core.goSalary;
+        // Mira Dawnlight passive: GO bonus
         if (getPassive(player) === 'idealist') {
-          goBonus += 50;
-          G.messages.push('Growth vision: extra $50 from GO!');
+          goBonus += RULES.passives.idealist.goBonus;
+          G.messages.push(`Growth vision: extra $${RULES.passives.idealist.goBonus} from GO!`);
         }
         player.money += goBonus;
         G.messages.push(`Passed GO! Collect $${goBonus}.`);
@@ -747,7 +789,7 @@ export const Monopoly = {
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
       // Can only regulate one at a time
       player.regulatedProperty = propertyId;
-      G.messages.push(`${playerName(player)} regulates ${BOARD_SPACES[propertyId].name}! (+20% rent)`);
+      G.messages.push(`${playerName(player)} regulates ${BOARD_SPACES[propertyId].name}! (+${RULES.passives.enforcer.regulatedRentBonus * 100}% rent)`);
     },
 
     // --- Property upgrades ---
@@ -767,7 +809,7 @@ export const Monopoly = {
       if (groupIds.some(id => G.mortgaged[id])) return INVALID_MOVE;
 
       const currentLevel = G.buildings[propertyId] || 0;
-      if (currentLevel >= 4) return INVALID_MOVE;
+      if (currentLevel >= RULES.core.maxBuildingLevel) return INVALID_MOVE;
 
       // Even building: can only upgrade if at minimum level in group
       const minLevel = Math.min(...groupIds.map(id => G.buildings[id] || 0));
@@ -779,7 +821,7 @@ export const Monopoly = {
 
       player.money -= cost;
       G.buildings[propertyId] = targetLevel;
-      G.messages.push(`Built ${BUILDING_NAMES[targetLevel]} on ${space.name} for $${cost}!`);
+      G.messages.push(`Built ${RULES.buildings.names[targetLevel]} on ${space.name} for $${cost}!`);
     },
 
     mortgageProperty: (G, ctx, propertyId) => {
@@ -803,7 +845,7 @@ export const Monopoly = {
       }
 
       G.mortgaged[propertyId] = true;
-      const mortgageValue = Math.floor(space.price * 0.5 * getSeasonPriceMod(G));
+      const mortgageValue = Math.floor(space.price * RULES.core.mortgageRate * getSeasonPriceMod(G));
       player.money += mortgageValue;
       G.messages.push(`Mortgaged ${space.name} for $${mortgageValue}.`);
     },
@@ -818,7 +860,7 @@ export const Monopoly = {
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
       if (!G.mortgaged[propertyId]) return INVALID_MOVE;
 
-      const unmortgageCost = Math.floor(space.price * 0.55 * getSeasonPriceMod(G));
+      const unmortgageCost = Math.floor(space.price * RULES.core.unmortgageRate * getSeasonPriceMod(G));
       if (player.money < unmortgageCost) return INVALID_MOVE;
 
       player.money -= unmortgageCost;
@@ -849,6 +891,30 @@ export const Monopoly = {
       if (!G.canBuy) return INVALID_MOVE;
       G.canBuy = false;
       G.effectivePrice = 0;
+
+      if (RULES.auction.enabled && RULES.auction.auctionOnPass) {
+        const player = G.players[ctx.currentPlayer];
+        const space = BOARD_SPACES[player.position];
+        const activeBidders = G.players
+          .filter(p => !p.bankrupt)
+          .map(p => ({ playerId: p.id, passed: false }));
+
+        if (activeBidders.length > 0) {
+          G.auction = {
+            propertyId: space.id,
+            currentBid: 0,
+            currentBidder: null,
+            bidders: activeBidders,
+            currentBidderIndex: 0,
+          };
+          G.turnPhase = 'auction';
+          G.messages.push(`${space.name} goes to auction! Bidding starts at $${RULES.auction.startingBid}.`);
+          const firstBidder = G.players[activeBidders[0].playerId];
+          G.messages.push(`${playerName(firstBidder)}'s turn to bid.`);
+          return;
+        }
+      }
+
       G.messages.push('Passed on buying.');
       G.turnPhase = 'done';
     },
@@ -859,15 +925,164 @@ export const Monopoly = {
       if (!player.inJail) return INVALID_MOVE;
       if (G.hasRolled) return INVALID_MOVE;
 
-      if (player.money < JAIL_FINE) {
-        G.messages.push(`Not enough money to pay $${JAIL_FINE} fine!`);
+      if (player.money < RULES.core.jailFine) {
+        G.messages.push(`Not enough money to pay $${RULES.core.jailFine} fine!`);
         return INVALID_MOVE;
       }
 
-      player.money -= JAIL_FINE;
+      player.money -= RULES.core.jailFine;
       player.inJail = false;
       player.jailTurns = 0;
-      G.messages = [`${playerName(player)} paid $${JAIL_FINE} to get out of jail.`];
+      G.messages = [`${playerName(player)} paid $${RULES.core.jailFine} to get out of jail.`];
+    },
+
+    // --- Trading ---
+    proposeTrade: (G, ctx, proposal) => {
+      if (G.phase !== 'play') return INVALID_MOVE;
+      if (!RULES.trading.enabled) return INVALID_MOVE;
+      if (!G.hasRolled) return INVALID_MOVE;
+      if (G.canBuy || G.pendingCard || G.auction) return INVALID_MOVE;
+      if (G.trade) return INVALID_MOVE;
+
+      const player = G.players[ctx.currentPlayer];
+      if (!RULES.trading.canTradeInJail && player.inJail) return INVALID_MOVE;
+
+      const { targetPlayerId, offeredProperties, requestedProperties, offeredMoney, requestedMoney } = proposal;
+      const target = G.players[targetPlayerId];
+      if (!target || target.bankrupt || targetPlayerId === ctx.currentPlayer) return INVALID_MOVE;
+
+      // Validate offered properties belong to proposer and have no buildings
+      if (offeredProperties && offeredProperties.length > 0) {
+        for (const pid of offeredProperties) {
+          if (G.ownership[pid] !== ctx.currentPlayer) return INVALID_MOVE;
+          if ((G.buildings[pid] || 0) > 0) return INVALID_MOVE;
+          if (!RULES.trading.allowMortgagedProperties && G.mortgaged[pid]) return INVALID_MOVE;
+        }
+      }
+
+      // Validate requested properties belong to target and have no buildings
+      if (requestedProperties && requestedProperties.length > 0) {
+        for (const pid of requestedProperties) {
+          if (G.ownership[pid] !== targetPlayerId) return INVALID_MOVE;
+          if ((G.buildings[pid] || 0) > 0) return INVALID_MOVE;
+          if (!RULES.trading.allowMortgagedProperties && G.mortgaged[pid]) return INVALID_MOVE;
+        }
+      }
+
+      // Validate money
+      if (!RULES.trading.allowMoneyInTrade && ((offeredMoney || 0) > 0 || (requestedMoney || 0) > 0)) return INVALID_MOVE;
+      if ((offeredMoney || 0) > player.money) return INVALID_MOVE;
+      if ((requestedMoney || 0) > target.money) return INVALID_MOVE;
+
+      G.trade = {
+        proposerId: ctx.currentPlayer,
+        targetPlayerId,
+        offeredProperties: offeredProperties || [],
+        requestedProperties: requestedProperties || [],
+        offeredMoney: offeredMoney || 0,
+        requestedMoney: requestedMoney || 0,
+      };
+      G.turnPhase = 'trade';
+      G.messages.push(`${playerName(player)} proposes a trade to ${playerName(target)}!`);
+    },
+
+    acceptTrade: (G, ctx) => {
+      if (!G.trade) return INVALID_MOVE;
+
+      const { proposerId, targetPlayerId, offeredProperties, requestedProperties, offeredMoney, requestedMoney } = G.trade;
+      const proposer = G.players[proposerId];
+      const target = G.players[targetPlayerId];
+
+      // Transfer offered properties (proposer → target)
+      for (const pid of offeredProperties) {
+        proposer.properties = proposer.properties.filter(p => p !== pid);
+        target.properties.push(pid);
+        G.ownership[pid] = targetPlayerId;
+      }
+
+      // Transfer requested properties (target → proposer)
+      for (const pid of requestedProperties) {
+        target.properties = target.properties.filter(p => p !== pid);
+        proposer.properties.push(pid);
+        G.ownership[pid] = proposerId;
+      }
+
+      // Transfer money
+      if (offeredMoney > 0) {
+        proposer.money -= offeredMoney;
+        target.money += offeredMoney;
+      }
+      if (requestedMoney > 0) {
+        target.money -= requestedMoney;
+        proposer.money += requestedMoney;
+      }
+
+      G.messages.push(`Trade accepted! ${playerName(proposer)} and ${playerName(target)} completed a trade.`);
+      G.trade = null;
+      G.turnPhase = 'done';
+    },
+
+    rejectTrade: (G, ctx) => {
+      if (!G.trade) return INVALID_MOVE;
+      const target = G.players[G.trade.targetPlayerId];
+      G.messages.push(`${playerName(target)} rejected the trade.`);
+      G.trade = null;
+      G.turnPhase = 'done';
+    },
+
+    cancelTrade: (G, ctx) => {
+      if (!G.trade) return INVALID_MOVE;
+      if (G.trade.proposerId !== ctx.currentPlayer) return INVALID_MOVE;
+      G.messages.push('Trade cancelled.');
+      G.trade = null;
+      G.turnPhase = 'done';
+    },
+
+    // --- Auctions ---
+    placeBid: (G, ctx, amount) => {
+      if (!G.auction) return INVALID_MOVE;
+
+      const auction = G.auction;
+      const bidderEntry = auction.bidders[auction.currentBidderIndex];
+      const player = G.players[bidderEntry.playerId];
+
+      // Validate bid
+      const minBid = auction.currentBid === 0
+        ? RULES.auction.startingBid
+        : auction.currentBid + RULES.auction.minimumIncrement;
+      if (amount < minBid) return INVALID_MOVE;
+      if (amount > player.money) return INVALID_MOVE;
+
+      auction.currentBid = amount;
+      auction.currentBidder = bidderEntry.playerId;
+      G.messages.push(`${playerName(player)} bids $${amount}!`);
+
+      // Advance to next bidder
+      advanceAuction(G);
+    },
+
+    passAuction: (G, ctx) => {
+      if (!G.auction) return INVALID_MOVE;
+
+      const auction = G.auction;
+      const bidderEntry = auction.bidders[auction.currentBidderIndex];
+      const player = G.players[bidderEntry.playerId];
+
+      bidderEntry.passed = true;
+      G.messages.push(`${playerName(player)} passes.`);
+
+      // Check if auction is over
+      const activeBidders = auction.bidders.filter(b => !b.passed);
+      if (activeBidders.length <= 1 && auction.currentBidder !== null) {
+        resolveAuction(G);
+      } else if (activeBidders.length === 0) {
+        // Everyone passed with no bids
+        G.messages.push(`No bids. ${BOARD_SPACES[auction.propertyId].name} remains unowned.`);
+        G.auction = null;
+        G.turnPhase = 'done';
+      } else {
+        advanceAuction(G);
+      }
     },
 
     endTurn: (G, ctx) => {
@@ -875,6 +1090,8 @@ export const Monopoly = {
       if (!G.hasRolled) return INVALID_MOVE;
       if (G.canBuy) return INVALID_MOVE;
       if (G.pendingCard) return INVALID_MOVE;
+      if (G.trade) return INVALID_MOVE;
+      if (G.auction) return INVALID_MOVE;
       G.turnPhase = 'roll';
       ctx.events.endTurn();
     },

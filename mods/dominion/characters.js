@@ -11,6 +11,7 @@ import cassianEchoHead from './portraits/Cassian-Echo.png';
 import miraDawnlightHead from './portraits/Mira-Dawnlight.png';
 import rennChainbreakerHead from './portraits/Renn-Chainbreaker.png';
 import opheliaNightveilHead from './portraits/Ophelia-Nightveil.png';
+import { RULES } from './rules';
 
 export const CHARACTERS = [
   {
@@ -150,5 +151,5 @@ export function getCharacterById(id) {
 }
 
 export function getStartingMoney(character) {
-  return 1500 + character.stats.capital * 50;
+  return RULES.core.baseStartingMoney + character.stats.capital * RULES.stats.capital.startingMoneyBonus;
 }

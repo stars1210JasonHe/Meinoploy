@@ -23,7 +23,7 @@
 - [x] Create portrait for Ophelia Nightveil (10th character)
 - [x] Character lore viewer modal (click "View Lore" on character cards)
 
-## Phase 3 — Enhanced Gameplay (Partial)
+## Phase 3 — Enhanced Gameplay ✅ (core mechanics complete)
 
 - [x] Building system (House, Hotel, Skyscraper, Landmark) with color-set monopoly requirement
 - [x] Mortgage / unmortgage mechanic
@@ -31,8 +31,9 @@
 - [x] Season system (4 seasons cycling every 10 turns, affecting prices/rent/tax)
 - [x] Triple doubles → go to jail
 - [x] Property management UI panel (upgrade, mortgage, unmortgage)
-- [ ] Property trading between players
-- [ ] Auction system for unpurchased properties
+- [x] Config-driven rules system (`mods/dominion/rules.js`) — all game rules modifiable
+- [x] Property trading between players (propose, accept, reject, cancel)
+- [x] Auction system for unpurchased properties (round-robin bidding)
 - [ ] Sound effects and animations (dice roll, movement, purchase)
 - [ ] Turn timer
 
@@ -64,7 +65,8 @@
 
 ## Architecture
 
-- **Engine code**: `src/` (Game.js, App.js, constants.js)
-- **Mod data**: `mods/dominion/` (characters, board, cards, lore, portraits)
-- **Tests**: `src/__tests__/` (128 tests covering all game mechanics)
+- **Engine code**: `src/` (Game.js, App.js, constants.js — shim re-exports from mod)
+- **Mod data**: `mods/dominion/` (characters, board, cards, lore, rules, portraits)
+- **Rules config**: `mods/dominion/rules.js` — all game rules in one config object
+- **Tests**: `src/__tests__/` (142 tests covering all game mechanics)
 - **Design docs**: `data/` (Chinese design documents, Python tools)

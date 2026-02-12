@@ -1,7 +1,7 @@
 import { Client } from 'boardgame.io/client';
 import { Monopoly } from './Game';
 import { PLAYER_COLORS, BUILDING_ICONS, BUILDING_NAMES, UPGRADE_COST_MULTIPLIERS, RENT_MULTIPLIERS, SEASONS } from './constants';
-import { BOARD_SPACES, COLOR_GROUPS, CHARACTERS, getLoreById } from '../mods/dominion';
+import { BOARD_SPACES, COLOR_GROUPS, CHARACTERS, getLoreById, RULES } from '../mods/dominion';
 
 const BOARD_SIZE = 11; // 11x11 grid
 
@@ -175,7 +175,7 @@ class MonopolyBoard {
       const taken = takenIds.includes(char.id);
       const takenBy = G.players.find(p => p.character && p.character.id === char.id);
       const takenLabel = takenBy ? ` (Player ${parseInt(takenBy.id) + 1})` : '';
-      const startMoney = 1500 + char.stats.capital * 50;
+      const startMoney = RULES.core.baseStartingMoney + char.stats.capital * RULES.stats.capital.startingMoneyBonus;
 
       html += `
         <div class="char-card ${taken ? 'taken' : ''}" data-char-id="${char.id}">
@@ -303,6 +303,95 @@ class MonopolyBoard {
   hideLoreModal() {
     this.loreModalEl.style.display = 'none';
     document.body.style.overflow = '';
+  }
+
+  showTradeModal(G, ctx) {
+    const player = G.players[ctx.currentPlayer];
+    const opponents = G.players.filter(p => p.id !== ctx.currentPlayer && !p.bankrupt);
+    if (opponents.length === 0) return;
+
+    // Build trade modal using the lore modal overlay
+    const myProps = player.properties
+      .filter(pid => (G.buildings[pid] || 0) === 0 && (!G.mortgaged[pid] || RULES.trading.allowMortgagedProperties))
+      .map(pid => BOARD_SPACES[pid]);
+    const target = opponents[0]; // Default to first opponent
+    const targetProps = target.properties
+      .filter(pid => (G.buildings[pid] || 0) === 0 && (!G.mortgaged[pid] || RULES.trading.allowMortgagedProperties))
+      .map(pid => BOARD_SPACES[pid]);
+
+    const playerName = player.character ? player.character.name : `Player ${parseInt(ctx.currentPlayer) + 1}`;
+    const targetName = target.character ? target.character.name : `Player ${parseInt(target.id) + 1}`;
+
+    this.loreBodyEl.innerHTML = `
+      <div class="trade-modal-content">
+        <h3>Propose Trade</h3>
+        <div class="trade-builder">
+          <div class="trade-col">
+            <h4>${playerName} Offers:</h4>
+            <div class="trade-props-select">
+              ${myProps.map(sp => `
+                <label class="trade-prop-option">
+                  <input type="checkbox" value="${sp.id}" class="offer-prop" />
+                  <span style="border-left: 3px solid ${sp.color || '#666'}; padding-left: 4px;">${sp.name}</span>
+                </label>
+              `).join('') || '<p>No tradeable properties</p>'}
+            </div>
+            ${RULES.trading.allowMoneyInTrade ? `
+              <div class="trade-money-input">
+                <label>Offer $: <input type="number" id="offer-money" min="0" max="${player.money}" value="0" /></label>
+              </div>
+            ` : ''}
+          </div>
+          <div class="trade-col">
+            <h4>Request from ${targetName}:</h4>
+            <div class="trade-props-select">
+              ${targetProps.map(sp => `
+                <label class="trade-prop-option">
+                  <input type="checkbox" value="${sp.id}" class="request-prop" />
+                  <span style="border-left: 3px solid ${sp.color || '#666'}; padding-left: 4px;">${sp.name}</span>
+                </label>
+              `).join('') || '<p>No tradeable properties</p>'}
+            </div>
+            ${RULES.trading.allowMoneyInTrade ? `
+              <div class="trade-money-input">
+                <label>Request $: <input type="number" id="request-money" min="0" max="${target.money}" value="0" /></label>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+        <div class="trade-submit">
+          <button id="btn-submit-trade" class="btn btn-success">Send Proposal</button>
+          <button id="btn-cancel-trade-modal" class="btn btn-secondary">Cancel</button>
+        </div>
+      </div>
+    `;
+
+    this.loreModalEl.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+
+    // Attach submit/cancel handlers
+    document.getElementById('btn-submit-trade').onclick = () => {
+      const offeredProperties = Array.from(document.querySelectorAll('.offer-prop:checked')).map(cb => parseInt(cb.value));
+      const requestedProperties = Array.from(document.querySelectorAll('.request-prop:checked')).map(cb => parseInt(cb.value));
+      const offeredMoney = parseInt(document.getElementById('offer-money')?.value || '0');
+      const requestedMoney = parseInt(document.getElementById('request-money')?.value || '0');
+
+      if (offeredProperties.length === 0 && requestedProperties.length === 0 && offeredMoney === 0 && requestedMoney === 0) {
+        return; // Empty trade
+      }
+
+      this.client.moves.proposeTrade({
+        targetPlayerId: target.id,
+        offeredProperties,
+        requestedProperties,
+        offeredMoney,
+        requestedMoney,
+      });
+      this.hideLoreModal();
+    };
+    document.getElementById('btn-cancel-trade-modal').onclick = () => {
+      this.hideLoreModal();
+    };
   }
 
   renderSeason(G) {
@@ -509,7 +598,7 @@ class MonopolyBoard {
 
     // Jail options
     if (player.inJail && !G.hasRolled) {
-      html += `<button id="btn-jail" class="btn btn-warning">Pay $50 Fine</button>`;
+      html += `<button id="btn-jail" class="btn btn-warning">Pay $${RULES.core.jailFine} Fine</button>`;
       html += `<button id="btn-roll" class="btn btn-primary">Roll for Doubles</button>`;
     } else if (!G.hasRolled && G.turnPhase === 'roll') {
       html += `<button id="btn-roll" class="btn btn-primary">\u{1F3B2} Roll Dice</button>`;
@@ -529,13 +618,80 @@ class MonopolyBoard {
       html += `<button id="btn-pass" class="btn btn-secondary">Pass</button>`;
     }
 
+    // Auction UI
+    if (G.auction && G.turnPhase === 'auction') {
+      const auctionSpace = BOARD_SPACES[G.auction.propertyId];
+      const currentBidder = G.auction.bidders[G.auction.currentBidderIndex];
+      const bidderPlayer = G.players[currentBidder.playerId];
+      const bidderName = bidderPlayer.character ? bidderPlayer.character.name : `Player ${parseInt(currentBidder.playerId) + 1}`;
+      const minBid = G.auction.currentBid === 0
+        ? RULES.auction.startingBid
+        : G.auction.currentBid + RULES.auction.minimumIncrement;
+
+      html += `<div class="auction-panel">
+        <h4>Auction: ${auctionSpace.name}</h4>
+        <div class="auction-info">
+          <div>Current bid: <strong>$${G.auction.currentBid || 'None'}</strong></div>
+          <div>Bidder: <strong>${bidderName}</strong></div>
+          <div>Min bid: $${minBid}</div>
+        </div>
+        <div class="auction-controls">
+          <input type="number" id="bid-amount" min="${minBid}" value="${minBid}" step="${RULES.auction.minimumIncrement}" class="bid-input" />
+          <button id="btn-bid" class="btn btn-success">Place Bid</button>
+          <button id="btn-pass-auction" class="btn btn-secondary">Pass</button>
+        </div>
+      </div>`;
+    }
+
+    // Trade pending UI (accept/reject for target player)
+    if (G.trade && G.turnPhase === 'trade') {
+      const proposer = G.players[G.trade.proposerId];
+      const target = G.players[G.trade.targetPlayerId];
+      const proposerName = proposer.character ? proposer.character.name : `Player ${parseInt(G.trade.proposerId) + 1}`;
+      const targetName = target.character ? target.character.name : `Player ${parseInt(G.trade.targetPlayerId) + 1}`;
+
+      html += `<div class="trade-panel">
+        <h4>Trade Proposal</h4>
+        <div class="trade-details">
+          <div class="trade-side">
+            <strong>${proposerName} offers:</strong>
+            <ul>
+              ${G.trade.offeredProperties.map(pid => `<li>${BOARD_SPACES[pid].name}</li>`).join('') || '<li>No properties</li>'}
+              ${G.trade.offeredMoney > 0 ? `<li>$${G.trade.offeredMoney}</li>` : ''}
+            </ul>
+          </div>
+          <div class="trade-arrow">&#x21C4;</div>
+          <div class="trade-side">
+            <strong>${targetName} gives:</strong>
+            <ul>
+              ${G.trade.requestedProperties.map(pid => `<li>${BOARD_SPACES[pid].name}</li>`).join('') || '<li>No properties</li>'}
+              ${G.trade.requestedMoney > 0 ? `<li>$${G.trade.requestedMoney}</li>` : ''}
+            </ul>
+          </div>
+        </div>
+        <div class="trade-actions">
+          <button id="btn-accept-trade" class="btn btn-success">Accept</button>
+          <button id="btn-reject-trade" class="btn btn-danger">Reject</button>
+          <button id="btn-cancel-trade" class="btn btn-secondary">Cancel</button>
+        </div>
+      </div>`;
+    }
+
     // Reroll button (stamina ability)
     if (G.hasRolled && player.rerollsLeft > 0 && !G.canBuy && !G.pendingCard && G.turnPhase === 'done') {
       html += `<button id="btn-reroll" class="btn btn-warning">\u{1F3B2} Reroll (${player.rerollsLeft} left)</button>`;
     }
 
+    // Trade propose button (during 'done' phase, if trading enabled)
+    if (RULES.trading.enabled && G.hasRolled && !G.canBuy && !G.pendingCard && !G.trade && !G.auction && G.turnPhase === 'done') {
+      const opponents = G.players.filter(p => p.id !== ctx.currentPlayer && !p.bankrupt);
+      if (opponents.length > 0 && player.properties.length > 0) {
+        html += `<button id="btn-propose-trade" class="btn btn-trade">Propose Trade</button>`;
+      }
+    }
+
     // End turn
-    if (G.hasRolled && !G.canBuy && !G.pendingCard && G.turnPhase === 'done') {
+    if (G.hasRolled && !G.canBuy && !G.pendingCard && !G.trade && !G.auction && G.turnPhase === 'done') {
       html += `<button id="btn-end" class="btn btn-end">End Turn \u{27A1}\u{FE0F}</button>`;
     }
 
@@ -555,7 +711,7 @@ class MonopolyBoard {
           <span class="prop-mgmt-actions">`;
 
         if (mortgaged) {
-          const cost = Math.floor(space.price * 0.55);
+          const cost = Math.floor(space.price * RULES.core.unmortgageRate);
           html += `<button class="btn-small btn-unmortgage" data-pid="${pid}" title="Unmortgage for $${cost}">Unmortgage $${cost}</button>`;
         } else {
           // Upgrade check
@@ -564,7 +720,7 @@ class MonopolyBoard {
             const ownsGroup = groupIds.every(id => G.ownership[id] === ctx.currentPlayer);
             const minLevel = Math.min(...groupIds.map(id => G.buildings[id] || 0));
             const noMortgaged = !groupIds.some(id => G.mortgaged[id]);
-            if (ownsGroup && level <= minLevel && level < 4 && noMortgaged) {
+            if (ownsGroup && level <= minLevel && level < RULES.core.maxBuildingLevel && noMortgaged) {
               const upgCost = Math.floor(space.price * UPGRADE_COST_MULTIPLIERS[level]);
               html += `<button class="btn-small btn-upgrade" data-pid="${pid}" title="Build ${BUILDING_NAMES[level + 1]} for ~$${upgCost}">\u{2B06} ${BUILDING_NAMES[level + 1]}</button>`;
             }
@@ -575,7 +731,7 @@ class MonopolyBoard {
             canMortgage = !COLOR_GROUPS[space.color].some(id => (G.buildings[id] || 0) > 0);
           }
           if (canMortgage && level === 0) {
-            const val = Math.floor(space.price * 0.5);
+            const val = Math.floor(space.price * RULES.core.mortgageRate);
             html += `<button class="btn-small btn-mortgage" data-pid="${pid}" title="Mortgage for $${val}">Mortgage $${val}</button>`;
           }
         }
@@ -605,6 +761,25 @@ class MonopolyBoard {
     if (rerollBtn) rerollBtn.onclick = () => this.client.moves.useReroll();
     if (acceptCardBtn) acceptCardBtn.onclick = () => this.client.moves.acceptCard();
     if (redrawCardBtn) redrawCardBtn.onclick = () => this.client.moves.redrawCard();
+
+    // Auction buttons
+    const bidBtn = document.getElementById('btn-bid');
+    const passAuctionBtn = document.getElementById('btn-pass-auction');
+    if (bidBtn) bidBtn.onclick = () => {
+      const amount = parseInt(document.getElementById('bid-amount').value);
+      if (!isNaN(amount)) this.client.moves.placeBid(amount);
+    };
+    if (passAuctionBtn) passAuctionBtn.onclick = () => this.client.moves.passAuction();
+
+    // Trade buttons
+    const proposeTradeBtn = document.getElementById('btn-propose-trade');
+    const acceptTradeBtn = document.getElementById('btn-accept-trade');
+    const rejectTradeBtn = document.getElementById('btn-reject-trade');
+    const cancelTradeBtn = document.getElementById('btn-cancel-trade');
+    if (proposeTradeBtn) proposeTradeBtn.onclick = () => this.showTradeModal(G, ctx);
+    if (acceptTradeBtn) acceptTradeBtn.onclick = () => this.client.moves.acceptTrade();
+    if (rejectTradeBtn) rejectTradeBtn.onclick = () => this.client.moves.rejectTrade();
+    if (cancelTradeBtn) cancelTradeBtn.onclick = () => this.client.moves.cancelTrade();
 
     // Property management buttons
     document.querySelectorAll('.btn-upgrade').forEach(btn => {

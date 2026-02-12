@@ -5,3 +5,4 @@ export { CHARACTERS, getCharacterById, getStartingMoney } from './characters';
 export { BOARD_SPACES, COLOR_GROUPS } from './board';
 export { CHANCE_CARDS, COMMUNITY_CARDS } from './cards';
 export { CHARACTER_LORE, getLoreById } from './lore';
+export { RULES } from './rules';

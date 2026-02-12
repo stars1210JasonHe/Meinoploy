@@ -329,15 +329,20 @@ describe('buyProperty', () => {
 
 // ─── PASS PROPERTY ───────────────────────────────────────
 describe('passProperty', () => {
-  test('passing does not change money', () => {
+  test('passing does not change money and triggers auction', () => {
     const G = freshG();
     G.canBuy = true;
+    // Player must be on a buyable space for auction to reference it
+    G.players[0].position = 1;
 
     Monopoly.moves.passProperty(G, makeCtx('0'));
 
     expect(G.players[0].money).toBe(1500);
     expect(G.canBuy).toBe(false);
-    expect(G.turnPhase).toBe('done');
+    // Auction is enabled, so passProperty triggers auction phase
+    expect(G.turnPhase).toBe('auction');
+    expect(G.auction).not.toBeNull();
+    expect(G.auction.propertyId).toBe(1);
   });
 
   test('cannot pass when canBuy is false', () => {
@@ -1490,5 +1495,302 @@ describe('enhanced event cards', () => {
 
     expect(G.pendingCard).toBeNull();
     expect(G.players[0].luckRedraws).toBe(0);
+  });
+});
+
+// ─── TRADING ────────────────────────────────────────────
+describe('Trading', () => {
+  test('proposeTrade creates a trade object', () => {
+    const G = freshG();
+    G.hasRolled = true;
+    G.turnPhase = 'done';
+
+    // Give player 0 a property to trade
+    G.ownership[1] = '0';
+    G.players[0].properties.push(1);
+
+    const result = Monopoly.moves.proposeTrade(G, makeCtx('0'), {
+      targetPlayerId: '1',
+      offeredProperties: [1],
+      requestedProperties: [],
+      offeredMoney: 0,
+      requestedMoney: 0,
+    });
+
+    expect(result).not.toBe(INVALID_MOVE);
+    expect(G.trade).not.toBeNull();
+    expect(G.trade.proposerId).toBe('0');
+    expect(G.trade.targetPlayerId).toBe('1');
+    expect(G.trade.offeredProperties).toEqual([1]);
+    expect(G.turnPhase).toBe('trade');
+  });
+
+  test('proposeTrade fails without rolling first', () => {
+    const G = freshG();
+    G.hasRolled = false;
+
+    G.ownership[1] = '0';
+    G.players[0].properties.push(1);
+
+    const result = Monopoly.moves.proposeTrade(G, makeCtx('0'), {
+      targetPlayerId: '1',
+      offeredProperties: [1],
+      requestedProperties: [],
+      offeredMoney: 0,
+      requestedMoney: 0,
+    });
+
+    expect(result).toBe(INVALID_MOVE);
+    expect(G.trade).toBeNull();
+  });
+
+  test('proposeTrade fails if property has buildings', () => {
+    const G = freshG();
+    G.hasRolled = true;
+    G.turnPhase = 'done';
+
+    G.ownership[1] = '0';
+    G.players[0].properties.push(1);
+    G.buildings[1] = 2;
+
+    const result = Monopoly.moves.proposeTrade(G, makeCtx('0'), {
+      targetPlayerId: '1',
+      offeredProperties: [1],
+      requestedProperties: [],
+      offeredMoney: 0,
+      requestedMoney: 0,
+    });
+
+    expect(result).toBe(INVALID_MOVE);
+  });
+
+  test('acceptTrade transfers properties and money', () => {
+    const G = freshG();
+    G.hasRolled = true;
+
+    // Give properties
+    G.ownership[1] = '0';
+    G.players[0].properties.push(1);
+    G.ownership[3] = '1';
+    G.players[1].properties.push(3);
+
+    G.trade = {
+      proposerId: '0',
+      targetPlayerId: '1',
+      offeredProperties: [1],
+      requestedProperties: [3],
+      offeredMoney: 100,
+      requestedMoney: 0,
+    };
+    G.turnPhase = 'trade';
+
+    Monopoly.moves.acceptTrade(G, makeCtx('1'));
+
+    expect(G.trade).toBeNull();
+    expect(G.ownership[1]).toBe('1');
+    expect(G.ownership[3]).toBe('0');
+    expect(G.players[0].properties).toContain(3);
+    expect(G.players[0].properties).not.toContain(1);
+    expect(G.players[1].properties).toContain(1);
+    expect(G.players[1].properties).not.toContain(3);
+    expect(G.players[0].money).toBe(1400); // 1500 - 100
+    expect(G.players[1].money).toBe(1600); // 1500 + 100
+    expect(G.turnPhase).toBe('done');
+  });
+
+  test('rejectTrade clears trade', () => {
+    const G = freshG();
+    G.trade = {
+      proposerId: '0',
+      targetPlayerId: '1',
+      offeredProperties: [],
+      requestedProperties: [],
+      offeredMoney: 0,
+      requestedMoney: 0,
+    };
+    G.turnPhase = 'trade';
+
+    Monopoly.moves.rejectTrade(G, makeCtx('1'));
+
+    expect(G.trade).toBeNull();
+    expect(G.turnPhase).toBe('done');
+  });
+
+  test('cancelTrade only works for proposer', () => {
+    const G = freshG();
+    G.trade = {
+      proposerId: '0',
+      targetPlayerId: '1',
+      offeredProperties: [],
+      requestedProperties: [],
+      offeredMoney: 0,
+      requestedMoney: 0,
+    };
+
+    // Player 1 can't cancel player 0's trade
+    const result = Monopoly.moves.cancelTrade(G, makeCtx('1'));
+    expect(result).toBe(INVALID_MOVE);
+    expect(G.trade).not.toBeNull();
+
+    // Player 0 can cancel
+    Monopoly.moves.cancelTrade(G, makeCtx('0'));
+    expect(G.trade).toBeNull();
+  });
+
+  test('cannot end turn during active trade', () => {
+    const G = freshG();
+    G.hasRolled = true;
+    G.trade = {
+      proposerId: '0',
+      targetPlayerId: '1',
+      offeredProperties: [],
+      requestedProperties: [],
+      offeredMoney: 0,
+      requestedMoney: 0,
+    };
+
+    const result = Monopoly.moves.endTurn(G, makeCtx('0'));
+    expect(result).toBe(INVALID_MOVE);
+  });
+});
+
+// ─── AUCTIONS ───────────────────────────────────────────
+describe('Auctions', () => {
+  test('passProperty triggers auction when enabled', () => {
+    const G = freshG();
+    G.canBuy = true;
+    G.players[0].position = 1;
+
+    Monopoly.moves.passProperty(G, makeCtx('0'));
+
+    expect(G.auction).not.toBeNull();
+    expect(G.auction.propertyId).toBe(1);
+    expect(G.auction.currentBid).toBe(0);
+    expect(G.auction.bidders).toHaveLength(2);
+    expect(G.turnPhase).toBe('auction');
+  });
+
+  test('placeBid updates auction state', () => {
+    const G = freshG();
+    G.canBuy = true;
+    G.players[0].position = 1;
+
+    Monopoly.moves.passProperty(G, makeCtx('0'));
+
+    // First bidder places a bid
+    Monopoly.moves.placeBid(G, makeCtx('0'), 50);
+
+    expect(G.auction.currentBid).toBe(50);
+    expect(G.auction.currentBidder).toBe('0');
+  });
+
+  test('placeBid rejects bid below minimum', () => {
+    const G = freshG();
+    G.auction = {
+      propertyId: 1,
+      currentBid: 50,
+      currentBidder: '0',
+      bidders: [
+        { playerId: '0', passed: false },
+        { playerId: '1', passed: false },
+      ],
+      currentBidderIndex: 1,
+    };
+    G.turnPhase = 'auction';
+
+    // Try to bid below current + increment
+    const result = Monopoly.moves.placeBid(G, makeCtx('1'), 50);
+    expect(result).toBe(INVALID_MOVE);
+  });
+
+  test('passAuction marks bidder as passed', () => {
+    const G = freshG();
+    G.auction = {
+      propertyId: 1,
+      currentBid: 50,
+      currentBidder: '0',
+      bidders: [
+        { playerId: '0', passed: false },
+        { playerId: '1', passed: false },
+      ],
+      currentBidderIndex: 1,
+    };
+    G.turnPhase = 'auction';
+
+    Monopoly.moves.passAuction(G, makeCtx('1'));
+
+    // Player 1 passed, player 0 had the only bid → auction resolves
+    expect(G.auction).toBeNull();
+    expect(G.ownership[1]).toBe('0');
+    expect(G.players[0].money).toBe(1450); // 1500 - 50
+    expect(G.players[0].properties).toContain(1);
+    expect(G.turnPhase).toBe('done');
+  });
+
+  test('all players pass with no bids — property stays unowned', () => {
+    const G = freshG();
+    G.auction = {
+      propertyId: 1,
+      currentBid: 0,
+      currentBidder: null,
+      bidders: [
+        { playerId: '0', passed: false },
+        { playerId: '1', passed: false },
+      ],
+      currentBidderIndex: 0,
+    };
+    G.turnPhase = 'auction';
+
+    // Both pass
+    Monopoly.moves.passAuction(G, makeCtx('0'));
+    // After first pass, auction advances to player 1
+    Monopoly.moves.passAuction(G, makeCtx('1'));
+
+    expect(G.auction).toBeNull();
+    expect(G.ownership[1]).toBeNull();
+    expect(G.turnPhase).toBe('done');
+  });
+
+  test('cannot end turn during active auction', () => {
+    const G = freshG();
+    G.hasRolled = true;
+    G.auction = {
+      propertyId: 1,
+      currentBid: 0,
+      currentBidder: null,
+      bidders: [{ playerId: '0', passed: false }],
+      currentBidderIndex: 0,
+    };
+
+    const result = Monopoly.moves.endTurn(G, makeCtx('0'));
+    expect(result).toBe(INVALID_MOVE);
+  });
+
+  test('bidding war resolves to highest bidder', () => {
+    const G = freshG();
+    G.auction = {
+      propertyId: 1,
+      currentBid: 0,
+      currentBidder: null,
+      bidders: [
+        { playerId: '0', passed: false },
+        { playerId: '1', passed: false },
+      ],
+      currentBidderIndex: 0,
+    };
+    G.turnPhase = 'auction';
+
+    // Player 0 bids 10
+    Monopoly.moves.placeBid(G, makeCtx('0'), 10);
+    // Player 1 bids 20
+    Monopoly.moves.placeBid(G, makeCtx('1'), 20);
+    // Player 0 passes
+    Monopoly.moves.passAuction(G, makeCtx('0'));
+
+    // Player 1 wins at $20
+    expect(G.auction).toBeNull();
+    expect(G.ownership[1]).toBe('1');
+    expect(G.players[1].money).toBe(1480); // 1500 - 20
+    expect(G.turnPhase).toBe('done');
   });
 });
