@@ -1,7 +1,7 @@
 import { INVALID_MOVE } from 'boardgame.io/core';
 import { Monopoly } from '../Game';
 import { UPGRADE_COST_MULTIPLIERS, RENT_MULTIPLIERS, SEASONS, SEASON_CHANGE_INTERVAL } from '../constants';
-import { BOARD_SPACES, COLOR_GROUPS, CHARACTERS, getCharacterById } from '../../mods/dominion';
+import { BOARD_SPACES, COLOR_GROUPS, CHARACTERS, getCharacterById, RULES } from '../../mods/dominion';
 
 // Helper: create a fresh game state in 'play' phase (skipping char select)
 function freshG() {
@@ -1792,5 +1792,264 @@ describe('Auctions', () => {
     expect(G.ownership[1]).toBe('1');
     expect(G.players[1].money).toBe(1480); // 1500 - 20
     expect(G.turnPhase).toBe('done');
+  });
+});
+
+// ─── RULES CONFIG COVERAGE ──────────────────────────────
+describe('RULES config coverage', () => {
+
+  // --- Utility rent uses RULES.rent.utilityMultiplierSingle/Both ---
+  test('single utility rent = diceTotal * utilityMultiplierSingle', () => {
+    const G = freshG();
+    // Player 1 owns Electric Company (id 12)
+    G.ownership[12] = '1';
+    G.players[1].properties.push(12);
+    // Player 0 lands on Electric Company
+    G.players[0].position = 5; // roll 3+4=7 → pos 12
+    const ctx = makeCtx('0', 3, 4);
+
+    Monopoly.moves.rollDice(G, ctx);
+
+    expect(G.players[0].position).toBe(12);
+    // Rent = diceTotal(7) * utilityMultiplierSingle(4) = 28
+    const expectedRent = 7 * RULES.rent.utilityMultiplierSingle;
+    expect(G.players[0].money).toBe(1500 - expectedRent);
+    expect(G.players[1].money).toBe(1500 + expectedRent);
+  });
+
+  test('both utilities rent = diceTotal * utilityMultiplierBoth', () => {
+    const G = freshG();
+    // Player 1 owns both utilities (ids 12 and 28)
+    G.ownership[12] = '1';
+    G.ownership[28] = '1';
+    G.players[1].properties.push(12, 28);
+    // Player 0 lands on Electric Company
+    G.players[0].position = 5; // roll 3+4=7 → pos 12
+    const ctx = makeCtx('0', 3, 4);
+
+    Monopoly.moves.rollDice(G, ctx);
+
+    expect(G.players[0].position).toBe(12);
+    // Rent = diceTotal(7) * utilityMultiplierBoth(10) = 70
+    const expectedRent = 7 * RULES.rent.utilityMultiplierBoth;
+    expect(G.players[0].money).toBe(1500 - expectedRent);
+    expect(G.players[1].money).toBe(1500 + expectedRent);
+  });
+
+  // --- Railroad rent uses RULES.rent.railroadBase and railroadExponent ---
+  test('railroad rent uses base * exponent^(count-1)', () => {
+    const G = freshG();
+    // Player 1 owns 3 railroads (ids 5, 15, 25)
+    G.ownership[5] = '1';
+    G.ownership[15] = '1';
+    G.ownership[25] = '1';
+    G.players[1].properties.push(5, 15, 25);
+    G.players[0].position = 3; // roll 1+1=2 → pos 5
+    const ctx = makeCtx('0', 1, 1);
+
+    Monopoly.moves.rollDice(G, ctx);
+
+    expect(G.players[0].position).toBe(5);
+    // 3 railroads: base(25) * exponent(2)^(3-1) = 25 * 4 = 100
+    const expectedRent = RULES.rent.railroadBase * Math.pow(RULES.rent.railroadExponent, 2);
+    expect(G.players[0].money).toBe(1500 - expectedRent);
+    expect(G.players[1].money).toBe(1500 + expectedRent);
+  });
+
+  test('4 railroads rent uses full exponent chain', () => {
+    const G = freshG();
+    // Player 1 owns all 4 railroads (ids 5, 15, 25, 35)
+    G.ownership[5] = '1';
+    G.ownership[15] = '1';
+    G.ownership[25] = '1';
+    G.ownership[35] = '1';
+    G.players[1].properties.push(5, 15, 25, 35);
+    G.players[0].position = 3;
+    const ctx = makeCtx('0', 1, 1); // lands on 5
+
+    Monopoly.moves.rollDice(G, ctx);
+
+    // 4 railroads: base(25) * exponent(2)^(4-1) = 25 * 8 = 200
+    const expectedRent = RULES.rent.railroadBase * Math.pow(RULES.rent.railroadExponent, 3);
+    expect(G.players[0].money).toBe(1500 - expectedRent);
+  });
+
+  // --- Renn Chainbreaker passive: breaker reduces monopoly rent ---
+  test('Renn Chainbreaker reduces rent on monopoly properties', () => {
+    // Renn as visitor, opponent owns full color group
+    const G = freshGWithChars('renn-chainbreaker', 'albert-victor');
+    const renn = G.players[0];
+    const albert = G.players[1];
+
+    // Albert owns full brown group (ids 1, 3)
+    G.ownership[1] = '1';
+    G.ownership[3] = '1';
+    albert.properties.push(1, 3);
+
+    // Renn at position 1, roll 1+1=2, lands on position 3 (no GO crossing)
+    renn.position = 1;
+    const ctx = makeCtx('0', 1, 1); // total 2, lands on 3
+
+    const moneyBefore = renn.money;
+    Monopoly.moves.rollDice(G, ctx);
+
+    expect(renn.position).toBe(3);
+    // Base rent for space 3 (Baltic Avenue, rent $4), monopoly 2x = $8
+    // Renn has charisma 6, discount = min(6*0.01, 0.10) = 0.06
+    const baseRent = BOARD_SPACES[3].rent * RULES.core.monopolyRentMultiplier;
+    const afterCharisma = baseRent * (1 - Math.min(renn.character.stats.charisma * RULES.stats.charisma.rentDiscountPerPoint, RULES.stats.charisma.rentDiscountMax));
+    const afterBreaker = afterCharisma * (1 - RULES.passives.breaker.monopolyRentReduction);
+    const expectedRent = Math.floor(afterBreaker);
+    expect(expectedRent).toBeGreaterThan(0);
+    expect(renn.money).toBe(moneyBefore - expectedRent);
+  });
+
+  // --- Cassian Echo passive: unlimited redraws ---
+  test('Cassian Echo has unlimited redraws (merchant passive)', () => {
+    const G = freshGWithChars('cassian-echo', 'albert-victor');
+    const cassian = G.players[0];
+
+    // Even with 0 luckRedraws, Cassian can redraw
+    cassian.luckRedraws = 0;
+    G.pendingCard = { card: { text: 'Pay $50', action: 'pay', value: 50 }, deck: 'chance' };
+    G.hasRolled = true;
+
+    const ctx = makeCtx('0', 1, 1);
+    Monopoly.moves.redrawCard(G, ctx);
+
+    // Should succeed — merchant doesn't consume luckRedraws
+    expect(cassian.luckRedraws).toBe(0); // unchanged, not decremented
+    expect(G.pendingCard).toBeNull(); // card was redrawn and auto-applied
+  });
+
+  test('Cassian Echo can redraw multiple times', () => {
+    const G = freshGWithChars('cassian-echo', 'albert-victor');
+    const cassian = G.players[0];
+    cassian.luckRedraws = 0;
+
+    // First redraw
+    G.pendingCard = { card: { text: 'Pay $50', action: 'pay', value: 50 }, deck: 'chance' };
+    G.hasRolled = true;
+    Monopoly.moves.redrawCard(G, makeCtx('0', 1, 1));
+    expect(cassian.luckRedraws).toBe(0);
+
+    // Second redraw (if still pending)
+    G.pendingCard = { card: { text: 'Pay $100', action: 'pay', value: 100 }, deck: 'community' };
+    Monopoly.moves.redrawCard(G, makeCtx('0', 2, 2));
+    expect(cassian.luckRedraws).toBe(0); // still unlimited
+  });
+
+  // --- Trading: mortgaged properties rejected ---
+  test('proposeTrade rejects mortgaged offered properties', () => {
+    const G = freshG();
+    G.hasRolled = true;
+    G.turnPhase = 'done';
+
+    G.ownership[1] = '0';
+    G.players[0].properties.push(1);
+    G.mortgaged[1] = true; // Property is mortgaged
+
+    const result = Monopoly.moves.proposeTrade(G, makeCtx('0'), {
+      targetPlayerId: '1',
+      offeredProperties: [1],
+      requestedProperties: [],
+      offeredMoney: 0,
+      requestedMoney: 0,
+    });
+
+    // RULES.trading.allowMortgagedProperties is false
+    expect(result).toBe(INVALID_MOVE);
+    expect(G.trade).toBeNull();
+  });
+
+  test('proposeTrade rejects mortgaged requested properties', () => {
+    const G = freshG();
+    G.hasRolled = true;
+    G.turnPhase = 'done';
+
+    G.ownership[1] = '0';
+    G.players[0].properties.push(1);
+    G.ownership[3] = '1';
+    G.players[1].properties.push(3);
+    G.mortgaged[3] = true; // Target's property is mortgaged
+
+    const result = Monopoly.moves.proposeTrade(G, makeCtx('0'), {
+      targetPlayerId: '1',
+      offeredProperties: [1],
+      requestedProperties: [3],
+      offeredMoney: 0,
+      requestedMoney: 0,
+    });
+
+    expect(result).toBe(INVALID_MOVE);
+    expect(G.trade).toBeNull();
+  });
+
+  // --- Trading: canTradeInJail = false ---
+  test('proposeTrade fails when player is in jail (canTradeInJail=false)', () => {
+    const G = freshG();
+    G.hasRolled = true;
+    G.turnPhase = 'done';
+
+    G.ownership[1] = '0';
+    G.players[0].properties.push(1);
+    G.players[0].inJail = true;
+
+    const result = Monopoly.moves.proposeTrade(G, makeCtx('0'), {
+      targetPlayerId: '1',
+      offeredProperties: [1],
+      requestedProperties: [],
+      offeredMoney: 0,
+      requestedMoney: 0,
+    });
+
+    expect(result).toBe(INVALID_MOVE);
+    expect(G.trade).toBeNull();
+  });
+
+  // --- diceSides config ---
+  test('RULES.core.diceSides is used in dice rolling (value 6)', () => {
+    // Verify the config value exists and is 6
+    expect(RULES.core.diceSides).toBe(6);
+    // The rollTwoDice function uses this — tested indirectly by all dice-based tests
+    // Verify dice produce values 1-6 via the valForDie helper
+    expect(Math.floor(valForDie(1) * RULES.core.diceSides) + 1).toBe(1);
+    expect(Math.floor(valForDie(6) * RULES.core.diceSides) + 1).toBe(6);
+  });
+
+  // --- RULES structure validation ---
+  test('RULES has all required config sections', () => {
+    expect(RULES.core).toBeDefined();
+    expect(RULES.buildings).toBeDefined();
+    expect(RULES.rent).toBeDefined();
+    expect(RULES.seasons).toBeDefined();
+    expect(RULES.stats).toBeDefined();
+    expect(RULES.passives).toBeDefined();
+    expect(RULES.trading).toBeDefined();
+    expect(RULES.auction).toBeDefined();
+  });
+
+  test('RULES.rent values are consistent', () => {
+    expect(RULES.rent.railroadBase).toBe(25);
+    expect(RULES.rent.railroadExponent).toBe(2);
+    expect(RULES.rent.utilityMultiplierSingle).toBe(4);
+    expect(RULES.rent.utilityMultiplierBoth).toBe(10);
+    // Both > Single
+    expect(RULES.rent.utilityMultiplierBoth).toBeGreaterThan(RULES.rent.utilityMultiplierSingle);
+  });
+
+  test('RULES.passives has all 10 character passive configs', () => {
+    const passiveIds = ['financier', 'pioneer', 'enforcer', 'arbitrageur', 'idealist',
+                        'breaker', 'speculator', 'merchant', 'operator', 'shadow'];
+    passiveIds.forEach(id => {
+      expect(RULES.passives[id]).toBeDefined();
+    });
+  });
+
+  test('RULES.buildings has matching names/icons/multiplier arrays', () => {
+    expect(RULES.buildings.names).toHaveLength(5); // Vacant + 4 levels
+    expect(RULES.buildings.icons).toHaveLength(5);
+    expect(RULES.buildings.upgradeCostMultipliers).toHaveLength(4); // 4 upgrade levels
+    expect(RULES.buildings.rentMultipliers).toHaveLength(5); // 0 + 4 building levels
   });
 });

@@ -16,15 +16,18 @@
 ## Key Directories
 
 - `src/` — Engine source code (App.js, Game.js, constants.js)
-- `mods/dominion/` — Current mod: characters, board, cards, portraits, lore
-- `data/` — Design docs and Python tooling (Split.py for portraits)
+- `src/__tests__/` — 157 Jest unit tests
+- `mods/dominion/` — Current mod: characters, board, cards, rules, portraits, lore
+- `docs/` — Project documentation (RULES.md, MODDING.md, ROADMAP.md, PLAN.md, Design.md) — gitignored
+- `tests/e2e/` — 18 Playwright E2E tests
+- `data/` — Design docs (Chinese) and Python tooling (Split.py for portraits)
 - `test/` — Original boardgame.io TicTacToe tutorial (reference only)
 
 ## Architecture
 
 ### Engine (src/)
 - `src/Game.js` — boardgame.io game definition: setup(), moves, turn management, endIf. Imports mod data from `mods/dominion/`.
-- `src/constants.js` — Engine constants: building tiers, seasons, player colors/tokens
+- `src/constants.js` — Re-export shim from mod rules (backward compat for App.js imports)
 - `src/App.js` — Client initialization + DOM-based UI rendering (no framework). Creates an 11x11 CSS grid board, player panels, dice, action buttons, message log
 - `index.html` — Entry point with all CSS styles inline
 
@@ -33,8 +36,9 @@
 - `mods/dominion/characters.js` — 10 characters with stats, passives, Parcel-imported portrait PNGs
 - `mods/dominion/board.js` — 40 board spaces + 8 color groups
 - `mods/dominion/cards.js` — Chance & Community Chest card decks (includes enhanced cards)
-- `mods/dominion/portraits/` — 9 character head portraits (341x341 PNG)
-- `mods/dominion/lore/` — 9 character lore markdown files
+- `mods/dominion/rules.js` — All game rules config (core, buildings, rent, seasons, stats, passives, trading, auction)
+- `mods/dominion/portraits/` — 10 character head portraits (341x341 PNG)
+- `mods/dominion/lore/` — 10 character lore markdown files
 
 ## Characters
 
@@ -52,13 +56,17 @@
 - Triple doubles → jail
 - Chance/Community Chest with card redraw mechanics
 - 10 character passives integrated into gameplay
+- Config-driven rules: all game values in `mods/dominion/rules.js`
+- Property trading: propose, accept, reject, cancel between players
+- Auction system: round-robin bidding when player passes on buying
 
 ## Commands
 
 ```bash
 npm start        # Dev server at localhost:1234
 npm run build    # Production build
-npx jest --no-coverage  # Run 128 unit tests
+npx jest --no-coverage  # Run 157 unit tests
+npx playwright test     # Run 18 E2E tests
 ```
 
 For Python scripts in `data/`:
@@ -82,7 +90,8 @@ cd data && uv run Split.py
 - The 10th character (Ophelia Nightveil) is missing a portrait
 - Parcel v1 is deprecated; consider migrating to Parcel v2 or Vite in the future
 - `data/` has its own `pyproject.toml` from uv init — this is for the Python split script only
-- Future: online multiplayer, AI bots, trading, auctions (see PLAN.md)
+- Marcus (operator) and Ophelia (shadow) passives have config but no engine logic yet
+- Future: online multiplayer, AI bots, max turns, world disasters (see docs/PLAN.md, docs/ROADMAP.md)
 
 ## GitHub
 
