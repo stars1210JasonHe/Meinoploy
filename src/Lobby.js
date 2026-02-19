@@ -15,7 +15,9 @@ export class Lobby {
     try {
       const res = await fetch(`${this.serverUrl}/games/monopoly`);
       const data = await res.json();
-      this.matches = data.matches || [];
+      const all = data.matches || [];
+      // Hide matches where no one has joined yet (stale/orphaned)
+      this.matches = all.filter(m => m.players.some(p => p.name));
     } catch (e) {
       this.matches = [];
     }
@@ -30,11 +32,10 @@ export class Lobby {
         body: JSON.stringify({ numPlayers }),
       });
       const data = await res.json();
-      await this.refreshMatches();
-      return data.matchID;
+      // Auto-join as player 0
+      await this.joinMatch(data.matchID, '0');
     } catch (e) {
       console.error('Failed to create match:', e);
-      return null;
     }
   }
 

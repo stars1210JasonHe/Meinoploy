@@ -163,9 +163,9 @@ class MonopolyBoard {
       multiplayer: SocketIO({ server: serverUrl }),
       matchID: matchID,
       playerID: playerID,
-      credentials: credentials,
       debug: false,
     });
+    this.client.updateCredentials(credentials);
     this.client.start();
     this.client.subscribe(state => this.update(state));
   }
