@@ -1,7 +1,9 @@
 import { Client } from 'boardgame.io/client';
+import { SocketIO } from 'boardgame.io/multiplayer';
 import { Monopoly } from './Game';
 import { PLAYER_COLORS, BUILDING_ICONS, BUILDING_NAMES, UPGRADE_COST_MULTIPLIERS, RENT_MULTIPLIERS, SEASONS } from './constants';
 import { BOARD_SPACES, COLOR_GROUPS, CHARACTERS, getLoreById, RULES } from '../mods/dominion';
+import { Lobby } from './Lobby';
 
 const BOARD_SIZE = 11; // 11x11 grid
 
@@ -74,10 +76,105 @@ function renderStatBar(label, value, max) {
 class MonopolyBoard {
   constructor(rootElement) {
     this.rootElement = rootElement;
+    this.mode = null; // 'local' or 'online'
+    this.onlinePlayerID = null;
     this.createLayout();
+    this.showModeSelect();
+  }
+
+  showModeSelect() {
+    this.charSelectEl.style.display = 'none';
+    this.gameAreaEl.style.display = 'none';
+    this.seasonDisplayEl.style.display = 'none';
+    this.lobbyEl.style.display = 'none';
+    this.playerCountEl.style.display = 'block';
+
+    this.playerCountEl.innerHTML = `
+      <div class="count-select-header">
+        <h2>Select Game Mode</h2>
+        <p class="count-select-sub">Play locally or online with friends</p>
+      </div>
+      <div class="count-grid">
+        <button class="count-btn mode-btn" id="btn-mode-local">Local Game</button>
+        <button class="count-btn mode-btn" id="btn-mode-online">Online Game</button>
+      </div>`;
+
+    document.getElementById('btn-mode-local').onclick = () => {
+      this.mode = 'local';
+      this.showPlayerCountSelect();
+    };
+    document.getElementById('btn-mode-online').onclick = () => {
+      this.mode = 'online';
+      this.showOnlineLobby();
+    };
+  }
+
+  showPlayerCountSelect() {
+    this.charSelectEl.style.display = 'none';
+    this.gameAreaEl.style.display = 'none';
+    this.seasonDisplayEl.style.display = 'none';
+    this.lobbyEl.style.display = 'none';
+    this.playerCountEl.style.display = 'block';
+
+    let html = `
+      <div class="count-select-header">
+        <h2>How Many Players?</h2>
+        <p class="count-select-sub">Select 2-10 players for local hot-seat play</p>
+      </div>
+      <div class="count-grid">`;
+    for (let n = 2; n <= 10; n++) {
+      html += `<button class="count-btn" data-count="${n}">${n} Players</button>`;
+    }
+    html += `</div>
+      <div style="text-align:center;margin-top:16px;">
+        <button id="btn-back-mode" class="btn btn-secondary" style="display:inline-block;width:auto;">Back</button>
+      </div>`;
+    this.playerCountEl.innerHTML = html;
+
+    this.playerCountEl.querySelectorAll('.count-btn').forEach(btn => {
+      if (btn.dataset.count) {
+        btn.onclick = () => {
+          this.startGameWithPlayers(parseInt(btn.dataset.count));
+        };
+      }
+    });
+    document.getElementById('btn-back-mode').onclick = () => this.showModeSelect();
+  }
+
+  showOnlineLobby() {
+    this.playerCountEl.style.display = 'none';
+    this.charSelectEl.style.display = 'none';
+    this.gameAreaEl.style.display = 'none';
+    this.lobbyEl.style.display = 'block';
+
+    const serverUrl = window.location.protocol + '//' + window.location.hostname + ':8088';
+    const lobby = new Lobby(this.lobbyEl, serverUrl, (matchID, playerID, credentials, numPlayers) => {
+      this.startOnlineGame(serverUrl, matchID, playerID, credentials, numPlayers);
+    });
+    lobby.onBack = () => this.showModeSelect();
+  }
+
+  startOnlineGame(serverUrl, matchID, playerID, credentials, numPlayers) {
+    this.lobbyEl.style.display = 'none';
+    this.onlinePlayerID = playerID;
     this.client = Client({
       game: Monopoly,
-      numPlayers: 2,
+      numPlayers: numPlayers,
+      multiplayer: SocketIO({ server: serverUrl }),
+      matchID: matchID,
+      playerID: playerID,
+      credentials: credentials,
+      debug: false,
+    });
+    this.client.start();
+    this.client.subscribe(state => this.update(state));
+  }
+
+  startGameWithPlayers(numPlayers) {
+    this.playerCountEl.style.display = 'none';
+    this.client = Client({
+      game: Monopoly,
+      numPlayers: numPlayers,
       debug: false,
     });
     this.client.start();
@@ -89,8 +186,14 @@ class MonopolyBoard {
       <div class="game-container">
         <div class="header">
           <h1>\u{1F3E0} MEINOPOLY \u{1F3E0}</h1>
+          <div class="header-buttons">
+            <button id="btn-load-menu" class="btn-header">Load Game</button>
+          </div>
           <div id="season-display" class="season-display"></div>
         </div>
+        <div id="load-panel" class="load-panel" style="display:none;"></div>
+        <div id="player-count-select" class="character-select" style="display:none;"></div>
+        <div id="online-lobby" class="character-select" style="display:none;"></div>
         <div id="character-select" class="character-select" style="display:none;"></div>
         <div id="game-area" class="main-layout" style="display:none;">
           <div class="left-panel">
@@ -113,9 +216,15 @@ class MonopolyBoard {
         </div>
       </div>
     `;
+    this.playerCountEl = document.getElementById('player-count-select');
+    this.lobbyEl = document.getElementById('online-lobby');
     this.charSelectEl = document.getElementById('character-select');
+    this.loadPanelEl = document.getElementById('load-panel');
     this.gameAreaEl = document.getElementById('game-area');
     this.seasonDisplayEl = document.getElementById('season-display');
+
+    // Load menu button
+    document.getElementById('btn-load-menu').onclick = () => this.toggleLoadPanel();
     this.boardEl = document.getElementById('board');
     this.playerInfoEl = document.getElementById('player-info');
     this.diceAreaEl = document.getElementById('dice-area');
@@ -136,6 +245,8 @@ class MonopolyBoard {
     if (state === null) return;
     const G = state.G;
     const ctx = state.ctx;
+
+    this.playerCountEl.style.display = 'none';
 
     if (G.phase === 'characterSelect') {
       this.charSelectEl.style.display = 'block';
@@ -310,11 +421,19 @@ class MonopolyBoard {
     const opponents = G.players.filter(p => p.id !== ctx.currentPlayer && !p.bankrupt);
     if (opponents.length === 0) return;
 
-    // Build trade modal using the lore modal overlay
+    this._tradeState = { G, ctx, player, opponents, selectedIndex: 0 };
+    this._renderTradeModalContent();
+    this.loreModalEl.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+
+  _renderTradeModalContent() {
+    const { G, ctx, player, opponents, selectedIndex } = this._tradeState;
+    const target = opponents[selectedIndex];
+
     const myProps = player.properties
       .filter(pid => (G.buildings[pid] || 0) === 0 && (!G.mortgaged[pid] || RULES.trading.allowMortgagedProperties))
       .map(pid => BOARD_SPACES[pid]);
-    const target = opponents[0]; // Default to first opponent
     const targetProps = target.properties
       .filter(pid => (G.buildings[pid] || 0) === 0 && (!G.mortgaged[pid] || RULES.trading.allowMortgagedProperties))
       .map(pid => BOARD_SPACES[pid]);
@@ -322,9 +441,24 @@ class MonopolyBoard {
     const playerName = player.character ? player.character.name : `Player ${parseInt(ctx.currentPlayer) + 1}`;
     const targetName = target.character ? target.character.name : `Player ${parseInt(target.id) + 1}`;
 
+    // Target selector (dropdown for 3+ players)
+    const targetSelector = opponents.length > 1
+      ? `<div class="trade-target-select">
+          <label>Trade with:
+            <select id="trade-target-select">
+              ${opponents.map((opp, i) => {
+                const oppName = opp.character ? opp.character.name : `Player ${parseInt(opp.id) + 1}`;
+                return `<option value="${i}" ${i === selectedIndex ? 'selected' : ''}>${oppName}</option>`;
+              }).join('')}
+            </select>
+          </label>
+        </div>`
+      : '';
+
     this.loreBodyEl.innerHTML = `
       <div class="trade-modal-content">
         <h3>Propose Trade</h3>
+        ${targetSelector}
         <div class="trade-builder">
           <div class="trade-col">
             <h4>${playerName} Offers:</h4>
@@ -366,18 +500,26 @@ class MonopolyBoard {
       </div>
     `;
 
-    this.loreModalEl.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
+    // Target selector change handler
+    const selectEl = document.getElementById('trade-target-select');
+    if (selectEl) {
+      selectEl.onchange = () => {
+        this._tradeState.selectedIndex = parseInt(selectEl.value);
+        this._renderTradeModalContent();
+      };
+    }
 
-    // Attach submit/cancel handlers
+    // Submit/cancel handlers
     document.getElementById('btn-submit-trade').onclick = () => {
       const offeredProperties = Array.from(document.querySelectorAll('.offer-prop:checked')).map(cb => parseInt(cb.value));
       const requestedProperties = Array.from(document.querySelectorAll('.request-prop:checked')).map(cb => parseInt(cb.value));
-      const offeredMoney = parseInt(document.getElementById('offer-money')?.value || '0');
-      const requestedMoney = parseInt(document.getElementById('request-money')?.value || '0');
+      const offerMoneyEl = document.getElementById('offer-money');
+      const requestMoneyEl = document.getElementById('request-money');
+      const offeredMoney = parseInt((offerMoneyEl && offerMoneyEl.value) || '0');
+      const requestedMoney = parseInt((requestMoneyEl && requestMoneyEl.value) || '0');
 
       if (offeredProperties.length === 0 && requestedProperties.length === 0 && offeredMoney === 0 && requestedMoney === 0) {
-        return; // Empty trade
+        return;
       }
 
       this.client.moves.proposeTrade({
@@ -408,11 +550,17 @@ class MonopolyBoard {
     if (season.taxMod !== 1.0) {
       effects += `<span class="season-effect">Tax x${season.taxMod}</span>`;
     }
+    const turnLabel = RULES.core.maxTurns > 0
+      ? `Turn ${G.totalTurns} / ${RULES.core.maxTurns}`
+      : `Turn ${G.totalTurns}`;
     this.seasonDisplayEl.innerHTML = `
       <span class="season-icon">${season.icon}</span>
       <span class="season-name">${season.name}</span>
-      <span class="season-turn">Turn ${G.totalTurns}</span>
+      <span class="season-turn">${turnLabel}</span>
       ${effects}
+      ${RULES.core.freeParkingPot && G.freeParkingPot > 0
+        ? `<span class="season-effect">Parking Pot: $${G.freeParkingPot}</span>`
+        : ''}
     `;
   }
 
@@ -459,6 +607,9 @@ class MonopolyBoard {
 
           const icon = getSpaceTypeIcon(space);
           const priceTag = space.price > 0 ? `<div class="price">$${space.price}</div>` : '';
+          const parkingPot = (space.type === 'parking' && RULES.core.freeParkingPot && G.freeParkingPot > 0)
+            ? `<div class="parking-pot">$${G.freeParkingPot}</div>`
+            : '';
 
           let side = '';
           if (row === 10 && col > 0 && col < 10) side = 'bottom';
@@ -473,6 +624,7 @@ class MonopolyBoard {
                 <div class="space-name">${icon} ${space.name}</div>
                 ${priceTag}
                 ${buildingTag}${mortgageTag}
+                ${parkingPot}
                 ${ownerDot}
                 <div class="tokens">${playersHere}</div>
               </div>
@@ -584,10 +736,14 @@ class MonopolyBoard {
     if (ctx.gameover) {
       const winner = G.players[ctx.gameover.winner];
       const winnerName = winner.character ? winner.character.name : `Player ${parseInt(ctx.gameover.winner) + 1}`;
+      const reason = ctx.gameover.reason === 'maxTurns'
+        ? `<p class="game-over-reason">Turn limit reached (${RULES.core.maxTurns} turns)</p>`
+        : '';
       this.actionsEl.innerHTML = `
         <div class="game-over">
           <h2>\u{1F3C6} Game Over!</h2>
           <p>${winnerName} wins!</p>
+          ${reason}
         </div>`;
       return;
     }
@@ -595,6 +751,14 @@ class MonopolyBoard {
     const player = G.players[ctx.currentPlayer];
     const displayName = player.character ? player.character.name : `Player ${parseInt(ctx.currentPlayer) + 1}`;
     let html = `<h3>${displayName}'s Turn</h3>`;
+
+    // Online mode: show waiting message if it's not our turn
+    const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
+    if (!isMyTurn) {
+      html += `<div class="waiting-message">Waiting for ${displayName}...</div>`;
+      this.actionsEl.innerHTML = html;
+      return;
+    }
 
     // Jail options
     if (player.inJail && !G.hasRolled) {
@@ -695,6 +859,11 @@ class MonopolyBoard {
       html += `<button id="btn-end" class="btn btn-end">End Turn \u{27A1}\u{FE0F}</button>`;
     }
 
+    // Save button (always visible during play phase)
+    if (G.phase === 'play') {
+      html += `<button id="btn-save" class="btn btn-save">Save Game</button>`;
+    }
+
     // Property management panel (after rolling, during 'done' phase)
     if (G.hasRolled && !G.canBuy && !G.pendingCard && player.properties.length > 0) {
       html += '<div class="prop-management"><h4>Manage Properties</h4>';
@@ -723,6 +892,18 @@ class MonopolyBoard {
             if (ownsGroup && level <= minLevel && level < RULES.core.maxBuildingLevel && noMortgaged) {
               const upgCost = Math.floor(space.price * UPGRADE_COST_MULTIPLIERS[level]);
               html += `<button class="btn-small btn-upgrade" data-pid="${pid}" title="Build ${BUILDING_NAMES[level + 1]} for ~$${upgCost}">\u{2B06} ${BUILDING_NAMES[level + 1]}</button>`;
+            }
+          }
+          // Sell building check (even-building in reverse: can only sell from highest in group)
+          if (level > 0) {
+            let canSell = true;
+            if (space.color && COLOR_GROUPS[space.color]) {
+              const groupIds = COLOR_GROUPS[space.color];
+              const maxLevel = Math.max(...groupIds.map(id => G.buildings[id] || 0));
+              if (level < maxLevel) canSell = false;
+            }
+            if (canSell) {
+              html += `<button class="btn-small btn-sell" data-pid="${pid}" title="Sell ${BUILDING_NAMES[level]}">Sell</button>`;
             }
           }
           // Mortgage check (no buildings on this or group)
@@ -791,6 +972,13 @@ class MonopolyBoard {
     document.querySelectorAll('.btn-unmortgage').forEach(btn => {
       btn.onclick = () => this.client.moves.unmortgageProperty(parseInt(btn.dataset.pid));
     });
+    document.querySelectorAll('.btn-sell').forEach(btn => {
+      btn.onclick = () => this.client.moves.sellBuilding(parseInt(btn.dataset.pid));
+    });
+
+    // Save game
+    const saveBtn = document.getElementById('btn-save');
+    if (saveBtn) saveBtn.onclick = () => this.saveGame(G, ctx);
   }
 
   renderMessages(G) {
@@ -798,6 +986,112 @@ class MonopolyBoard {
       .map(m => `<div class="message">${m}</div>`)
       .join('');
     this.messagesEl.innerHTML = `<h3>\u{1F4DC} Log</h3><div class="message-list">${html}</div>`;
+  }
+
+  toggleLoadPanel() {
+    if (this.loadPanelEl.style.display === 'none') {
+      const saves = MonopolyBoard.getSaves();
+      const entries = Object.entries(saves);
+      if (entries.length === 0) {
+        this.loadPanelEl.innerHTML = `
+          <div class="load-content">
+            <h3>No Saved Games</h3>
+            <p>Save a game during play to see it here.</p>
+            <button class="btn btn-secondary" id="btn-close-load">Close</button>
+          </div>`;
+      } else {
+        let listHtml = entries
+          .sort((a, b) => b[1].timestamp - a[1].timestamp)
+          .map(([name, data]) => {
+            const date = new Date(data.timestamp).toLocaleString();
+            const players = data.numPlayers;
+            const turn = data.G.totalTurns;
+            return `<div class="save-entry">
+              <div class="save-info">
+                <div class="save-name">${name}</div>
+                <div class="save-meta">${players} players | Turn ${turn} | ${date}</div>
+              </div>
+              <div class="save-actions">
+                <button class="btn-small btn-upgrade btn-load-save" data-save="${name}">Load</button>
+                <button class="btn-small btn-mortgage btn-delete-save" data-save="${name}">Delete</button>
+              </div>
+            </div>`;
+          }).join('');
+        this.loadPanelEl.innerHTML = `
+          <div class="load-content">
+            <h3>Saved Games</h3>
+            ${listHtml}
+            <button class="btn btn-secondary" id="btn-close-load" style="margin-top:10px;">Close</button>
+          </div>`;
+      }
+      this.loadPanelEl.style.display = 'block';
+
+      // Attach handlers
+      document.getElementById('btn-close-load').onclick = () => {
+        this.loadPanelEl.style.display = 'none';
+      };
+      this.loadPanelEl.querySelectorAll('.btn-load-save').forEach(btn => {
+        btn.onclick = () => {
+          const saves = MonopolyBoard.getSaves();
+          const saveData = saves[btn.dataset.save];
+          if (saveData) {
+            this.loadGame(saveData);
+            this.loadPanelEl.style.display = 'none';
+          }
+        };
+      });
+      this.loadPanelEl.querySelectorAll('.btn-delete-save').forEach(btn => {
+        btn.onclick = () => {
+          MonopolyBoard.deleteSave(btn.dataset.save);
+          this.toggleLoadPanel(); // Refresh
+        };
+      });
+    } else {
+      this.loadPanelEl.style.display = 'none';
+    }
+  }
+
+  saveGame(G, ctx) {
+    const saveData = {
+      G: G,
+      currentPlayer: ctx.currentPlayer,
+      numPlayers: G.players.length,
+      timestamp: Date.now(),
+    };
+    const saveName = `meinopoly_save_${new Date().toLocaleString().replace(/[/:]/g, '-')}`;
+    const saves = JSON.parse(localStorage.getItem('meinopoly_saves') || '{}');
+    saves[saveName] = saveData;
+    localStorage.setItem('meinopoly_saves', JSON.stringify(saves));
+    G.messages.push(`Game saved: ${saveName}`);
+    this.renderMessages(G);
+  }
+
+  static getSaves() {
+    return JSON.parse(localStorage.getItem('meinopoly_saves') || '{}');
+  }
+
+  static deleteSave(name) {
+    const saves = JSON.parse(localStorage.getItem('meinopoly_saves') || '{}');
+    delete saves[name];
+    localStorage.setItem('meinopoly_saves', JSON.stringify(saves));
+  }
+
+  loadGame(saveData) {
+    // Stop current client
+    this.client.stop();
+    // Re-create client with saved state injected via setup override
+    const savedG = saveData.G;
+    const LoadedGame = {
+      ...Monopoly,
+      setup: () => savedG,
+    };
+    this.client = Client({
+      game: LoadedGame,
+      numPlayers: saveData.numPlayers,
+      debug: false,
+    });
+    this.client.start();
+    this.client.subscribe(state => this.update(state));
   }
 }
 

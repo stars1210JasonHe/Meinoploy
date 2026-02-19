@@ -59,6 +59,8 @@
     .left-panel {
       width: 240px;
       flex-shrink: 0;
+      max-height: calc(100vh - 80px);
+      overflow-y: auto;
     }
     .right-panel {
       width: 260px;
@@ -936,6 +938,273 @@
       display: flex;
       gap: 8px;
       justify-content: flex-end;
+    }
+
+    /* ---- HEADER BUTTONS ---- */
+    .header-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .btn-header {
+      padding: 4px 14px;
+      font-size: 0.75rem;
+      font-weight: bold;
+      color: #f0c040;
+      background: rgba(240, 192, 64, 0.1);
+      border: 1px solid #f0c040;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-header:hover {
+      background: rgba(240, 192, 64, 0.25);
+    }
+
+    /* ---- SAVE / LOAD ---- */
+    .btn-save {
+      background: linear-gradient(135deg, #16a085, #1abc9c);
+    }
+    .load-panel {
+      max-width: 600px;
+      margin: 0 auto 10px;
+    }
+    .load-content {
+      background: #16213e;
+      border: 2px solid #f0c040;
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .load-content h3 {
+      color: #f0c040;
+      margin-bottom: 10px;
+    }
+    .save-entry {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px;
+      border-bottom: 1px solid #2a2a4a;
+    }
+    .save-entry:last-of-type {
+      border-bottom: none;
+    }
+    .save-name {
+      font-size: 0.85rem;
+      color: #eee;
+    }
+    .save-meta {
+      font-size: 0.7rem;
+      color: #888;
+      margin-top: 2px;
+    }
+    .save-actions {
+      display: flex;
+      gap: 4px;
+    }
+
+    /* ---- SELL BUTTON ---- */
+    .btn-sell {
+      background: #e74c3c;
+    }
+
+    /* ---- PARKING POT ---- */
+    .parking-pot {
+      font-size: 0.55rem;
+      font-weight: bold;
+      color: #2ecc71;
+      background: rgba(46, 204, 113, 0.15);
+      padding: 1px 4px;
+      border-radius: 3px;
+      margin-top: 1px;
+    }
+
+    /* ---- GAME OVER REASON ---- */
+    .game-over-reason {
+      font-size: 0.85rem;
+      margin-top: 6px;
+      opacity: 0.8;
+    }
+
+    /* ---- PLAYER COUNT SELECT ---- */
+    .count-select-header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .count-select-header h2 {
+      color: #f0c040;
+      font-size: 1.6rem;
+    }
+    .count-select-sub {
+      color: #aaa;
+      font-size: 0.9rem;
+      margin-top: 4px;
+    }
+    .count-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .count-btn {
+      padding: 16px 28px;
+      font-size: 1.1rem;
+      font-weight: bold;
+      color: #eee;
+      background: #16213e;
+      border: 2px solid #3498db;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .count-btn:hover {
+      border-color: #f0c040;
+      background: #1a2a4e;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(240, 192, 64, 0.2);
+    }
+
+    /* ---- TRADE TARGET SELECT ---- */
+    .trade-target-select {
+      margin-bottom: 12px;
+    }
+    .trade-target-select select {
+      padding: 6px 10px;
+      border-radius: 4px;
+      border: 1px solid #555;
+      background: #16213e;
+      color: #eee;
+      font-size: 0.9rem;
+      margin-left: 8px;
+    }
+
+    /* ---- ONLINE LOBBY ---- */
+    .lobby-container {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+    .lobby-container h2 {
+      color: #f0c040;
+      text-align: center;
+      margin-bottom: 16px;
+    }
+    .lobby-container h3 {
+      color: #f0c040;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .lobby-name-input {
+      text-align: center;
+      margin-bottom: 16px;
+    }
+    .lobby-name-input input {
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid #555;
+      background: #16213e;
+      color: #eee;
+      font-size: 1rem;
+      width: 200px;
+      margin-left: 8px;
+    }
+    .lobby-create {
+      background: #16213e;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+    .lobby-create-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .lobby-create-controls select {
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid #555;
+      background: #16213e;
+      color: #eee;
+      font-size: 0.9rem;
+    }
+    .lobby-matches {
+      background: #16213e;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+    .match-entry {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px;
+      border-bottom: 1px solid #2a2a4a;
+    }
+    .match-entry:last-child { border-bottom: none; }
+    .match-id {
+      font-size: 0.9rem;
+      color: #eee;
+      font-family: monospace;
+    }
+    .match-meta {
+      font-size: 0.75rem;
+      color: #888;
+      margin-top: 2px;
+    }
+    .match-players {
+      display: flex;
+      gap: 4px;
+      margin-top: 4px;
+      flex-wrap: wrap;
+    }
+    .match-player {
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .match-player.joined {
+      background: rgba(46, 204, 113, 0.2);
+      color: #2ecc71;
+    }
+    .match-player.open {
+      background: rgba(52, 152, 219, 0.2);
+      color: #3498db;
+    }
+    .match-full {
+      font-size: 0.75rem;
+      color: #888;
+    }
+    .no-matches {
+      color: #888;
+      text-align: center;
+      padding: 20px;
+    }
+    .lobby-back {
+      text-align: center;
+    }
+
+    /* ---- WAITING MESSAGE ---- */
+    .waiting-message {
+      text-align: center;
+      padding: 20px;
+      font-size: 1.1rem;
+      color: #f0c040;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* ---- MODE SELECT ---- */
+    .mode-btn {
+      min-width: 160px;
+      font-size: 1.2rem !important;
+      padding: 20px 36px !important;
     }
 
     /* ---- RESPONSIVE ---- */

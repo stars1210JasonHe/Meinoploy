@@ -1,5 +1,8 @@
 import { INVALID_MOVE } from 'boardgame.io/core';
-import { BOARD_SPACES, CHANCE_CARDS, COMMUNITY_CARDS, COLOR_GROUPS, getCharacterById, getStartingMoney, RULES } from '../mods/dominion';
+import { BOARD_SPACES, COLOR_GROUPS } from '../mods/dominion/board';
+import { CHANCE_CARDS, COMMUNITY_CARDS } from '../mods/dominion/cards';
+import { RULES } from '../mods/dominion/rules';
+import { getCharacterById, getStartingMoney } from '../mods/dominion/characters-data';
 
 function createPlayer(id) {
   return {
@@ -255,6 +258,9 @@ function handleLanding(G, ctx) {
         messages.push(`Financial expertise reduces tax to $${taxAmount}.`);
       }
       player.money -= taxAmount;
+      if (RULES.core.freeParkingPot) {
+        G.freeParkingPot += taxAmount;
+      }
       messages.push(`Paid $${taxAmount} in ${space.name}.`);
       if (player.money <= 0) {
         handleBankruptcy(G, ctx, player, null);
@@ -305,7 +311,13 @@ function handleLanding(G, ctx) {
       break;
 
     case 'parking':
-      messages.push('Free Parking - relax!');
+      if (RULES.core.freeParkingPot && G.freeParkingPot > 0) {
+        player.money += G.freeParkingPot;
+        messages.push(`Free Parking jackpot! Collected $${G.freeParkingPot}!`);
+        G.freeParkingPot = 0;
+      } else {
+        messages.push('Free Parking - relax!');
+      }
       break;
   }
 }
@@ -335,6 +347,9 @@ function applyCard(G, ctx, player, card) {
         G.messages.push(`Financial expertise reduces loss to $${amount}.`);
       }
       player.money -= amount;
+      if (RULES.core.freeParkingPot) {
+        G.freeParkingPot += amount;
+      }
       if (player.money <= 0) {
         handleBankruptcy(G, ctx, player, null);
       }
@@ -373,6 +388,9 @@ function applyCard(G, ctx, player, card) {
         G.messages.push(`Financial expertise reduces loss to $${amount}.`);
       }
       player.money -= amount;
+      if (RULES.core.freeParkingPot) {
+        G.freeParkingPot += amount;
+      }
       G.messages.push(`Total assets: $${assets}. Paid $${amount} (${card.value}%).`);
       if (player.money <= 0) {
         handleBankruptcy(G, ctx, player, null);
@@ -491,6 +509,13 @@ function checkGameOver(G) {
   if (activePlayers.length === 1) {
     return { winner: activePlayers[0].id };
   }
+  // Max turns: compare total assets
+  if (RULES.core.maxTurns > 0 && G.totalTurns >= RULES.core.maxTurns) {
+    const sorted = activePlayers
+      .map(p => ({ id: p.id, assets: getTotalAssets(G, p) }))
+      .sort((a, b) => b.assets - a.assets);
+    return { winner: sorted[0].id, reason: 'maxTurns' };
+  }
   return undefined;
 }
 
@@ -576,6 +601,7 @@ export const Monopoly = {
       totalTurns: 0,
       trade: null,
       auction: null,
+      freeParkingPot: 0,
     };
   },
 
@@ -866,6 +892,37 @@ export const Monopoly = {
       player.money -= unmortgageCost;
       G.mortgaged[propertyId] = false;
       G.messages.push(`Unmortgaged ${space.name} for $${unmortgageCost}.`);
+    },
+
+    sellBuilding: (G, ctx, propertyId) => {
+      if (G.phase !== 'play') return INVALID_MOVE;
+      if (!G.hasRolled) return INVALID_MOVE;
+
+      const player = G.players[ctx.currentPlayer];
+      const space = BOARD_SPACES[propertyId];
+
+      if (!space || space.type !== 'property') return INVALID_MOVE;
+      if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
+
+      const currentLevel = G.buildings[propertyId] || 0;
+      if (currentLevel <= 0) return INVALID_MOVE;
+
+      // Even building in reverse: can only sell from highest level in group
+      if (space.color && COLOR_GROUPS[space.color]) {
+        const groupIds = COLOR_GROUPS[space.color];
+        const maxLevel = Math.max(...groupIds.map(id => G.buildings[id] || 0));
+        if (currentLevel < maxLevel) return INVALID_MOVE;
+      }
+
+      // Refund = upgrade cost for this level * sellbackRate
+      const refund = Math.floor(getUpgradeCost(G, player, space, currentLevel) * RULES.buildings.sellbackRate);
+
+      G.buildings[propertyId] = currentLevel - 1;
+      if (G.buildings[propertyId] === 0) delete G.buildings[propertyId];
+      player.money += refund;
+
+      const newLevel = G.buildings[propertyId] || 0;
+      G.messages.push(`Sold ${RULES.buildings.names[currentLevel]} on ${space.name} for $${refund}. Now: ${RULES.buildings.names[newLevel]}.`);
     },
 
     // --- Buy property ---

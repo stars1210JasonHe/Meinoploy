@@ -8,11 +8,14 @@
     "build": "parcel build index.html",
     "test": "jest && npx playwright test",
     "test:unit": "jest",
-    "test:e2e": "npx playwright test"
+    "test:e2e": "npx playwright test",
+    "server": "node -r esm server.js"
   },
   "browserslist": "defaults and supports async-functions",
   "dependencies": {
-    "boardgame.io": "0.45.0"
+    "boardgame.io": "0.45.0",
+    "esm": "^3.2.25",
+    "koa-static": "^5.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",

@@ -18,6 +18,8 @@ export const RULES = {
     maxBuildingLevel: 4,
     monopolyRentMultiplier: 2,
     diceSides: 6,
+    maxTurns: 0,              // 0 = unlimited; positive integer = turn limit (highest assets wins)
+    freeParkingPot: false,    // true = taxes/fines accumulate; landing on parking collects pot
   },
 
   // ── Building System ─────────────────────────────────────
@@ -27,6 +29,7 @@ export const RULES = {
     upgradeCostMultipliers: [0.5, 0.75, 1.0, 1.5],
     rentMultipliers: [1, 3, 7, 12, 20],
     evenBuildingRule: true,
+    sellbackRate: 0.5,        // refund percentage when selling a building
   },
 
   // ── Rent Formulas ───────────────────────────────────────
@@ -136,7 +139,13 @@ export const RULES = {
 
   // ── Player Display ──────────────────────────────────────
   display: {
-    playerColors: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12'],
-    playerTokens: ['\u{1F534}', '\u{1F535}', '\u{1F7E2}', '\u{1F7E1}'],
+    playerColors: [
+      '#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
+      '#1abc9c', '#e67e22', '#2c3e50', '#d35400', '#8e44ad',
+    ],
+    playerTokens: [
+      '\u{1F534}', '\u{1F535}', '\u{1F7E2}', '\u{1F7E1}', '\u{1F7E3}',
+      '\u{26AA}', '\u{1F7E0}', '\u{26AB}', '\u{1F7E4}', '\u{1F7E6}',
+    ],
   },
 };

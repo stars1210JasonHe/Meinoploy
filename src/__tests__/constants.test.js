@@ -91,7 +91,7 @@ describe('COMMUNITY_CARDS', () => {
 });
 
 describe('PLAYER_COLORS', () => {
-  test('has 4 colors', () => {
-    expect(PLAYER_COLORS).toHaveLength(4);
+  test('has 10 colors', () => {
+    expect(PLAYER_COLORS).toHaveLength(10);
   });
 });
