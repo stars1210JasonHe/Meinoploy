@@ -1,0 +1,161 @@
+{
+  "schemaVersion": "2.0",
+  "id": "outer-rim-station",
+  "name": "Outer Rim Station",
+  "description": "A 30-space hex-station board with volatile events and portal shortcuts.",
+  "author": "Akina (design kit)",
+  "version": "2.0.0",
+
+  "world": {
+    "category": "planet",
+    "tags": ["space", "station", "anomaly"],
+    "eventPools": ["station_core", "anomaly", "council_politics"]
+  },
+
+  "layout": {
+    "type": "hexagon",
+    "params": { "radius": 44 }
+  },
+
+  "connections": {
+    "5":  [6, 17],
+    "11": [12, 26],
+    "17": [18, 5],
+    "26": [27, 11]
+  },
+
+  "spaceCount": 30,
+
+  "spaces": [
+    { "id": 0,  "name": "GO / Docking Bay",        "type": "go" },
+    { "id": 1,  "name": "Bio-Dome A",               "type": "property", "color": "#22C55E", "price": 102, "rent": 6 },
+    { "id": 2,  "name": "Bio-Dome B",               "type": "property", "color": "#22C55E", "price": 114, "rent": 6 },
+    { "id": 3,  "name": "Chance: Anomaly Signal",   "type": "chance" },
+    { "id": 4,  "name": "Oxygen Tax",               "type": "tax",      "taxAmount": 200 },
+    { "id": 5,  "name": "Bio-Dome C",               "type": "property", "color": "#22C55E", "price": 150, "rent": 8 },
+    { "id": 6,  "name": "Community: Crew Logistics", "type": "community" },
+    { "id": 7,  "name": "Transit: Cargo Spine",     "type": "railroad", "price": 200 },
+    { "id": 8,  "name": "Just Visiting",            "type": "jail" },
+    { "id": 9,  "name": "Cryo Belt-1",              "type": "property", "color": "#06B6D4", "price": 198, "rent": 12 },
+    { "id": 10, "name": "Utility: Reactor Core",    "type": "utility",  "price": 150 },
+    { "id": 11, "name": "Cryo Belt-2",              "type": "property", "color": "#06B6D4", "price": 222, "rent": 14 },
+    { "id": 12, "name": "Chance: Anomaly Signal",   "type": "chance" },
+    { "id": 13, "name": "Cryo Belt-3",              "type": "property", "color": "#06B6D4", "price": 246, "rent": 16 },
+    { "id": 14, "name": "Quantum Deck-1",           "type": "property", "color": "#A855F7", "price": 258, "rent": 18 },
+    { "id": 15, "name": "Free Parking / Salvage Yard", "type": "parking" },
+    { "id": 16, "name": "Quantum Deck-2",           "type": "property", "color": "#A855F7", "price": 282, "rent": 20 },
+    { "id": 17, "name": "Quantum Deck-3",           "type": "property", "color": "#A855F7", "price": 294, "rent": 20 },
+    { "id": 18, "name": "Community: Crew Logistics", "type": "community" },
+    { "id": 19, "name": "Transit: Ring Line",       "type": "railroad", "price": 200 },
+    { "id": 20, "name": "Docking Fee",              "type": "tax",      "taxAmount": 120 },
+    { "id": 21, "name": "Chance: Anomaly Signal",   "type": "chance" },
+    { "id": 22, "name": "Mining Arc-1",             "type": "property", "color": "#F97316", "price": 354, "rent": 26 },
+    { "id": 23, "name": "Go To Jail / Airlock Lockdown", "type": "goToJail" },
+    { "id": 24, "name": "Mining Arc-2",             "type": "property", "color": "#F97316", "price": 378, "rent": 28 },
+    { "id": 25, "name": "Utility: Comms Array",     "type": "utility",  "price": 150 },
+    { "id": 26, "name": "Mining Arc-3",             "type": "property", "color": "#F97316", "price": 402, "rent": 30 },
+    { "id": 27, "name": "Community: Crew Logistics", "type": "community" },
+    { "id": 28, "name": "Chance: Anomaly Signal",   "type": "chance" },
+    { "id": 29, "name": "Transit: Freighter Corridor", "type": "railroad", "price": 200 }
+  ],
+
+  "specialSpaces": {
+    "go": 0,
+    "jail": 8,
+    "parking": 15,
+    "goToJail": 23
+  },
+
+  "colorGroups": {
+    "#22C55E": { "name": "Bio-Domes",    "spaces": [1, 2, 5] },
+    "#06B6D4": { "name": "Cryo Belt",    "spaces": [9, 11, 13] },
+    "#A855F7": { "name": "Quantum Deck", "spaces": [14, 16, 17] },
+    "#F97316": { "name": "Mining Arc",   "spaces": [22, 24, 26] }
+  },
+
+  "cards": {
+    "chance": [
+      { "text": "Warp to Docking Bay (GO). Collect $200.", "action": "moveTo", "value": 0 },
+      { "text": "Wormhole drift — advance to Quantum Deck.", "action": "moveTo", "value": 14 },
+      { "text": "Cargo shipment arrived. Collect $120.", "action": "gain", "value": 120 },
+      { "text": "Go to Jail: Airlock Lockdown. Do not pass GO.", "action": "goToJail", "value": 0 },
+      { "text": "Hull breach repairs: pay $150.", "action": "pay", "value": 150 },
+      { "text": "Pay 10% of your total assets (station security levy).", "action": "payPercent", "value": 10 },
+      { "text": "Collect $50 per property (salvage bonus).", "action": "gainPerProperty", "value": 50 },
+      { "text": "Free upgrade on one property (nano-repair).", "action": "freeUpgrade", "value": 0 }
+    ],
+    "community": [
+      { "text": "Warp to Docking Bay (GO). Collect $200.", "action": "moveTo", "value": 0 },
+      { "text": "Research grant approved. Collect $200.", "action": "gain", "value": 200 },
+      { "text": "Crew payroll processed. Collect $60.", "action": "gain", "value": 60 },
+      { "text": "Go to Jail: Quarantine. Do not pass GO.", "action": "goToJail", "value": 0 },
+      { "text": "Radiation audit: pay 15% of total assets.", "action": "payPercent", "value": 15 },
+      { "text": "Your best module loses 1 level (system glitch).", "action": "downgrade", "value": 0 },
+      { "text": "All players receive $50 (federation aid).", "action": "gainAll", "value": 50 },
+      { "text": "Free upgrade on a module (firmware update).", "action": "freeUpgrade", "value": 0 }
+    ]
+  },
+
+  "mapMechanics": {
+    "incomeMultiplier": 1.0,
+    "rentMultiplier": 1.05,
+    "taxMultiplier": 1.1,
+    "priceMultiplier": 1.0,
+    "upgradeCostMultiplier": 1.0
+  },
+
+  "riskProfile": {
+    "volatility": 0.45,
+    "eventFrequency": 0.75
+  },
+
+  "affinity": {
+    "lia-startrace": {
+      "upgradeCostMultiplier": 0.9,
+      "description": "Lia's tech expertise lowers module upgrade costs on the station."
+    },
+    "evelyn-zero": {
+      "description": "Evelyn's analytical mind thrives amid anomalies and station volatility."
+    },
+    "sophia-ember": {
+      "description": "Sophia's diplomatic skills boost recovery from station crises."
+    }
+  },
+
+  "victory": {
+    "primary": "wealth",
+    "maxTurns": 0
+  },
+
+  "theme": {
+    "boardBackground": "#05070f",
+    "boardBorder": "#111827",
+    "cellBackground": "#0b1020",
+    "cellBorder": "#1f2937",
+    "cornerBackground": "#0b1020",
+    "textColor": "#e5e7eb",
+    "centerBackground": "#05070f",
+    "logoText": "OUTER RIM STATION",
+    "logoSubtitle": "Hex Station Board — Portal Shortcuts",
+    "logoColor": "#a855f7",
+    "logoSubColor": "#22c55e",
+    "icons": {
+      "go": "➡️",
+      "chance": "❓",
+      "community": "📦",
+      "tax": "💰",
+      "railroad": "🚂",
+      "utility": "⚡",
+      "jail": "👮",
+      "parking": "🅿️",
+      "goToJail": "🚨"
+    }
+  },
+
+  "rulesOverrides": {
+    "core": {
+      "boardSize": 30,
+      "jailPosition": 8
+    }
+  }
+}

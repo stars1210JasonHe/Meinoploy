@@ -1,8 +1,25 @@
 import { INVALID_MOVE } from 'boardgame.io/core';
-import { BOARD_SPACES, COLOR_GROUPS } from '../mods/dominion/board';
-import { CHANCE_CARDS, COMMUNITY_CARDS } from '../mods/dominion/cards';
+import { BOARD_SPACES as DEFAULT_BOARD_SPACES, COLOR_GROUPS as DEFAULT_COLOR_GROUPS } from '../mods/dominion/board';
+import { CHANCE_CARDS as DEFAULT_CHANCE_CARDS, COMMUNITY_CARDS as DEFAULT_COMMUNITY_CARDS } from '../mods/dominion/cards';
 import { RULES } from '../mods/dominion/rules';
 import { getCharacterById, getStartingMoney } from '../mods/dominion/characters-data';
+
+// Active map data — defaults to classic mod, can be overridden via setActiveMap()
+var _boardSpaces = DEFAULT_BOARD_SPACES;
+var _colorGroups = DEFAULT_COLOR_GROUPS;
+var _chanceCards = DEFAULT_CHANCE_CARDS;
+var _communityCards = DEFAULT_COMMUNITY_CARDS;
+var _boardSize = RULES.core.boardSize;
+var _jailPosition = RULES.core.jailPosition;
+
+export function setActiveMap(mapData) {
+  _boardSpaces = mapData.spaces;
+  _colorGroups = mapData.colorGroupsFlat;
+  _chanceCards = mapData.chanceCards;
+  _communityCards = mapData.communityCards;
+  _boardSize = mapData.spaceCount;
+  _jailPosition = mapData.specialSpaces.jail;
+}
 
 function createPlayer(id) {
   return {
@@ -32,8 +49,8 @@ function playerName(player) {
 }
 
 function ownsColorGroup(G, playerId, color) {
-  if (!color || !COLOR_GROUPS[color]) return false;
-  return COLOR_GROUPS[color].every(id => G.ownership[id] === playerId);
+  if (!color || !_colorGroups[color]) return false;
+  return _colorGroups[color].every(id => G.ownership[id] === playerId);
 }
 
 function getEffectiveBuyPrice(G, player, space) {
@@ -111,13 +128,13 @@ function drawCard(ctx, deck) {
 
 function countOwnedRailroads(G, ownerID) {
   return G.players[ownerID].properties.filter(pid => {
-    return BOARD_SPACES[pid].type === 'railroad';
+    return _boardSpaces[pid].type === 'railroad';
   }).length;
 }
 
 function countOwnedUtilities(G, ownerID) {
   return G.players[ownerID].properties.filter(pid => {
-    return BOARD_SPACES[pid].type === 'utility';
+    return _boardSpaces[pid].type === 'utility';
   }).length;
 }
 
@@ -210,7 +227,7 @@ function handleBankruptcy(G, ctx, player, creditorId) {
 
 function handleLanding(G, ctx) {
   const player = G.players[ctx.currentPlayer];
-  const space = BOARD_SPACES[player.position];
+  const space = _boardSpaces[player.position];
   const messages = G.messages;
 
   switch (space.type) {
@@ -269,7 +286,7 @@ function handleLanding(G, ctx) {
     }
 
     case 'chance': {
-      const card = drawCard(ctx, CHANCE_CARDS);
+      const card = drawCard(ctx, _chanceCards);
       messages.push(`CHANCE: ${card.text}`);
       // Check if player can redraw (Cassian passive OR luck redraws)
       const canRedraw = (getPassive(player) === 'merchant') ||
@@ -285,7 +302,7 @@ function handleLanding(G, ctx) {
     }
 
     case 'community': {
-      const card = drawCard(ctx, COMMUNITY_CARDS);
+      const card = drawCard(ctx, _communityCards);
       messages.push(`COMMUNITY CHEST: ${card.text}`);
       const canRedraw = (getPassive(player) === 'merchant') ||
                         (player.luckRedraws > 0 && ['pay', 'payPercent', 'downgrade', 'goToJail'].includes(card.action));
@@ -300,7 +317,7 @@ function handleLanding(G, ctx) {
     }
 
     case 'goToJail':
-      player.position = RULES.core.jailPosition;
+      player.position = _jailPosition;
       player.inJail = true;
       player.jailTurns = 0;
       messages.push('Go to Jail!');
@@ -325,10 +342,10 @@ function handleLanding(G, ctx) {
 function getTotalAssets(G, player) {
   let total = player.money;
   player.properties.forEach(pid => {
-    total += BOARD_SPACES[pid].price;
+    total += _boardSpaces[pid].price;
     const level = G.buildings[pid] || 0;
     for (let i = 1; i <= level; i++) {
-      total += Math.floor(BOARD_SPACES[pid].price * RULES.buildings.upgradeCostMultipliers[i - 1]);
+      total += Math.floor(_boardSpaces[pid].price * RULES.buildings.upgradeCostMultipliers[i - 1]);
     }
   });
   return total;
@@ -358,7 +375,7 @@ function applyCard(G, ctx, player, card) {
     case 'moveTo': {
       const oldPos = player.position;
       player.position = card.value;
-      if (card.value < oldPos && card.value !== RULES.core.jailPosition) {
+      if (card.value < oldPos && card.value !== _jailPosition) {
         let goBonus = RULES.core.goSalary;
         // Mira Dawnlight passive: GO bonus
         if (getPassive(player) === 'idealist') {
@@ -372,7 +389,7 @@ function applyCard(G, ctx, player, card) {
       break;
     }
     case 'goToJail':
-      player.position = RULES.core.jailPosition;
+      player.position = _jailPosition;
       player.inJail = true;
       player.jailTurns = 0;
       break;
@@ -422,23 +439,23 @@ function applyCard(G, ctx, player, card) {
       // Auto-upgrade the cheapest upgradeable property
       const upgradeable = player.properties
         .filter(pid => {
-          const sp = BOARD_SPACES[pid];
+          const sp = _boardSpaces[pid];
           if (sp.type !== 'property' || !sp.color) return false;
           if (!ownsColorGroup(G, player.id, sp.color)) return false;
           const level = G.buildings[pid] || 0;
           if (level >= RULES.core.maxBuildingLevel) return false;
-          const groupIds = COLOR_GROUPS[sp.color];
+          const groupIds = _colorGroups[sp.color];
           if (groupIds.some(id => G.mortgaged[id])) return false;
           const minLevel = Math.min(...groupIds.map(id => G.buildings[id] || 0));
           return level <= minLevel;
         })
-        .sort((a, b) => BOARD_SPACES[a].price - BOARD_SPACES[b].price);
+        .sort((a, b) => _boardSpaces[a].price - _boardSpaces[b].price);
 
       if (upgradeable.length > 0) {
         const pid = upgradeable[0];
         const level = (G.buildings[pid] || 0) + 1;
         G.buildings[pid] = level;
-        G.messages.push(`Free upgrade! ${BOARD_SPACES[pid].name} upgraded to ${RULES.buildings.names[level]}!`);
+        G.messages.push(`Free upgrade! ${_boardSpaces[pid].name} upgraded to ${RULES.buildings.names[level]}!`);
       } else {
         G.messages.push('No properties eligible for free upgrade.');
       }
@@ -456,7 +473,7 @@ function applyCard(G, ctx, player, card) {
         G.buildings[pid]--;
         if (G.buildings[pid] === 0) delete G.buildings[pid];
         const newLevel = G.buildings[pid] || 0;
-        G.messages.push(`Market Crash! ${BOARD_SPACES[pid].name} downgraded to ${RULES.buildings.names[newLevel]}.`);
+        G.messages.push(`Market Crash! ${_boardSpaces[pid].name} downgraded to ${RULES.buildings.names[newLevel]}.`);
       } else {
         G.messages.push('No buildings to downgrade.');
       }
@@ -476,8 +493,8 @@ function applyCard(G, ctx, player, card) {
       let targetOwner = null;
       opponents.forEach(opp => {
         opp.properties.forEach(pid => {
-          if (BOARD_SPACES[pid].price < cheapestPrice) {
-            cheapestPrice = BOARD_SPACES[pid].price;
+          if (_boardSpaces[pid].price < cheapestPrice) {
+            cheapestPrice = _boardSpaces[pid].price;
             cheapestPid = pid;
             targetOwner = opp;
           }
@@ -494,7 +511,7 @@ function applyCard(G, ctx, player, card) {
           player.properties.push(cheapestPid);
           G.ownership[cheapestPid] = player.id;
           // Transfer buildings & mortgage status
-          G.messages.push(`Hostile Takeover! Bought ${BOARD_SPACES[cheapestPid].name} from ${playerName(targetOwner)} for $${cost}!`);
+          G.messages.push(`Hostile Takeover! Bought ${_boardSpaces[cheapestPid].name} from ${playerName(targetOwner)} for $${cost}!`);
         } else {
           G.messages.push(`Can't afford hostile takeover ($${cost} needed).`);
         }
@@ -546,7 +563,7 @@ function advanceAuction(G) {
   if (auction.currentBidder !== null) {
     resolveAuction(G);
   } else {
-    G.messages.push(`No bids. ${BOARD_SPACES[auction.propertyId].name} remains unowned.`);
+    G.messages.push(`No bids. ${_boardSpaces[auction.propertyId].name} remains unowned.`);
     G.auction = null;
     G.turnPhase = 'done';
   }
@@ -555,7 +572,7 @@ function advanceAuction(G) {
 function resolveAuction(G) {
   const auction = G.auction;
   const winner = G.players[auction.currentBidder];
-  const space = BOARD_SPACES[auction.propertyId];
+  const space = _boardSpaces[auction.propertyId];
 
   winner.money -= auction.currentBid;
   winner.properties.push(auction.propertyId);
@@ -577,7 +594,7 @@ export const Monopoly = {
     }
 
     const ownership = {};
-    BOARD_SPACES.forEach(space => {
+    _boardSpaces.forEach(space => {
       if (space.type === 'property' || space.type === 'railroad' || space.type === 'utility') {
         ownership[space.id] = null;
       }
@@ -692,7 +709,7 @@ export const Monopoly = {
       if (dice.isDoubles) {
         G.doublesCount++;
         if (G.doublesCount >= RULES.core.doublesJailThreshold) {
-          player.position = RULES.core.jailPosition;
+          player.position = _jailPosition;
           player.inJail = true;
           player.jailTurns = 0;
           G.messages.push('Triple doubles! Go to Jail!');
@@ -729,9 +746,9 @@ export const Monopoly = {
       }
 
       const oldPos = player.position;
-      player.position = (player.position + dice.total) % RULES.core.boardSize;
+      player.position = (player.position + dice.total) % _boardSize;
 
-      if (player.position < oldPos && BOARD_SPACES[player.position].type !== 'goToJail') {
+      if (player.position < oldPos && _boardSpaces[player.position].type !== 'goToJail') {
         let goBonus = RULES.core.goSalary;
         // Mira Dawnlight passive: GO bonus
         if (getPassive(player) === 'idealist') {
@@ -742,7 +759,7 @@ export const Monopoly = {
         G.messages.push(`Passed GO! Collect $${goBonus}.`);
       }
 
-      G.messages.push(`Landed on ${BOARD_SPACES[player.position].name}.`);
+      G.messages.push(`Landed on ${_boardSpaces[player.position].name}.`);
       handleLanding(G, ctx);
 
       // Set turnPhase based on what happened
@@ -796,7 +813,7 @@ export const Monopoly = {
         player.luckRedraws--;
       }
 
-      const deck = G.pendingCard.deck === 'chance' ? CHANCE_CARDS : COMMUNITY_CARDS;
+      const deck = G.pendingCard.deck === 'chance' ? _chanceCards : _communityCards;
       const newCard = drawCard(ctx, deck);
       const deckName = G.pendingCard.deck === 'chance' ? 'CHANCE' : 'COMMUNITY CHEST';
       G.messages.push(`Redraw! ${deckName}: ${newCard.text}`);
@@ -815,7 +832,7 @@ export const Monopoly = {
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
       // Can only regulate one at a time
       player.regulatedProperty = propertyId;
-      G.messages.push(`${playerName(player)} regulates ${BOARD_SPACES[propertyId].name}! (+${RULES.passives.enforcer.regulatedRentBonus * 100}% rent)`);
+      G.messages.push(`${playerName(player)} regulates ${_boardSpaces[propertyId].name}! (+${RULES.passives.enforcer.regulatedRentBonus * 100}% rent)`);
     },
 
     // --- Property upgrades ---
@@ -824,14 +841,14 @@ export const Monopoly = {
       if (!G.hasRolled) return INVALID_MOVE;
 
       const player = G.players[ctx.currentPlayer];
-      const space = BOARD_SPACES[propertyId];
+      const space = _boardSpaces[propertyId];
 
       if (!space || space.type !== 'property') return INVALID_MOVE;
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
       if (!space.color || !ownsColorGroup(G, ctx.currentPlayer, space.color)) return INVALID_MOVE;
 
       // No mortgaged properties in group
-      const groupIds = COLOR_GROUPS[space.color];
+      const groupIds = _colorGroups[space.color];
       if (groupIds.some(id => G.mortgaged[id])) return INVALID_MOVE;
 
       const currentLevel = G.buildings[propertyId] || 0;
@@ -854,7 +871,7 @@ export const Monopoly = {
       if (G.phase !== 'play') return INVALID_MOVE;
 
       const player = G.players[ctx.currentPlayer];
-      const space = BOARD_SPACES[propertyId];
+      const space = _boardSpaces[propertyId];
       if (!space) return INVALID_MOVE;
 
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
@@ -864,8 +881,8 @@ export const Monopoly = {
       if ((G.buildings[propertyId] || 0) > 0) return INVALID_MOVE;
 
       // Can't mortgage if any property in color group has buildings
-      if (space.color && COLOR_GROUPS[space.color]) {
-        if (COLOR_GROUPS[space.color].some(id => (G.buildings[id] || 0) > 0)) {
+      if (space.color && _colorGroups[space.color]) {
+        if (_colorGroups[space.color].some(id => (G.buildings[id] || 0) > 0)) {
           return INVALID_MOVE;
         }
       }
@@ -880,7 +897,7 @@ export const Monopoly = {
       if (G.phase !== 'play') return INVALID_MOVE;
 
       const player = G.players[ctx.currentPlayer];
-      const space = BOARD_SPACES[propertyId];
+      const space = _boardSpaces[propertyId];
       if (!space) return INVALID_MOVE;
 
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
@@ -899,7 +916,7 @@ export const Monopoly = {
       if (!G.hasRolled) return INVALID_MOVE;
 
       const player = G.players[ctx.currentPlayer];
-      const space = BOARD_SPACES[propertyId];
+      const space = _boardSpaces[propertyId];
 
       if (!space || space.type !== 'property') return INVALID_MOVE;
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
@@ -908,8 +925,8 @@ export const Monopoly = {
       if (currentLevel <= 0) return INVALID_MOVE;
 
       // Even building in reverse: can only sell from highest level in group
-      if (space.color && COLOR_GROUPS[space.color]) {
-        const groupIds = COLOR_GROUPS[space.color];
+      if (space.color && _colorGroups[space.color]) {
+        const groupIds = _colorGroups[space.color];
         const maxLevel = Math.max(...groupIds.map(id => G.buildings[id] || 0));
         if (currentLevel < maxLevel) return INVALID_MOVE;
       }
@@ -929,7 +946,7 @@ export const Monopoly = {
     buyProperty: (G, ctx) => {
       if (!G.canBuy) return INVALID_MOVE;
       const player = G.players[ctx.currentPlayer];
-      const space = BOARD_SPACES[player.position];
+      const space = _boardSpaces[player.position];
 
       const effectivePrice = G.effectivePrice || getEffectiveBuyPrice(G, player, space);
       if (player.money < effectivePrice) return INVALID_MOVE;
@@ -951,7 +968,7 @@ export const Monopoly = {
 
       if (RULES.auction.enabled && RULES.auction.auctionOnPass) {
         const player = G.players[ctx.currentPlayer];
-        const space = BOARD_SPACES[player.position];
+        const space = _boardSpaces[player.position];
         const activeBidders = G.players
           .filter(p => !p.bankrupt)
           .map(p => ({ playerId: p.id, passed: false }));
@@ -1134,7 +1151,7 @@ export const Monopoly = {
         resolveAuction(G);
       } else if (activeBidders.length === 0) {
         // Everyone passed with no bids
-        G.messages.push(`No bids. ${BOARD_SPACES[auction.propertyId].name} remains unowned.`);
+        G.messages.push(`No bids. ${_boardSpaces[auction.propertyId].name} remains unowned.`);
         G.auction = null;
         G.turnPhase = 'done';
       } else {

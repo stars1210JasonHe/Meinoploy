@@ -1,0 +1,152 @@
+{
+  "schemaVersion": "2.0",
+  "id": "classic",
+  "name": "Council District",
+  "description": "The classic 40-space square board. The capital's financial heart where the Council oversees all transactions.",
+  "author": "Dominion Team",
+  "version": "1.0.0",
+
+  "world": {
+    "category": "city",
+    "tags": ["finance", "council", "classic"],
+    "eventPools": []
+  },
+
+  "layout": {
+    "type": "square",
+    "params": {}
+  },
+
+  "spaceCount": 40,
+
+  "spaces": [
+    { "id": 0,  "name": "GO",                  "type": "go" },
+    { "id": 1,  "name": "Mediterranean Ave",   "type": "property", "color": "#8B4513", "price": 60,  "rent": 4 },
+    { "id": 2,  "name": "Community Chest",     "type": "community" },
+    { "id": 3,  "name": "Baltic Ave",          "type": "property", "color": "#8B4513", "price": 60,  "rent": 8 },
+    { "id": 4,  "name": "Income Tax",          "type": "tax",      "taxAmount": 200 },
+    { "id": 5,  "name": "Reading Railroad",    "type": "railroad", "price": 200 },
+    { "id": 6,  "name": "Oriental Ave",        "type": "property", "color": "#87CEEB", "price": 100, "rent": 12 },
+    { "id": 7,  "name": "Chance",              "type": "chance" },
+    { "id": 8,  "name": "Vermont Ave",         "type": "property", "color": "#87CEEB", "price": 100, "rent": 12 },
+    { "id": 9,  "name": "Connecticut Ave",     "type": "property", "color": "#87CEEB", "price": 120, "rent": 16 },
+    { "id": 10, "name": "Just Visiting",       "type": "jail" },
+    { "id": 11, "name": "St. Charles Place",   "type": "property", "color": "#FF69B4", "price": 140, "rent": 20 },
+    { "id": 12, "name": "Electric Company",    "type": "utility",  "price": 150, "icon": "💡" },
+    { "id": 13, "name": "States Ave",          "type": "property", "color": "#FF69B4", "price": 140, "rent": 20 },
+    { "id": 14, "name": "Virginia Ave",        "type": "property", "color": "#FF69B4", "price": 160, "rent": 24 },
+    { "id": 15, "name": "Pennsylvania RR",     "type": "railroad", "price": 200 },
+    { "id": 16, "name": "St. James Place",     "type": "property", "color": "#FFA500", "price": 180, "rent": 28 },
+    { "id": 17, "name": "Community Chest",     "type": "community" },
+    { "id": 18, "name": "Tennessee Ave",       "type": "property", "color": "#FFA500", "price": 180, "rent": 28 },
+    { "id": 19, "name": "New York Ave",        "type": "property", "color": "#FFA500", "price": 200, "rent": 32 },
+    { "id": 20, "name": "Free Parking",        "type": "parking" },
+    { "id": 21, "name": "Kentucky Ave",        "type": "property", "color": "#FF0000", "price": 220, "rent": 36 },
+    { "id": 22, "name": "Chance",              "type": "chance" },
+    { "id": 23, "name": "Indiana Ave",         "type": "property", "color": "#FF0000", "price": 220, "rent": 36 },
+    { "id": 24, "name": "Illinois Ave",        "type": "property", "color": "#FF0000", "price": 240, "rent": 40 },
+    { "id": 25, "name": "B&O Railroad",        "type": "railroad", "price": 200 },
+    { "id": 26, "name": "Atlantic Ave",        "type": "property", "color": "#FFFF00", "price": 260, "rent": 44 },
+    { "id": 27, "name": "Ventnor Ave",         "type": "property", "color": "#FFFF00", "price": 260, "rent": 44 },
+    { "id": 28, "name": "Water Works",         "type": "utility",  "price": 150, "icon": "🚰" },
+    { "id": 29, "name": "Marvin Gardens",      "type": "property", "color": "#FFFF00", "price": 280, "rent": 48 },
+    { "id": 30, "name": "Go To Jail",          "type": "goToJail" },
+    { "id": 31, "name": "Pacific Ave",         "type": "property", "color": "#00AA00", "price": 300, "rent": 52 },
+    { "id": 32, "name": "North Carolina Ave",  "type": "property", "color": "#00AA00", "price": 300, "rent": 52 },
+    { "id": 33, "name": "Community Chest",     "type": "community" },
+    { "id": 34, "name": "Pennsylvania Ave",    "type": "property", "color": "#00AA00", "price": 320, "rent": 56 },
+    { "id": 35, "name": "Short Line",          "type": "railroad", "price": 200 },
+    { "id": 36, "name": "Chance",              "type": "chance" },
+    { "id": 37, "name": "Park Place",          "type": "property", "color": "#0000CC", "price": 350, "rent": 70 },
+    { "id": 38, "name": "Luxury Tax",          "type": "tax",      "taxAmount": 100 },
+    { "id": 39, "name": "Boardwalk",           "type": "property", "color": "#0000CC", "price": 400, "rent": 100 }
+  ],
+
+  "specialSpaces": {
+    "go": 0,
+    "jail": 10,
+    "parking": 20,
+    "goToJail": 30
+  },
+
+  "colorGroups": {
+    "#8B4513": { "name": "Brown",      "spaces": [1, 3] },
+    "#87CEEB": { "name": "Light Blue", "spaces": [6, 8, 9] },
+    "#FF69B4": { "name": "Pink",       "spaces": [11, 13, 14] },
+    "#FFA500": { "name": "Orange",     "spaces": [16, 18, 19] },
+    "#FF0000": { "name": "Red",        "spaces": [21, 23, 24] },
+    "#FFFF00": { "name": "Yellow",     "spaces": [26, 27, 29] },
+    "#00AA00": { "name": "Green",      "spaces": [31, 32, 34] },
+    "#0000CC": { "name": "Dark Blue",  "spaces": [37, 39] }
+  },
+
+  "cards": {
+    "chance": [
+      { "text": "Advance to GO! Collect $200.", "action": "moveTo", "value": 0 },
+      { "text": "Advance to Illinois Ave.", "action": "moveTo", "value": 24 },
+      { "text": "Advance to St. Charles Place.", "action": "moveTo", "value": 11 },
+      { "text": "Bank pays you dividend of $50.", "action": "gain", "value": 50 },
+      { "text": "Go to Jail. Do not pass GO.", "action": "goToJail", "value": 0 },
+      { "text": "Black Swan Event! Pay 10% of your total assets.", "action": "payPercent", "value": 10 },
+      { "text": "Market Boom! Collect $50 per property you own.", "action": "gainPerProperty", "value": 50 },
+      { "text": "Tech Breakthrough! Free upgrade on one of your properties.", "action": "freeUpgrade", "value": 0 },
+      { "text": "Hostile Takeover! Force-buy an opponent's cheapest property at 150% price.", "action": "forceBuy", "value": 150 },
+      { "text": "Stimulus Package! All players receive $100.", "action": "gainAll", "value": 100 }
+    ],
+    "community": [
+      { "text": "Advance to GO! Collect $200.", "action": "moveTo", "value": 0 },
+      { "text": "Bank error in your favor. Collect $200.", "action": "gain", "value": 200 },
+      { "text": "Go to Jail. Do not pass GO.", "action": "goToJail", "value": 0 },
+      { "text": "Income tax refund. Collect $20.", "action": "gain", "value": 20 },
+      { "text": "Life insurance matures. Collect $100.", "action": "gain", "value": 100 },
+      { "text": "Tax Audit! Pay 15% of your total assets.", "action": "payPercent", "value": 15 },
+      { "text": "Infrastructure Grant! Free upgrade on a property.", "action": "freeUpgrade", "value": 0 },
+      { "text": "Market Crash! Your best building loses 1 level.", "action": "downgrade", "value": 0 },
+      { "text": "Insurance Payout! Collect $200.", "action": "gain", "value": 200 },
+      { "text": "Community Fund! All players receive $50.", "action": "gainAll", "value": 50 }
+    ]
+  },
+
+  "mapMechanics": {
+    "incomeMultiplier": 1.0,
+    "rentMultiplier": 1.0,
+    "taxMultiplier": 1.0,
+    "priceMultiplier": 1.0,
+    "upgradeCostMultiplier": 1.0
+  },
+
+  "riskProfile": {
+    "volatility": 0.5,
+    "eventFrequency": 1.0
+  },
+
+  "victory": {
+    "primary": "wealth",
+    "maxTurns": 0
+  },
+
+  "theme": {
+    "boardBackground": "#2d5016",
+    "boardBorder": "#000000",
+    "cellBackground": "#c8e6c0",
+    "cellBorder": "#3a7d2a",
+    "cornerBackground": "#b0d8a0",
+    "textColor": "#222222",
+    "centerBackground": "#2d5016",
+    "logoText": "MEINOPOLY",
+    "logoSubtitle": "Dominion: Multi-dimensional World",
+    "logoColor": "#f0c040",
+    "logoSubColor": "#aed581",
+    "icons": {
+      "go": "➡️",
+      "chance": "❓",
+      "community": "📦",
+      "tax": "💰",
+      "railroad": "🚂",
+      "utility": "⚡",
+      "jail": "👮",
+      "parking": "🅿️",
+      "goToJail": "🚨"
+    }
+  }
+}

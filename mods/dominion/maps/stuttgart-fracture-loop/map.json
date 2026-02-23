@@ -1,0 +1,154 @@
+{
+  "schemaVersion": "2.0",
+  "id": "stuttgart-fracture-loop",
+  "name": "Stuttgart Fracture Loop",
+  "description": "A 28-space circular city board themed around Stuttgart's districts and transit.",
+  "author": "Akina (design kit)",
+  "version": "2.0.0",
+
+  "world": {
+    "category": "city",
+    "tags": ["urban", "transit", "civic"],
+    "eventPools": ["city_core", "council_politics", "civic"]
+  },
+
+  "layout": {
+    "type": "circle",
+    "params": { "radius": 44 }
+  },
+
+  "spaceCount": 28,
+
+  "spaces": [
+    { "id": 0,  "name": "GO / Council Gate",   "type": "go" },
+    { "id": 1,  "name": "Schlossplatz",         "type": "property", "color": "#7A4E2D", "price": 90,  "rent": 6 },
+    { "id": 2,  "name": "Markthalle",           "type": "property", "color": "#7A4E2D", "price": 100, "rent": 6 },
+    { "id": 3,  "name": "Chance: City Signal",  "type": "chance" },
+    { "id": 4,  "name": "Rathaus Passage",      "type": "property", "color": "#7A4E2D", "price": 120, "rent": 8 },
+    { "id": 5,  "name": "City Tax",             "type": "tax",      "taxAmount": 150 },
+    { "id": 6,  "name": "Vaihingen Lab Park",   "type": "property", "color": "#3B82F6", "price": 140, "rent": 10 },
+    { "id": 7,  "name": "Just Visiting",        "type": "jail" },
+    { "id": 8,  "name": "Rail: Regional Line",  "type": "railroad", "price": 200 },
+    { "id": 9,  "name": "Uni Stuttgart Node",   "type": "property", "color": "#3B82F6", "price": 170, "rent": 12 },
+    { "id": 10, "name": "Community: Civic Initiative", "type": "community" },
+    { "id": 11, "name": "Startup Alley",        "type": "property", "color": "#3B82F6", "price": 190, "rent": 14 },
+    { "id": 12, "name": "Königstraße",          "type": "property", "color": "#F59E0B", "price": 200, "rent": 16 },
+    { "id": 13, "name": "Milaneo Exchange",     "type": "property", "color": "#F59E0B", "price": 210, "rent": 16 },
+    { "id": 14, "name": "Free Parking / Fund Pool", "type": "parking" },
+    { "id": 15, "name": "Utility: Power Grid",  "type": "utility",  "price": 150 },
+    { "id": 16, "name": "Messe District",       "type": "property", "color": "#F59E0B", "price": 240, "rent": 20 },
+    { "id": 17, "name": "Chance: City Signal",  "type": "chance" },
+    { "id": 18, "name": "Hauptbahnhof",         "type": "property", "color": "#EF4444", "price": 260, "rent": 22 },
+    { "id": 19, "name": "Transit Fee",          "type": "tax",      "taxAmount": 100 },
+    { "id": 20, "name": "Museum Quarter",       "type": "property", "color": "#EF4444", "price": 280, "rent": 24 },
+    { "id": 21, "name": "Go To Jail",           "type": "goToJail" },
+    { "id": 22, "name": "Opernhaus",            "type": "property", "color": "#EF4444", "price": 300, "rent": 26 },
+    { "id": 23, "name": "Rail: InterCity",       "type": "railroad", "price": 200 },
+    { "id": 24, "name": "Chance: City Signal",  "type": "chance" },
+    { "id": 25, "name": "Utility: Data Backbone", "type": "utility", "price": 150 },
+    { "id": 26, "name": "Killesberg Heights",   "type": "property", "color": "#10B981", "price": 320, "rent": 28 },
+    { "id": 27, "name": "Rosenstein Park",      "type": "property", "color": "#10B981", "price": 350, "rent": 30 }
+  ],
+
+  "specialSpaces": {
+    "go": 0,
+    "jail": 7,
+    "parking": 14,
+    "goToJail": 21
+  },
+
+  "colorGroups": {
+    "#7A4E2D": { "name": "Altstadt",          "spaces": [1, 2, 4] },
+    "#3B82F6": { "name": "Tech Corridor",     "spaces": [6, 9, 11] },
+    "#F59E0B": { "name": "Trade Ring",        "spaces": [12, 13, 16] },
+    "#EF4444": { "name": "Central District",  "spaces": [18, 20, 22] },
+    "#10B981": { "name": "Green Belt",        "spaces": [26, 27] }
+  },
+
+  "cards": {
+    "chance": [
+      { "text": "Advance to GO! Collect $200.", "action": "moveTo", "value": 0 },
+      { "text": "Transit delay cleared — advance to Hauptbahnhof.", "action": "moveTo", "value": 18 },
+      { "text": "City grants a startup subsidy. Collect $100.", "action": "gain", "value": 100 },
+      { "text": "Go to Jail. Do not pass GO.", "action": "goToJail", "value": 0 },
+      { "text": "Pay 10% of your total assets for infrastructure upgrades.", "action": "payPercent", "value": 10 },
+      { "text": "Collect $40 per property you own (tourism surge).", "action": "gainPerProperty", "value": 40 },
+      { "text": "Free upgrade on one property (renovation permit).", "action": "freeUpgrade", "value": 0 },
+      { "text": "Force-buy cheapest unowned property at 150% (hot market).", "action": "forceBuy", "value": 150 }
+    ],
+    "community": [
+      { "text": "Advance to GO! Collect $200.", "action": "moveTo", "value": 0 },
+      { "text": "Insurance payout after storm. Collect $150.", "action": "gain", "value": 150 },
+      { "text": "Local initiative award. Collect $50.", "action": "gain", "value": 50 },
+      { "text": "Go to Jail. Do not pass GO.", "action": "goToJail", "value": 0 },
+      { "text": "Pay 15% of your total assets (maintenance fund).", "action": "payPercent", "value": 15 },
+      { "text": "Your best building loses 1 level (inspection).", "action": "downgrade", "value": 0 },
+      { "text": "Free upgrade on a property (green retrofit).", "action": "freeUpgrade", "value": 0 },
+      { "text": "Bank error in your favor. Collect $200.", "action": "gain", "value": 200 }
+    ]
+  },
+
+  "mapMechanics": {
+    "incomeMultiplier": 1.05,
+    "rentMultiplier": 1.0,
+    "taxMultiplier": 1.0,
+    "priceMultiplier": 1.0,
+    "upgradeCostMultiplier": 1.0
+  },
+
+  "riskProfile": {
+    "volatility": 0.25,
+    "eventFrequency": 0.55
+  },
+
+  "affinity": {
+    "albert-victor": {
+      "incomeMultiplier": 1.05,
+      "description": "Financial capital suits Albert's conservative strategy."
+    },
+    "mira-dawnlight": {
+      "description": "Mira's optimism thrives in civic-minded Stuttgart."
+    },
+    "knox-ironlaw": {
+      "taxMultiplier": 0.95,
+      "description": "Knox's regulation expertise reduces bureaucratic overhead."
+    }
+  },
+
+  "victory": {
+    "primary": "wealth",
+    "maxTurns": 0
+  },
+
+  "theme": {
+    "boardBackground": "#103b2a",
+    "boardBorder": "#0b1220",
+    "cellBackground": "#d1fae5",
+    "cellBorder": "#065f46",
+    "cornerBackground": "#a7f3d0",
+    "textColor": "#06281a",
+    "centerBackground": "#103b2a",
+    "logoText": "STUTTGART LOOP",
+    "logoSubtitle": "Fracture-Scar City Board",
+    "logoColor": "#f59e0b",
+    "logoSubColor": "#3b82f6",
+    "icons": {
+      "go": "➡️",
+      "chance": "❓",
+      "community": "📦",
+      "tax": "💰",
+      "railroad": "🚂",
+      "utility": "⚡",
+      "jail": "👮",
+      "parking": "🅿️",
+      "goToJail": "🚨"
+    }
+  },
+
+  "rulesOverrides": {
+    "core": {
+      "boardSize": 28,
+      "jailPosition": 7
+    }
+  }
+}

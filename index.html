@@ -74,19 +74,47 @@
 
     /* ---- BOARD ---- */
     .board {
-      display: grid;
-      grid-template-columns: 90px repeat(9, 68px) 90px;
-      grid-template-rows: 90px repeat(9, 68px) 90px;
-      gap: 1px;
-      background: #2d5016;
-      border: 3px solid #000;
+      background: var(--board-bg, #2d5016);
+      border: 3px solid var(--board-border, #000);
       border-radius: 6px;
       padding: 2px;
     }
 
+    /* Grid layout (square boards) */
+    .board-grid {
+      display: grid;
+      gap: 1px;
+    }
+
+    /* Absolute layout (circle/hexagon/custom boards) */
+    .board-absolute {
+      position: relative;
+      width: 700px;
+      height: 700px;
+    }
+    .board-absolute .cell {
+      position: absolute;
+      width: 72px;
+      height: 72px;
+      transform: translate(-50%, -50%);
+      border-radius: 6px;
+    }
+    .board-absolute .cell.corner {
+      width: 82px;
+      height: 82px;
+    }
+    .center-logo-absolute {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      pointer-events: none;
+    }
+
     .cell {
-      background: #c8e6c0;
-      border: 1px solid #3a7d2a;
+      background: var(--cell-bg, #c8e6c0);
+      border: 1px solid var(--cell-border, #3a7d2a);
       display: flex;
       flex-direction: column;
       position: relative;
@@ -94,7 +122,7 @@
       cursor: default;
     }
     .cell.corner {
-      background: #b0d8a0;
+      background: var(--corner-bg, #b0d8a0);
     }
     .cell.empty {
       background: transparent;
@@ -117,6 +145,11 @@
     .side-right .color-bar {
       top: 0; left: 0; bottom: 0; width: 10px;
     }
+    /* Default color bar for non-grid layouts (no side class) */
+    .board-absolute .cell:not([class*="side-"]) .color-bar,
+    .side- .color-bar {
+      top: 0; left: 0; right: 0; height: 10px;
+    }
 
     .cell-content {
       flex: 1;
@@ -133,7 +166,7 @@
       font-size: 0.55rem;
       font-weight: 600;
       text-align: center;
-      color: #222;
+      color: var(--text-color, #222);
       line-height: 1.1;
       word-wrap: break-word;
     }
@@ -185,7 +218,7 @@
 
     /* ---- CENTER LOGO ---- */
     .center-area {
-      background: #2d5016;
+      background: var(--center-bg, #2d5016);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -197,14 +230,14 @@
     .logo-text {
       font-size: 2.2rem;
       font-weight: bold;
-      color: #f0c040;
+      color: var(--logo-color, #f0c040);
       text-shadow: 2px 2px 4px rgba(0,0,0,0.6);
       letter-spacing: 4px;
       font-family: Georgia, serif;
     }
     .logo-sub {
       font-size: 0.85rem;
-      color: #aed581;
+      color: var(--logo-sub-color, #aed581);
       margin-top: 4px;
     }
 
@@ -1067,6 +1100,61 @@
       box-shadow: 0 4px 12px rgba(240, 192, 64, 0.2);
     }
 
+    /* ---- MAP SELECTION ---- */
+    .map-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+      padding: 0 20px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .map-card {
+      background: #16213e;
+      border: 2px solid #333;
+      border-radius: 10px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .map-card:hover {
+      border-color: #f0c040;
+      transform: translateY(-3px);
+      box-shadow: 0 6px 16px rgba(240, 192, 64, 0.25);
+    }
+    .map-card-header {
+      padding: 16px;
+      text-align: center;
+    }
+    .map-card-title {
+      font-size: 1.2rem;
+      font-weight: bold;
+      letter-spacing: 2px;
+      font-family: Georgia, serif;
+    }
+    .map-card-body {
+      padding: 12px 16px 16px;
+    }
+    .map-card-desc {
+      font-size: 0.8rem;
+      color: #aab;
+      margin-bottom: 10px;
+      line-height: 1.3;
+    }
+    .map-card-meta {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .map-tag {
+      font-size: 0.65rem;
+      background: #0b1020;
+      color: #8899aa;
+      padding: 2px 8px;
+      border-radius: 10px;
+      border: 1px solid #2a3a5a;
+    }
+
     /* ---- TRADE TARGET SELECT ---- */
     .trade-target-select {
       margin-bottom: 12px;
@@ -1217,9 +1305,17 @@
         width: 100%;
         max-width: 600px;
       }
-      .board {
-        grid-template-columns: 80px repeat(9, 58px) 80px;
-        grid-template-rows: 80px repeat(9, 58px) 80px;
+      .board-absolute {
+        width: 560px;
+        height: 560px;
+      }
+      .board-absolute .cell {
+        width: 62px;
+        height: 62px;
+      }
+      .board-absolute .cell.corner {
+        width: 72px;
+        height: 72px;
       }
     }
   </style>

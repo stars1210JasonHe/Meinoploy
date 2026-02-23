@@ -1,0 +1,207 @@
+{
+  "schemaVersion": "2.0",
+  "id": "nightveil-intrigue",
+  "name": "Nightveil Intrigue",
+  "description": "A 26-space noir board where intrigue escalates over phases.",
+  "author": "Akina (design kit)",
+  "version": "2.0.0",
+
+  "world": {
+    "category": "fictional",
+    "tags": ["noir", "intrigue", "shadow"],
+    "eventPools": ["noir_core", "shadow", "council_politics"]
+  },
+
+  "layout": {
+    "type": "custom",
+    "params": {},
+    "width": 100,
+    "height": 100,
+    "positions": {
+      "0":  { "x": 88, "y": 88 },
+      "1":  { "x": 74, "y": 88 },
+      "2":  { "x": 60, "y": 88 },
+      "3":  { "x": 46, "y": 88 },
+      "4":  { "x": 32, "y": 88 },
+      "5":  { "x": 18, "y": 88 },
+      "6":  { "x": 12, "y": 78 },
+      "7":  { "x": 12, "y": 64 },
+      "8":  { "x": 12, "y": 50 },
+      "9":  { "x": 12, "y": 36 },
+      "10": { "x": 12, "y": 22 },
+      "11": { "x": 18, "y": 12 },
+      "12": { "x": 32, "y": 12 },
+      "13": { "x": 46, "y": 12 },
+      "14": { "x": 60, "y": 12 },
+      "15": { "x": 74, "y": 12 },
+      "16": { "x": 88, "y": 12 },
+      "17": { "x": 88, "y": 26 },
+      "18": { "x": 72, "y": 26 },
+      "19": { "x": 72, "y": 40 },
+      "20": { "x": 72, "y": 54 },
+      "21": { "x": 72, "y": 68 },
+      "22": { "x": 58, "y": 68 },
+      "23": { "x": 44, "y": 68 },
+      "24": { "x": 30, "y": 68 },
+      "25": { "x": 30, "y": 54 }
+    }
+  },
+
+  "connections": {
+    "16": [17],
+    "17": [18],
+    "25": [8]
+  },
+
+  "spaceCount": 26,
+
+  "spaces": [
+    { "id": 0,  "name": "GO / Curtain Rise",        "type": "go" },
+    { "id": 1,  "name": "Shadow Alley",              "type": "property", "color": "#4C1D95", "price": 94,  "rent": 8 },
+    { "id": 2,  "name": "Rift Lanterns",             "type": "property", "color": "#4C1D95", "price": 108, "rent": 8 },
+    { "id": 3,  "name": "Chance: Hidden Clause",     "type": "chance" },
+    { "id": 4,  "name": "Violet Court",              "type": "property", "color": "#4C1D95", "price": 136, "rent": 10 },
+    { "id": 5,  "name": "Whisper Bazaar",            "type": "property", "color": "#0F766E", "price": 150, "rent": 10 },
+    { "id": 6,  "name": "Just Visiting",             "type": "jail" },
+    { "id": 7,  "name": "Veil Utility",              "type": "utility",  "price": 150 },
+    { "id": 8,  "name": "Night Train",               "type": "railroad", "price": 200 },
+    { "id": 9,  "name": "Community: Favor Ledger",   "type": "community" },
+    { "id": 10, "name": "Silent Exchange",            "type": "property", "color": "#0F766E", "price": 220, "rent": 16 },
+    { "id": 11, "name": "Chance: Hidden Clause",     "type": "chance" },
+    { "id": 12, "name": "Ink Ledger",                "type": "property", "color": "#0F766E", "price": 248, "rent": 18 },
+    { "id": 13, "name": "Free Parking / Secrets Pool", "type": "parking" },
+    { "id": 14, "name": "Blood Court Gate",          "type": "property", "color": "#BE123C", "price": 276, "rent": 20 },
+    { "id": 15, "name": "Reputation Tax",            "type": "tax",      "taxAmount": 180 },
+    { "id": 16, "name": "Crimson Tribunal",          "type": "property", "color": "#BE123C", "price": 304, "rent": 22 },
+    { "id": 17, "name": "Chance: Hidden Clause",     "type": "chance" },
+    { "id": 18, "name": "Signal Utility",            "type": "utility",  "price": 150 },
+    { "id": 19, "name": "Oath Hall",                 "type": "property", "color": "#BE123C", "price": 346, "rent": 24 },
+    { "id": 20, "name": "Go To Jail / Exile",        "type": "goToJail" },
+    { "id": 21, "name": "Gilded Arcade",             "type": "property", "color": "#F59E0B", "price": 374, "rent": 26 },
+    { "id": 22, "name": "Community: Favor Ledger",   "type": "community" },
+    { "id": 23, "name": "Golden Spire",              "type": "property", "color": "#F59E0B", "price": 402, "rent": 28 },
+    { "id": 24, "name": "Chance: Hidden Clause",     "type": "chance" },
+    { "id": 25, "name": "Night Train (Express)",     "type": "railroad", "price": 200 }
+  ],
+
+  "specialSpaces": {
+    "go": 0,
+    "jail": 6,
+    "parking": 13,
+    "goToJail": 20
+  },
+
+  "colorGroups": {
+    "#4C1D95": { "name": "Shadow Quarter",  "spaces": [1, 2, 4] },
+    "#0F766E": { "name": "Whisper Market",  "spaces": [5, 10, 12] },
+    "#BE123C": { "name": "Blood Court",     "spaces": [14, 16, 19] },
+    "#F59E0B": { "name": "Gilded Street",   "spaces": [21, 23] }
+  },
+
+  "cards": {
+    "chance": [
+      { "text": "Return to Curtain Rise (GO). Collect $200.", "action": "moveTo", "value": 0 },
+      { "text": "Blackmail file surfaces — pay $200.", "action": "pay", "value": 200 },
+      { "text": "A secret ally tips you. Collect $150.", "action": "gain", "value": 150 },
+      { "text": "Go to Jail: Exile. Do not pass GO.", "action": "goToJail", "value": 0 },
+      { "text": "Pay 10% of your total assets (silence money).", "action": "payPercent", "value": 10 },
+      { "text": "Collect $40 per property you own (shadow dividends).", "action": "gainPerProperty", "value": 40 },
+      { "text": "Free upgrade on one property (forged permit).", "action": "freeUpgrade", "value": 0 },
+      { "text": "Force-buy cheapest unowned property at 160% (underworld auction).", "action": "forceBuy", "value": 160 }
+    ],
+    "community": [
+      { "text": "Return to Curtain Rise (GO). Collect $200.", "action": "moveTo", "value": 0 },
+      { "text": "Favor repaid. Collect $100.", "action": "gain", "value": 100 },
+      { "text": "Whisper network payout. Collect $50.", "action": "gain", "value": 50 },
+      { "text": "Go to Jail: Interrogation. Do not pass GO.", "action": "goToJail", "value": 0 },
+      { "text": "Pay 15% of total assets (debt to the court).", "action": "payPercent", "value": 15 },
+      { "text": "Your best building loses 1 level (arson).", "action": "downgrade", "value": 0 },
+      { "text": "All players receive $25 (mutual cover).", "action": "gainAll", "value": 25 },
+      { "text": "Free upgrade on a property (quiet renovation).", "action": "freeUpgrade", "value": 0 }
+    ]
+  },
+
+  "mapMechanics": {
+    "incomeMultiplier": 0.98,
+    "rentMultiplier": 1.08,
+    "taxMultiplier": 1.05,
+    "priceMultiplier": 1.0,
+    "upgradeCostMultiplier": 1.0
+  },
+
+  "riskProfile": {
+    "volatility": 0.4,
+    "eventFrequency": 0.65
+  },
+
+  "affinity": {
+    "ophelia-nightveil": {
+      "rentMultiplier": 1.1,
+      "description": "Ophelia's shadow network thrives in the intrigue of Nightveil."
+    },
+    "cassian-echo": {
+      "description": "Cassian's information brokering benefits from the city's secrets."
+    },
+    "marcus-grayline": {
+      "description": "Marcus's regulatory influence gives him an edge in Blood Court politics."
+    }
+  },
+
+  "phases": [
+    {
+      "id": "calm",
+      "name": "Calm Before Rumors",
+      "trigger": { "type": "turn", "value": 0 },
+      "effects": { "eventFrequency": 0.6 }
+    },
+    {
+      "id": "whispers",
+      "name": "Whispers Spread",
+      "trigger": { "type": "turn", "value": 8 },
+      "effects": { "eventFrequency": 0.8, "rentMultiplier": 1.1 }
+    },
+    {
+      "id": "exposure",
+      "name": "Exposure Night",
+      "trigger": { "type": "turn", "value": 16 },
+      "effects": { "taxMultiplier": 1.15 }
+    }
+  ],
+
+  "victory": {
+    "primary": "wealth",
+    "maxTurns": 0
+  },
+
+  "theme": {
+    "boardBackground": "#0a0612",
+    "boardBorder": "#111827",
+    "cellBackground": "#120a1f",
+    "cellBorder": "#3f3f46",
+    "cornerBackground": "#120a1f",
+    "textColor": "#f5f3ff",
+    "centerBackground": "#0a0612",
+    "logoText": "NIGHTVEIL",
+    "logoSubtitle": "Intrigue Board — Phases Escalate",
+    "logoColor": "#fbbf24",
+    "logoSubColor": "#c084fc",
+    "icons": {
+      "go": "➡️",
+      "chance": "❓",
+      "community": "📦",
+      "tax": "💰",
+      "railroad": "🚂",
+      "utility": "⚡",
+      "jail": "👮",
+      "parking": "🅿️",
+      "goToJail": "🚨"
+    }
+  },
+
+  "rulesOverrides": {
+    "core": {
+      "boardSize": 26,
+      "jailPosition": 6
+    }
+  }
+}

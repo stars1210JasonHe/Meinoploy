@@ -1,50 +1,22 @@
 import { Client } from 'boardgame.io/client';
 import { SocketIO } from 'boardgame.io/multiplayer';
-import { Monopoly } from './Game';
+import { Monopoly, setActiveMap } from './Game';
 import { PLAYER_COLORS, BUILDING_ICONS, BUILDING_NAMES, UPGRADE_COST_MULTIPLIERS, RENT_MULTIPLIERS, SEASONS } from './constants';
-import { BOARD_SPACES, COLOR_GROUPS, CHARACTERS, getLoreById, RULES } from '../mods/dominion';
+import { CHARACTERS, getLoreById, RULES } from '../mods/dominion';
 import { Lobby } from './Lobby';
+import { loadMap, getGridDimensions, positionsToGrid } from './map-loader';
+import classicMapJson from '../mods/dominion/maps/classic/map.json';
+import stuttgartMapJson from '../mods/dominion/maps/stuttgart-fracture-loop/map.json';
+import outerRimMapJson from '../mods/dominion/maps/outer-rim-station/map.json';
+import nightveilMapJson from '../mods/dominion/maps/nightveil-intrigue/map.json';
 
-const BOARD_SIZE = 11; // 11x11 grid
-
-// Map board space IDs to grid positions (row, col) — clockwise from bottom-left
-function getBoardPositions() {
-  const pos = {};
-  // Bottom row: spaces 0-10 (right to left)
-  for (let i = 0; i <= 10; i++) {
-    pos[i] = { row: 10, col: 10 - i };
-  }
-  // Left column: spaces 11-19 (bottom to top)
-  for (let i = 11; i <= 19; i++) {
-    pos[i] = { row: 10 - (i - 10), col: 0 };
-  }
-  // Top row: spaces 20-30 (left to right)
-  for (let i = 20; i <= 30; i++) {
-    pos[i] = { row: 0, col: i - 20 };
-  }
-  // Right column: spaces 31-39 (top to bottom)
-  for (let i = 31; i <= 39; i++) {
-    pos[i] = { row: i - 30, col: 10 };
-  }
-  return pos;
-}
-
-const POSITIONS = getBoardPositions();
-
-function getSpaceTypeIcon(space) {
-  switch (space.type) {
-    case 'go': return '\u{27A1}\u{FE0F}';
-    case 'chance': return '\u{2753}';
-    case 'community': return '\u{1F4E6}';
-    case 'tax': return '\u{1F4B0}';
-    case 'railroad': return '\u{1F682}';
-    case 'utility': return space.name.includes('Electric') ? '\u{1F4A1}' : '\u{1F6B0}';
-    case 'jail': return '\u{1F46E}';
-    case 'parking': return '\u{1F17F}\u{FE0F}';
-    case 'goToJail': return '\u{1F6A8}';
-    default: return '';
-  }
-}
+// Available maps for selection
+const AVAILABLE_MAPS = [
+  classicMapJson,
+  stuttgartMapJson,
+  outerRimMapJson,
+  nightveilMapJson,
+];
 
 // Render Chinese lore text: paragraphs + bold markers
 function renderLoreText(text) {
@@ -78,8 +50,18 @@ class MonopolyBoard {
     this.rootElement = rootElement;
     this.mode = null; // 'local' or 'online'
     this.onlinePlayerID = null;
+    this.setMap(classicMapJson);
     this.createLayout();
     this.showModeSelect();
+  }
+
+  // Load a map config and prepare rendering data + engine data
+  setMap(mapJson) {
+    this.mapData = loadMap(mapJson);
+    this.boardSpaces = this.mapData.spaces;
+    this.colorGroups = this.mapData.colorGroupsFlat;
+    // Update Game.js engine references to use this map's data
+    setActiveMap(this.mapData);
   }
 
   showModeSelect() {
@@ -101,12 +83,63 @@ class MonopolyBoard {
 
     document.getElementById('btn-mode-local').onclick = () => {
       this.mode = 'local';
-      this.showPlayerCountSelect();
+      this.showMapSelect();
     };
     document.getElementById('btn-mode-online').onclick = () => {
       this.mode = 'online';
       this.showOnlineLobby();
     };
+  }
+
+  showMapSelect() {
+    this.charSelectEl.style.display = 'none';
+    this.gameAreaEl.style.display = 'none';
+    this.seasonDisplayEl.style.display = 'none';
+    this.lobbyEl.style.display = 'none';
+    this.playerCountEl.style.display = 'block';
+
+    let html = '<div class="count-select-header">' +
+      '<h2>Select Map</h2>' +
+      '<p class="count-select-sub">Choose the board you want to play on</p>' +
+    '</div>' +
+    '<div class="map-grid">';
+
+    AVAILABLE_MAPS.forEach(function(mapJson, idx) {
+      var layoutLabel = mapJson.layout.type;
+      var spaceLabel = mapJson.spaceCount + ' spaces';
+      var catLabel = (mapJson.world && mapJson.world.category) || '';
+      html += '<div class="map-card" data-map-idx="' + idx + '">' +
+        '<div class="map-card-header" style="background:' + (mapJson.theme.boardBackground || '#2d5016') + ';color:' + (mapJson.theme.logoColor || '#f0c040') + ';">' +
+          '<div class="map-card-title">' + mapJson.name + '</div>' +
+        '</div>' +
+        '<div class="map-card-body">' +
+          '<div class="map-card-desc">' + (mapJson.description || '') + '</div>' +
+          '<div class="map-card-meta">' +
+            '<span class="map-tag">' + layoutLabel + '</span>' +
+            '<span class="map-tag">' + spaceLabel + '</span>' +
+            (catLabel ? '<span class="map-tag">' + catLabel + '</span>' : '') +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    });
+
+    html += '</div>' +
+      '<div style="text-align:center;margin-top:16px;">' +
+        '<button id="btn-back-mode" class="btn btn-secondary" style="display:inline-block;width:auto;">Back</button>' +
+      '</div>';
+
+    this.playerCountEl.innerHTML = html;
+
+    var self = this;
+    this.playerCountEl.querySelectorAll('.map-card').forEach(function(card) {
+      card.onclick = function() {
+        var idx = parseInt(card.dataset.mapIdx);
+        self.setMap(AVAILABLE_MAPS[idx]);
+        self._themeApplied = false; // Reset theme for new map
+        self.showPlayerCountSelect();
+      };
+    });
+    document.getElementById('btn-back-mode').onclick = function() { self.showModeSelect(); };
   }
 
   showPlayerCountSelect() {
@@ -138,7 +171,7 @@ class MonopolyBoard {
         };
       }
     });
-    document.getElementById('btn-back-mode').onclick = () => this.showModeSelect();
+    document.getElementById('btn-back-mode').onclick = () => this.showMapSelect();
   }
 
   showOnlineLobby() {
@@ -433,10 +466,10 @@ class MonopolyBoard {
 
     const myProps = player.properties
       .filter(pid => (G.buildings[pid] || 0) === 0 && (!G.mortgaged[pid] || RULES.trading.allowMortgagedProperties))
-      .map(pid => BOARD_SPACES[pid]);
+      .map(pid => this.boardSpaces[pid]);
     const targetProps = target.properties
       .filter(pid => (G.buildings[pid] || 0) === 0 && (!G.mortgaged[pid] || RULES.trading.allowMortgagedProperties))
-      .map(pid => BOARD_SPACES[pid]);
+      .map(pid => this.boardSpaces[pid]);
 
     const playerName = player.character ? player.character.name : `Player ${parseInt(ctx.currentPlayer) + 1}`;
     const targetName = target.character ? target.character.name : `Player ${parseInt(target.id) + 1}`;
@@ -564,87 +597,176 @@ class MonopolyBoard {
     `;
   }
 
+  // Apply map theme as CSS custom properties on the board wrapper
+  applyTheme() {
+    const t = this.mapData.theme;
+    const wrapper = this.boardEl.parentElement;
+    wrapper.style.setProperty('--board-bg', t.boardBackground);
+    wrapper.style.setProperty('--board-border', t.boardBorder);
+    wrapper.style.setProperty('--cell-bg', t.cellBackground);
+    wrapper.style.setProperty('--cell-border', t.cellBorder);
+    wrapper.style.setProperty('--corner-bg', t.cornerBackground);
+    wrapper.style.setProperty('--text-color', t.textColor);
+    wrapper.style.setProperty('--center-bg', t.centerBackground);
+    wrapper.style.setProperty('--logo-color', t.logoColor);
+    wrapper.style.setProperty('--logo-sub-color', t.logoSubColor);
+  }
+
+  // Build HTML for a single board cell
+  _renderCell(spaceId, G, options) {
+    const space = this.boardSpaces[spaceId];
+    const isCorner = this.mapData.cornerIds.includes(spaceId);
+    const owner = G.ownership[spaceId];
+    const ownerColor = owner !== null && owner !== undefined ? PLAYER_COLORS[parseInt(owner)] : '';
+    const buildingLevel = G.buildings[spaceId] || 0;
+    const isMortgaged = G.mortgaged[spaceId] || false;
+
+    const playersHere = G.players
+      .filter(function(p) { return !p.bankrupt && p.position === spaceId; })
+      .map(function(p) {
+        const color = p.character ? p.character.color : PLAYER_COLORS[parseInt(p.id)];
+        const label = p.character ? p.character.name[0] : parseInt(p.id) + 1;
+        return '<span class="player-token" style="background:' + color + '">' + label + '</span>';
+      })
+      .join('');
+
+    const colorBar = space.color
+      ? '<div class="color-bar" style="background:' + space.color + '"></div>'
+      : '';
+    const ownerDot = ownerColor
+      ? '<div class="owner-dot" style="background:' + ownerColor + '"></div>'
+      : '';
+    const buildingTag = buildingLevel > 0
+      ? '<div class="building-icon">' + BUILDING_ICONS[buildingLevel] + '</div>'
+      : '';
+    const mortgageTag = isMortgaged
+      ? '<div class="mortgage-badge">M</div>'
+      : '';
+
+    const icon = space.icon || '';
+    const priceTag = space.price > 0 ? '<div class="price">$' + space.price + '</div>' : '';
+    const parkingPot = (space.type === 'parking' && RULES.core.freeParkingPot && G.freeParkingPot > 0)
+      ? '<div class="parking-pot">$' + G.freeParkingPot + '</div>'
+      : '';
+
+    const sideClass = options.side ? ' side-' + options.side : '';
+    const posStyle = options.posStyle || '';
+
+    return '<div class="cell' + (isCorner ? ' corner' : '') + (isMortgaged ? ' mortgaged' : '') + sideClass + '" data-space="' + spaceId + '"' + (posStyle ? ' style="' + posStyle + '"' : '') + '>' +
+      colorBar +
+      '<div class="cell-content">' +
+        '<div class="space-name">' + icon + ' ' + space.name + '</div>' +
+        priceTag +
+        buildingTag + mortgageTag +
+        parkingPot +
+        ownerDot +
+        '<div class="tokens">' + playersHere + '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
   renderBoard(G, ctx) {
+    const layoutType = this.mapData.layoutType;
+
+    // Apply theme on first render
+    if (!this._themeApplied) {
+      this.applyTheme();
+      this._themeApplied = true;
+    }
+
+    if (layoutType === 'square') {
+      this._renderSquareBoard(G, ctx);
+    } else {
+      this._renderAbsoluteBoard(G, ctx);
+    }
+  }
+
+  // CSS Grid rendering for square layouts (classic Monopoly style)
+  _renderSquareBoard(G, ctx) {
+    const gridDims = getGridDimensions(this.mapData.spaceCount, 'square');
+    const gridSize = gridDims.rows; // square: rows === cols
+    const perSide = gridSize - 1;
+    const gridPositions = positionsToGrid(this.mapData.positions, this.mapData.spaceCount);
+
+    // Set grid template dynamically
+    const cornerPx = 90;
+    const cellPx = 68;
+    const innerRepeat = perSide - 1;
+    this.boardEl.style.gridTemplateColumns = cornerPx + 'px repeat(' + innerRepeat + ', ' + cellPx + 'px) ' + cornerPx + 'px';
+    this.boardEl.style.gridTemplateRows = cornerPx + 'px repeat(' + innerRepeat + ', ' + cellPx + 'px) ' + cornerPx + 'px';
+    this.boardEl.className = 'board board-grid';
+
     let html = '';
+    const lastIdx = gridSize - 1;
 
-    for (let row = 0; row < BOARD_SIZE; row++) {
-      for (let col = 0; col < BOARD_SIZE; col++) {
-        const spaceEntry = Object.entries(POSITIONS).find(
-          ([id, p]) => p.row === row && p.col === col
-        );
+    for (let row = 0; row < gridSize; row++) {
+      for (let col = 0; col < gridSize; col++) {
+        // Find which space is at this grid position
+        let foundId = null;
+        for (let id in gridPositions) {
+          if (gridPositions[id].row === row && gridPositions[id].col === col) {
+            foundId = parseInt(id);
+            break;
+          }
+        }
 
-        if (spaceEntry) {
-          const spaceId = parseInt(spaceEntry[0]);
-          const space = BOARD_SPACES[spaceId];
-          const isCorner = [0, 10, 20, 30].includes(spaceId);
-          const owner = G.ownership[spaceId];
-          const ownerColor = owner !== null && owner !== undefined ? PLAYER_COLORS[parseInt(owner)] : '';
-          const buildingLevel = G.buildings[spaceId] || 0;
-          const isMortgaged = G.mortgaged[spaceId] || false;
-
-          const playersHere = G.players
-            .filter(p => !p.bankrupt && p.position === spaceId)
-            .map(p => {
-              const color = p.character ? p.character.color : PLAYER_COLORS[parseInt(p.id)];
-              const label = p.character ? p.character.name[0] : parseInt(p.id) + 1;
-              return `<span class="player-token" style="background:${color}">${label}</span>`;
-            })
-            .join('');
-
-          const colorBar = space.color
-            ? `<div class="color-bar" style="background:${space.color}"></div>`
-            : '';
-
-          const ownerDot = ownerColor
-            ? `<div class="owner-dot" style="background:${ownerColor}"></div>`
-            : '';
-          const buildingTag = buildingLevel > 0
-            ? `<div class="building-icon">${BUILDING_ICONS[buildingLevel]}</div>`
-            : '';
-          const mortgageTag = isMortgaged
-            ? `<div class="mortgage-badge">M</div>`
-            : '';
-
-          const icon = getSpaceTypeIcon(space);
-          const priceTag = space.price > 0 ? `<div class="price">$${space.price}</div>` : '';
-          const parkingPot = (space.type === 'parking' && RULES.core.freeParkingPot && G.freeParkingPot > 0)
-            ? `<div class="parking-pot">$${G.freeParkingPot}</div>`
-            : '';
-
+        if (foundId !== null) {
+          // Determine which side for color-bar orientation
           let side = '';
-          if (row === 10 && col > 0 && col < 10) side = 'bottom';
-          else if (row === 0 && col > 0 && col < 10) side = 'top';
-          else if (col === 0 && row > 0 && row < 10) side = 'left';
-          else if (col === 10 && row > 0 && row < 10) side = 'right';
+          if (row === lastIdx && col > 0 && col < lastIdx) side = 'bottom';
+          else if (row === 0 && col > 0 && col < lastIdx) side = 'top';
+          else if (col === 0 && row > 0 && row < lastIdx) side = 'left';
+          else if (col === lastIdx && row > 0 && row < lastIdx) side = 'right';
 
-          html += `
-            <div class="cell ${isCorner ? 'corner' : ''} ${isMortgaged ? 'mortgaged' : ''} side-${side}" data-space="${spaceId}">
-              ${colorBar}
-              <div class="cell-content">
-                <div class="space-name">${icon} ${space.name}</div>
-                ${priceTag}
-                ${buildingTag}${mortgageTag}
-                ${parkingPot}
-                ${ownerDot}
-                <div class="tokens">${playersHere}</div>
-              </div>
-            </div>`;
+          html += this._renderCell(foundId, G, { side: side });
         } else {
-          if (row === 4 && col === 4) {
-            html += `<div class="center-area" style="grid-row: 2 / 10; grid-column: 2 / 10;">
-              <div class="center-logo">
-                <div class="logo-text">MEINOPOLY</div>
-                <div class="logo-sub">Dominion: Multi-dimensional World</div>
-              </div>
-            </div>`;
-          } else if (row >= 1 && row <= 9 && col >= 1 && col <= 9) {
+          // Center area or empty cell
+          const innerStart = 1;
+          const innerEnd = lastIdx;
+          const centerTriggerRow = Math.floor(gridSize / 2) - 1;
+          const centerTriggerCol = Math.floor(gridSize / 2) - 1;
+
+          if (row === centerTriggerRow && col === centerTriggerCol) {
+            html += '<div class="center-area" style="grid-row: 2 / ' + lastIdx + '; grid-column: 2 / ' + lastIdx + ';">' +
+              '<div class="center-logo">' +
+                '<div class="logo-text">' + this.mapData.theme.logoText + '</div>' +
+                '<div class="logo-sub">' + (this.mapData.theme.logoSubtitle || '') + '</div>' +
+              '</div>' +
+            '</div>';
+          } else if (row >= innerStart && row < innerEnd && col >= innerStart && col < innerEnd) {
             continue;
           } else {
-            html += `<div class="cell empty"></div>`;
+            html += '<div class="cell empty"></div>';
           }
         }
       }
     }
+
+    this.boardEl.innerHTML = html;
+  }
+
+  // Absolute positioning for circle/hexagon/custom layouts
+  _renderAbsoluteBoard(G, ctx) {
+    this.boardEl.className = 'board board-absolute';
+    // Clear grid template (not used)
+    this.boardEl.style.gridTemplateColumns = '';
+    this.boardEl.style.gridTemplateRows = '';
+
+    let html = '';
+
+    // Render each space as absolutely positioned cell
+    for (let i = 0; i < this.mapData.spaceCount; i++) {
+      const pos = this.mapData.positions[i];
+      if (!pos) continue;
+      const posStyle = 'left:' + pos.x + '%;top:' + pos.y + '%;';
+      html += this._renderCell(i, G, { side: '', posStyle: posStyle });
+    }
+
+    // Center logo
+    html += '<div class="center-logo-absolute">' +
+      '<div class="logo-text">' + this.mapData.theme.logoText + '</div>' +
+      '<div class="logo-sub">' + (this.mapData.theme.logoSubtitle || '') + '</div>' +
+    '</div>';
 
     this.boardEl.innerHTML = html;
   }
@@ -656,7 +778,7 @@ class MonopolyBoard {
       const propCount = player.properties.length;
       const propList = player.properties
         .map(pid => {
-          const sp = BOARD_SPACES[pid];
+          const sp = this.boardSpaces[pid];
           const lvl = G.buildings[pid] || 0;
           const mort = G.mortgaged[pid] || false;
           const bIcon = lvl > 0 ? BUILDING_ICONS[lvl] + ' ' : '';
@@ -689,7 +811,7 @@ class MonopolyBoard {
             ${player.bankrupt ? '<span class="bankrupt-badge">BANKRUPT</span>' : ''}
           </div>
           <div class="player-money ${hideFromOthers ? 'money-hidden' : ''}">${moneyDisplay}</div>
-          <div class="player-position">Position: ${BOARD_SPACES[player.position].name}</div>
+          <div class="player-position">Position: ${this.boardSpaces[player.position].name}</div>
           ${player.inJail ? '<div class="jail-badge">\u{1F46E} IN JAIL</div>' : ''}`;
 
       // Show abilities status
@@ -698,7 +820,7 @@ class MonopolyBoard {
         if (player.rerollsLeft > 0) abilities.push(`Rerolls: ${player.rerollsLeft}`);
         if (player.luckRedraws > 0) abilities.push(`Redraws: ${player.luckRedraws}`);
         if (player.regulatedProperty !== null) {
-          abilities.push(`Regulated: ${BOARD_SPACES[player.regulatedProperty].name}`);
+          abilities.push(`Regulated: ${this.boardSpaces[player.regulatedProperty].name}`);
         }
         if (abilities.length > 0) {
           html += `<div class="player-abilities">${abilities.join(' | ')}</div>`;
@@ -776,7 +898,7 @@ class MonopolyBoard {
 
     // Buy/pass
     if (G.canBuy) {
-      const space = BOARD_SPACES[player.position];
+      const space = this.boardSpaces[player.position];
       const price = G.effectivePrice || space.price;
       html += `<button id="btn-buy" class="btn btn-success">\u{1F3E0} Buy ${space.name} ($${price})</button>`;
       html += `<button id="btn-pass" class="btn btn-secondary">Pass</button>`;
@@ -784,7 +906,7 @@ class MonopolyBoard {
 
     // Auction UI
     if (G.auction && G.turnPhase === 'auction') {
-      const auctionSpace = BOARD_SPACES[G.auction.propertyId];
+      const auctionSpace = this.boardSpaces[G.auction.propertyId];
       const currentBidder = G.auction.bidders[G.auction.currentBidderIndex];
       const bidderPlayer = G.players[currentBidder.playerId];
       const bidderName = bidderPlayer.character ? bidderPlayer.character.name : `Player ${parseInt(currentBidder.playerId) + 1}`;
@@ -820,7 +942,7 @@ class MonopolyBoard {
           <div class="trade-side">
             <strong>${proposerName} offers:</strong>
             <ul>
-              ${G.trade.offeredProperties.map(pid => `<li>${BOARD_SPACES[pid].name}</li>`).join('') || '<li>No properties</li>'}
+              ${G.trade.offeredProperties.map(pid => `<li>${this.boardSpaces[pid].name}</li>`).join('') || '<li>No properties</li>'}
               ${G.trade.offeredMoney > 0 ? `<li>$${G.trade.offeredMoney}</li>` : ''}
             </ul>
           </div>
@@ -828,7 +950,7 @@ class MonopolyBoard {
           <div class="trade-side">
             <strong>${targetName} gives:</strong>
             <ul>
-              ${G.trade.requestedProperties.map(pid => `<li>${BOARD_SPACES[pid].name}</li>`).join('') || '<li>No properties</li>'}
+              ${G.trade.requestedProperties.map(pid => `<li>${this.boardSpaces[pid].name}</li>`).join('') || '<li>No properties</li>'}
               ${G.trade.requestedMoney > 0 ? `<li>$${G.trade.requestedMoney}</li>` : ''}
             </ul>
           </div>
@@ -868,7 +990,7 @@ class MonopolyBoard {
     if (G.hasRolled && !G.canBuy && !G.pendingCard && player.properties.length > 0) {
       html += '<div class="prop-management"><h4>Manage Properties</h4>';
       player.properties.forEach(pid => {
-        const space = BOARD_SPACES[pid];
+        const space = this.boardSpaces[pid];
         const level = G.buildings[pid] || 0;
         const mortgaged = G.mortgaged[pid] || false;
         const bIcon = level > 0 ? BUILDING_ICONS[level] + ' ' : '';
@@ -884,8 +1006,8 @@ class MonopolyBoard {
           html += `<button class="btn-small btn-unmortgage" data-pid="${pid}" title="Unmortgage for $${cost}">Unmortgage $${cost}</button>`;
         } else {
           // Upgrade check
-          if (space.type === 'property' && space.color && COLOR_GROUPS[space.color]) {
-            const groupIds = COLOR_GROUPS[space.color];
+          if (space.type === 'property' && space.color && this.colorGroups[space.color]) {
+            const groupIds = this.colorGroups[space.color];
             const ownsGroup = groupIds.every(id => G.ownership[id] === ctx.currentPlayer);
             const minLevel = Math.min(...groupIds.map(id => G.buildings[id] || 0));
             const noMortgaged = !groupIds.some(id => G.mortgaged[id]);
@@ -897,8 +1019,8 @@ class MonopolyBoard {
           // Sell building check (even-building in reverse: can only sell from highest in group)
           if (level > 0) {
             let canSell = true;
-            if (space.color && COLOR_GROUPS[space.color]) {
-              const groupIds = COLOR_GROUPS[space.color];
+            if (space.color && this.colorGroups[space.color]) {
+              const groupIds = this.colorGroups[space.color];
               const maxLevel = Math.max(...groupIds.map(id => G.buildings[id] || 0));
               if (level < maxLevel) canSell = false;
             }
@@ -908,8 +1030,8 @@ class MonopolyBoard {
           }
           // Mortgage check (no buildings on this or group)
           let canMortgage = true;
-          if (space.color && COLOR_GROUPS[space.color]) {
-            canMortgage = !COLOR_GROUPS[space.color].some(id => (G.buildings[id] || 0) > 0);
+          if (space.color && this.colorGroups[space.color]) {
+            canMortgage = !this.colorGroups[space.color].some(id => (G.buildings[id] || 0) > 0);
           }
           if (canMortgage && level === 0) {
             const val = Math.floor(space.price * RULES.core.mortgageRate);
