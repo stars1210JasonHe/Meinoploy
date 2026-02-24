@@ -5,6 +5,7 @@ import { PLAYER_COLORS, BUILDING_ICONS, BUILDING_NAMES, UPGRADE_COST_MULTIPLIERS
 import { CHARACTERS, getLoreById, RULES } from '../mods/dominion';
 import { Lobby } from './Lobby';
 import { loadMap, getGridDimensions, positionsToGrid } from './map-loader';
+import { CharacterAI, EVENT_TYPES, VERBOSITY } from './character-ai';
 import classicMapJson from '../mods/dominion/maps/classic/map.json';
 import stuttgartMapJson from '../mods/dominion/maps/stuttgart-fracture-loop/map.json';
 import outerRimMapJson from '../mods/dominion/maps/outer-rim-station/map.json';
@@ -51,6 +52,17 @@ class MonopolyBoard {
     this.mode = null; // 'local' or 'online'
     this.onlinePlayerID = null;
     this.setMap(classicMapJson);
+
+    // AI system
+    const savedKey = localStorage.getItem('meinopoly_ai_key') || '';
+    const savedVerbosity = localStorage.getItem('meinopoly_ai_verbosity') || VERBOSITY.MAJOR;
+    this.characterAI = new CharacterAI(savedKey, { verbosity: savedVerbosity });
+    this.aiResponses = []; // { charName, charColor, portrait, text }
+    this.chatHistories = {}; // { charId: [{ role, content }] }
+    this.activeChatCharId = null;
+    this._prevMessages = []; // Previous messages array for event detection
+    this._prevSeasonIdx = undefined;
+
     this.createLayout();
     this.showModeSelect();
   }
@@ -70,6 +82,7 @@ class MonopolyBoard {
     this.seasonDisplayEl.style.display = 'none';
     this.lobbyEl.style.display = 'none';
     this.playerCountEl.style.display = 'block';
+    if (this.exitBtnEl) this.exitBtnEl.style.display = 'none';
 
     this.playerCountEl.innerHTML = `
       <div class="count-select-header">
@@ -190,6 +203,7 @@ class MonopolyBoard {
   startOnlineGame(serverUrl, matchID, playerID, credentials, numPlayers) {
     this.lobbyEl.style.display = 'none';
     this.onlinePlayerID = playerID;
+    this.exitBtnEl.style.display = '';
     this.client = Client({
       game: Monopoly,
       numPlayers: numPlayers,
@@ -205,6 +219,7 @@ class MonopolyBoard {
 
   startGameWithPlayers(numPlayers) {
     this.playerCountEl.style.display = 'none';
+    this.exitBtnEl.style.display = '';
     this.client = Client({
       game: Monopoly,
       numPlayers: numPlayers,
@@ -220,7 +235,9 @@ class MonopolyBoard {
         <div class="header">
           <h1>\u{1F3E0} MEINOPOLY \u{1F3E0}</h1>
           <div class="header-buttons">
+            <button id="btn-exit-game" class="btn-header btn-header-exit" style="display:none;">Exit Game</button>
             <button id="btn-load-menu" class="btn-header">Load Game</button>
+            <button id="btn-ai-settings" class="btn-header">AI Settings</button>
           </div>
           <div id="season-display" class="season-display"></div>
         </div>
@@ -239,12 +256,39 @@ class MonopolyBoard {
             <div id="dice-area"></div>
             <div id="actions"></div>
             <div id="messages"></div>
+            <div id="ai-responses"></div>
+            <div id="chat-panel"></div>
           </div>
         </div>
         <div id="lore-modal" class="lore-modal">
           <div class="lore-modal-content">
             <button class="lore-close">&times;</button>
             <div id="lore-body"></div>
+          </div>
+        </div>
+        <div id="ai-settings-modal" class="ai-settings-modal">
+          <div class="ai-settings-content">
+            <button class="lore-close" id="btn-ai-close">&times;</button>
+            <h3>AI Character Settings</h3>
+            <div id="ai-status-display"></div>
+            <div class="ai-field">
+              <label>OpenAI API Key</label>
+              <input type="password" id="ai-key-input" placeholder="sk-..." />
+              <div class="ai-hint">Stored locally in your browser. Never sent anywhere except OpenAI.</div>
+            </div>
+            <div class="ai-field">
+              <label>Character Response Verbosity</label>
+              <select id="ai-verbosity-select">
+                <option value="off">Off (no AI responses)</option>
+                <option value="major">Major events only (recommended)</option>
+                <option value="all">All events</option>
+              </select>
+              <div class="ai-hint">Controls how often characters comment on game events.</div>
+            </div>
+            <div class="ai-settings-actions">
+              <button id="btn-ai-save" class="btn btn-success" style="width:auto;display:inline-block;">Save</button>
+              <button id="btn-ai-cancel" class="btn btn-secondary" style="width:auto;display:inline-block;">Cancel</button>
+            </div>
           </div>
         </div>
       </div>
@@ -256,15 +300,21 @@ class MonopolyBoard {
     this.gameAreaEl = document.getElementById('game-area');
     this.seasonDisplayEl = document.getElementById('season-display');
 
-    // Load menu button
+    // Header buttons
+    this.exitBtnEl = document.getElementById('btn-exit-game');
+    this.exitBtnEl.onclick = () => this.exitToMenu();
     document.getElementById('btn-load-menu').onclick = () => this.toggleLoadPanel();
+    document.getElementById('btn-ai-settings').onclick = () => this.showAISettings();
     this.boardEl = document.getElementById('board');
     this.playerInfoEl = document.getElementById('player-info');
     this.diceAreaEl = document.getElementById('dice-area');
     this.actionsEl = document.getElementById('actions');
     this.messagesEl = document.getElementById('messages');
+    this.aiResponsesEl = document.getElementById('ai-responses');
+    this.chatPanelEl = document.getElementById('chat-panel');
     this.loreModalEl = document.getElementById('lore-modal');
     this.loreBodyEl = document.getElementById('lore-body');
+    this.aiSettingsModalEl = document.getElementById('ai-settings-modal');
 
     // Close lore modal on backdrop or X click
     this.loreModalEl.addEventListener('click', (e) => {
@@ -272,6 +322,15 @@ class MonopolyBoard {
         this.hideLoreModal();
       }
     });
+
+    // Close AI settings modal on backdrop or X click
+    this.aiSettingsModalEl.addEventListener('click', (e) => {
+      if (e.target.classList.contains('ai-settings-modal') || e.target.id === 'btn-ai-close') {
+        this.hideAISettings();
+      }
+    });
+    document.getElementById('btn-ai-cancel').onclick = () => this.hideAISettings();
+    document.getElementById('btn-ai-save').onclick = () => this.saveAISettings();
   }
 
   update(state) {
@@ -290,12 +349,15 @@ class MonopolyBoard {
       this.charSelectEl.style.display = 'none';
       this.gameAreaEl.style.display = 'flex';
       this.seasonDisplayEl.style.display = 'flex';
+      this.detectAndTriggerAI(G, ctx);
       this.renderSeason(G);
       this.renderBoard(G, ctx);
       this.renderPlayerInfo(G, ctx);
       this.renderDice(G);
       this.renderActions(G, ctx);
       this.renderMessages(G);
+      this._renderAIResponses();
+      this.renderChatPanel(G, ctx);
     }
   }
 
@@ -344,6 +406,8 @@ class MonopolyBoard {
             <div class="char-money">Starting: $${startMoney}</div>
             ${taken ? `<div class="char-taken">TAKEN${takenLabel}</div>` : ''}
             <button class="char-lore-btn" data-char-id="${char.id}">View Lore</button>
+            ${this.characterAI.apiKey ? `<button class="char-chat-btn" data-char-id="${char.id}">Ask AI</button>` : ''}
+            <div id="char-chat-${char.id}" class="char-select-chat" style="display:none;"></div>
           </div>
         </div>`;
     });
@@ -377,6 +441,16 @@ class MonopolyBoard {
       btn.onclick = (e) => {
         e.stopPropagation();
         this.showLoreModal(btn.dataset.charId);
+      };
+    });
+
+    // AI intro button handlers
+    this.charSelectEl.querySelectorAll('.char-chat-btn').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const chatEl = document.getElementById('char-chat-' + btn.dataset.charId);
+        if (chatEl) chatEl.style.display = 'block';
+        this._charSelectIntro(btn.dataset.charId);
       };
     });
   }
@@ -447,6 +521,371 @@ class MonopolyBoard {
   hideLoreModal() {
     this.loreModalEl.style.display = 'none';
     document.body.style.overflow = '';
+  }
+
+  // ── AI Settings ──────────────────────────────────────
+  showAISettings() {
+    const keyInput = document.getElementById('ai-key-input');
+    const verbSelect = document.getElementById('ai-verbosity-select');
+    keyInput.value = this.characterAI.apiKey;
+    verbSelect.value = this.characterAI.verbosity;
+
+    const statusEl = document.getElementById('ai-status-display');
+    if (this.characterAI.apiKey) {
+      statusEl.innerHTML = '<span class="ai-status connected">Connected</span>';
+    } else {
+      statusEl.innerHTML = '<span class="ai-status disconnected">No API key</span>';
+    }
+
+    this.aiSettingsModalEl.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+
+  hideAISettings() {
+    this.aiSettingsModalEl.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+
+  saveAISettings() {
+    const key = document.getElementById('ai-key-input').value.trim();
+    const verbosity = document.getElementById('ai-verbosity-select').value;
+    this.characterAI.setApiKey(key);
+    this.characterAI.setVerbosity(verbosity);
+    localStorage.setItem('meinopoly_ai_key', key);
+    localStorage.setItem('meinopoly_ai_verbosity', verbosity);
+    this.hideAISettings();
+  }
+
+  // ── AI Event Detection ───────────────────────────────
+  detectAndTriggerAI(G, ctx) {
+    if (!this.characterAI.isEnabled()) return;
+    if (G.phase !== 'play') return;
+
+    // Snapshot current messages for comparison
+    const currentMessages = G.messages.slice();
+    const prevMessages = this._prevMessages || [];
+    this._prevMessages = currentMessages;
+    const prevSeasonIndex = this._prevSeasonIdx;
+    this._prevSeasonIdx = G.seasonIndex;
+
+    if (prevMessages.length === 0 && currentMessages.length === 0) return;
+
+    const player = G.players[ctx.currentPlayer];
+    const char = player.character;
+    if (!char) return;
+
+    const gameState = {
+      turnNumber: G.totalTurns,
+      season: SEASONS[G.seasonIndex] ? SEASONS[G.seasonIndex].name : '',
+      money: player.money,
+      propertyCount: player.properties.length,
+    };
+
+    // Find new messages by comparing content (handles array replacement on new turns)
+    let newMessages = [];
+    if (currentMessages.length >= prevMessages.length &&
+        currentMessages.slice(0, prevMessages.length).every((m, i) => m === prevMessages[i])) {
+      // Messages were appended
+      newMessages = currentMessages.slice(prevMessages.length);
+    } else {
+      // Messages were replaced (new turn) — all current messages are new
+      newMessages = currentMessages;
+    }
+
+    if (newMessages.length === 0 && G.seasonIndex === prevSeasonIndex) return;
+
+    // Parse new messages to determine event types
+    for (const msg of newMessages) {
+      const lowerMsg = msg.toLowerCase();
+      let eventType = null;
+      let eventData = {};
+
+      if (lowerMsg.includes('rolled') && lowerMsg.includes('+')) {
+        eventType = EVENT_TYPES.ROLL_DICE;
+        if (G.lastDice) {
+          eventData = { d1: G.lastDice.d1, d2: G.lastDice.d2, total: G.lastDice.total, isDoubles: G.lastDice.isDoubles };
+        }
+      } else if (lowerMsg.includes('available') && (lowerMsg.includes('buy or pass') || lowerMsg.includes('listed'))) {
+        eventType = EVENT_TYPES.LAND_PROPERTY_BUY;
+        eventData = { spaceName: msg, price: 0, money: player.money };
+      } else if (lowerMsg.includes('bought') || lowerMsg.includes('purchased')) {
+        eventType = EVENT_TYPES.BUY_PROPERTY;
+        eventData = { spaceName: msg.split('bought ')[1] || msg };
+      } else if (lowerMsg.includes('paid') && lowerMsg.includes('rent')) {
+        eventType = EVENT_TYPES.LAND_PROPERTY_RENT;
+        eventData = { spaceName: msg, ownerName: '', rent: 0 };
+      } else if (lowerMsg.includes('tax')) {
+        eventType = EVENT_TYPES.PAY_TAX;
+        eventData = { amount: 0 };
+      } else if (lowerMsg.includes('drew a') || lowerMsg.includes('card:')) {
+        eventType = EVENT_TYPES.DRAW_CARD;
+        eventData = { cardText: msg };
+      } else if (lowerMsg.includes('sent to jail') || lowerMsg.includes('go to jail')) {
+        eventType = EVENT_TYPES.GO_TO_JAIL;
+        eventData = { reason: msg };
+      } else if (lowerMsg.includes('passed go') || lowerMsg.includes('collects')) {
+        eventType = EVENT_TYPES.PASS_GO;
+        eventData = { amount: RULES.core.goSalary };
+      } else if (lowerMsg.includes('upgraded') || lowerMsg.includes('built')) {
+        eventType = EVENT_TYPES.UPGRADE_PROPERTY;
+        eventData = { spaceName: msg };
+      } else if (lowerMsg.includes('auction')) {
+        eventType = EVENT_TYPES.AUCTION_START;
+        eventData = { spaceName: msg };
+      } else if (lowerMsg.includes('trade') && lowerMsg.includes('propos')) {
+        eventType = EVENT_TYPES.TRADE_PROPOSED;
+        eventData = { targetName: msg };
+      } else if (lowerMsg.includes('bankrupt')) {
+        eventType = EVENT_TYPES.BANKRUPTCY;
+        eventData = { playerName: msg };
+      }
+
+      if (eventType) {
+        this._triggerAIResponse(char, eventType, eventData, gameState);
+      }
+    }
+
+    // Season change detection
+    if (prevSeasonIndex !== undefined && G.seasonIndex !== prevSeasonIndex) {
+      const newSeason = SEASONS[G.seasonIndex] ? SEASONS[G.seasonIndex].name : '';
+      this._triggerAIResponse(char, EVENT_TYPES.SEASON_CHANGE, { newSeason }, gameState);
+    }
+  }
+
+  async _triggerAIResponse(char, eventType, eventData, gameState) {
+    const lore = getLoreById(char.id);
+
+    // Add loading indicator
+    this._nextAIId = (this._nextAIId || 0) + 1;
+    const loadingId = this._nextAIId;
+    this.aiResponses.push({
+      id: loadingId,
+      charName: char.name,
+      charColor: char.color,
+      portrait: char.portrait,
+      text: null, // null = loading
+    });
+    this._renderAIResponses();
+
+    const text = await this.characterAI.respondToEvent(char, lore, eventType, eventData, gameState);
+
+    // Update the loading entry with the actual response
+    const entry = this.aiResponses.find(r => r.id === loadingId);
+    if (entry) {
+      if (text) {
+        entry.text = text;
+      } else {
+        // Remove failed/null responses
+        this.aiResponses = this.aiResponses.filter(r => r.id !== loadingId);
+      }
+    }
+
+    // Keep only last 8 responses
+    if (this.aiResponses.length > 8) {
+      this.aiResponses = this.aiResponses.slice(-8);
+    }
+
+    this._renderAIResponses();
+  }
+
+  _renderAIResponses() {
+    if (!this.aiResponsesEl) return;
+    if (this.aiResponses.length === 0) {
+      this.aiResponsesEl.innerHTML = '';
+      return;
+    }
+
+    let html = '';
+    this.aiResponses.forEach(r => {
+      const avatar = r.portrait
+        ? `<img class="ai-response-avatar" src="${r.portrait}" alt="${r.charName}" />`
+        : `<div class="ai-response-avatar-placeholder" style="background:${r.charColor}">${r.charName[0]}</div>`;
+
+      const textHtml = r.text === null
+        ? '<div class="ai-response-loading">Thinking...</div>'
+        : `<div class="ai-response-text">${this._escapeHtml(r.text)}</div>`;
+
+      html += `<div class="ai-response">
+        ${avatar}
+        <div class="ai-response-body">
+          <div class="ai-response-name" style="color:${r.charColor}">${r.charName}</div>
+          ${textHtml}
+        </div>
+      </div>`;
+    });
+
+    this.aiResponsesEl.innerHTML = html;
+  }
+
+  _escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  // ── Chat Panel ───────────────────────────────────────
+  renderChatPanel(G, ctx) {
+    if (!this.chatPanelEl) return;
+    if (!G || G.phase !== 'play') {
+      this.chatPanelEl.innerHTML = '';
+      return;
+    }
+
+    // Build list of chattable characters
+    const chars = G.players
+      .filter(p => p.character)
+      .map(p => p.character);
+
+    if (chars.length === 0) {
+      this.chatPanelEl.innerHTML = '';
+      return;
+    }
+
+    // Default to current player's character
+    if (!this.activeChatCharId || !chars.find(c => c.id === this.activeChatCharId)) {
+      this.activeChatCharId = chars[0].id;
+    }
+
+    const activeChar = chars.find(c => c.id === this.activeChatCharId);
+    const history = this.chatHistories[this.activeChatCharId] || [];
+
+    // Tabs
+    let tabsHtml = '';
+    chars.forEach(c => {
+      const isActive = c.id === this.activeChatCharId;
+      tabsHtml += `<div class="chat-tab ${isActive ? 'active' : ''}" data-chat-char="${c.id}" style="${isActive ? '' : 'border-color:' + c.color + '33;'}">${c.name.split(' ')[0]}</div>`;
+    });
+
+    // Messages
+    let msgsHtml = '';
+    if (history.length === 0) {
+      msgsHtml = '<div class="chat-empty">Start a conversation with ' + activeChar.name + '</div>';
+    } else {
+      history.forEach(msg => {
+        if (msg.role === 'user') {
+          msgsHtml += `<div class="chat-msg user"><div class="chat-sender">You</div>${this._escapeHtml(msg.content)}</div>`;
+        } else {
+          msgsHtml += `<div class="chat-msg ai"><div class="chat-sender" style="color:${activeChar.color}">${activeChar.name}</div>${this._escapeHtml(msg.content)}</div>`;
+        }
+      });
+    }
+
+    const disabled = !this.characterAI.apiKey ? 'disabled' : '';
+    const placeholder = !this.characterAI.apiKey ? 'Set API key in AI Settings first' : 'Type a message...';
+
+    this.chatPanelEl.innerHTML = `
+      <div class="chat-panel">
+        <h3>Chat</h3>
+        <div class="chat-tabs">${tabsHtml}</div>
+        <div class="chat-messages" id="chat-messages-scroll">${msgsHtml}</div>
+        <div class="chat-input-row">
+          <input class="chat-input" id="chat-input" type="text" placeholder="${placeholder}" ${disabled} />
+          <button class="btn-chat-send" id="btn-chat-send" ${disabled}>Send</button>
+        </div>
+      </div>`;
+
+    // Auto-scroll to bottom
+    const scrollEl = document.getElementById('chat-messages-scroll');
+    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+
+    // Tab click handlers
+    this.chatPanelEl.querySelectorAll('.chat-tab').forEach(tab => {
+      tab.onclick = () => {
+        this.activeChatCharId = tab.dataset.chatChar;
+        this.renderChatPanel(G, ctx);
+      };
+    });
+
+    // Send handler
+    const inputEl = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('btn-chat-send');
+    const sendMessage = () => {
+      const text = inputEl.value.trim();
+      if (!text) return;
+      inputEl.value = '';
+      this._sendChat(this.activeChatCharId, text, G, ctx);
+    };
+    if (sendBtn) sendBtn.onclick = sendMessage;
+    if (inputEl) inputEl.onkeydown = (e) => { if (e.key === 'Enter') sendMessage(); };
+  }
+
+  async _sendChat(charId, userMessage, G, ctx) {
+    const char = CHARACTERS.find(c => c.id === charId);
+    if (!char) return;
+    const lore = getLoreById(charId);
+
+    // Initialize history for this character if needed
+    if (!this.chatHistories[charId]) this.chatHistories[charId] = [];
+    const history = this.chatHistories[charId];
+
+    // Add user message
+    history.push({ role: 'user', content: userMessage });
+    this.renderChatPanel(G, ctx);
+
+    // Build game state context
+    const player = G.players[ctx.currentPlayer];
+    const gameState = {
+      turnNumber: G.totalTurns,
+      season: SEASONS[G.seasonIndex] ? SEASONS[G.seasonIndex].name : '',
+      money: player.money,
+      propertyCount: player.properties.length,
+      otherPlayers: G.players
+        .filter(p => p.character && p.id !== ctx.currentPlayer && !p.bankrupt)
+        .map(p => `${p.character.name} ($${p.money}, ${p.properties.length} props)`)
+        .join('; '),
+      lastEvent: G.messages.length > 0 ? G.messages[G.messages.length - 1] : '',
+    };
+
+    const response = await this.characterAI.chat(char, lore, userMessage, history.slice(0, -1), gameState);
+    if (response) {
+      history.push({ role: 'assistant', content: response });
+    } else {
+      history.push({ role: 'assistant', content: '(No response — check your API key in AI Settings)' });
+    }
+
+    this.renderChatPanel(G, ctx);
+  }
+
+  // ── Character Selection Chat ─────────────────────────
+  async _charSelectIntro(charId) {
+    if (!this.characterAI.apiKey) return;
+
+    const char = CHARACTERS.find(c => c.id === charId);
+    if (!char) return;
+    const lore = getLoreById(charId);
+
+    // Set loading state
+    const chatEl = document.getElementById('char-chat-' + charId);
+    if (chatEl) chatEl.innerHTML = '<div class="char-select-chat-loading">Thinking...</div>';
+
+    const text = await this.characterAI.introduce(char, lore);
+    const el = document.getElementById('char-chat-' + charId);
+    if (el) {
+      if (text) {
+        el.innerHTML = `<div class="char-select-chat-text">"${this._escapeHtml(text)}"</div>`;
+      } else {
+        el.innerHTML = '';
+      }
+    }
+  }
+
+  exitToMenu() {
+    if (this.client) {
+      this.client.stop();
+      this.client = null;
+    }
+    this.onlinePlayerID = null;
+    this._themeApplied = false;
+    this.aiResponses = [];
+    this.chatHistories = {};
+    this.activeChatCharId = null;
+    this._prevMessages = [];
+    this._prevSeasonIdx = undefined;
+    if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
+    if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
+    this.exitBtnEl.style.display = 'none';
+    this.setMap(classicMapJson);
+    this.showModeSelect();
   }
 
   showTradeModal(G, ctx) {
