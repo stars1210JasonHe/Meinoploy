@@ -471,6 +471,7 @@ class MonopolyBoard {
     this._showScreen('game');
     this.detectAndTriggerAI(G, ctx);
     this.renderBoard(G, ctx);
+    this.renderTokens(G);
     this.renderPlayerInfo(G, ctx);
     this.renderTurnbox(G, ctx);
     this.renderManage(G, ctx);
@@ -652,18 +653,15 @@ class MonopolyBoard {
     }
     const mort = mortgaged ? '<div class="tile__mort">M</div>' : '';
 
-    const tokens = G.players
-      .filter(p => !p.bankrupt && p.position === spaceId)
-      .map(p => tokenHtml(this._playerColor(G, p.id), p.character ? p.character.name[0] : (parseInt(p.id) + 1), true))
-      .join('');
-    const tokensHtml = tokens ? `<div class="tile__tokens">${tokens}</div>` : '';
+    // Tokens are NOT rendered into tiles — they live in the persistent
+    // #token-layer overlay (see renderTokens), so they survive grid rebuilds.
 
     const pot = (space.type === 'parking' && RULES.core.freeParkingPot && G.freeParkingPot > 0)
       ? `<div class="tile__pot">$${G.freeParkingPot}</div>` : '';
 
     const cls = `tile tile--${edge} ${isCorner ? 'tile--corner' : ''} ${mortgaged ? 'tile--mortgaged' : ''} ${opts.abs ? 'tile--abs' : ''} tile--click`;
     const style = opts.style ? ` style="${opts.style}"` : '';
-    return `<div class="${cls}" data-space="${spaceId}"${style}>${bar}<div class="tile__inner">${glyph}<span class="tile__name">${esc(space.name)}</span>${price}</div>${owned}${mort}${tokensHtml}${pot}</div>`;
+    return `<div class="${cls}" data-space="${spaceId}"${style}>${bar}<div class="tile__inner">${glyph}<span class="tile__name">${esc(space.name)}</span>${price}</div>${owned}${mort}${pot}</div>`;
   }
 
   _playerColor(G, id) {
@@ -735,6 +733,88 @@ class MonopolyBoard {
     }
     const center = `<div class="board__center board__center--abs">${this._centerHtml(G, ctx)}</div>`;
     this._gridWrap.innerHTML = `<div class="board__grid board__grid--absolute">${tiles}${center}</div>`;
+  }
+
+  // Returns {x, y} as PERCENT of the board element, for positioning overlay tokens.
+  // Absolute layouts use the map's percent positions directly; the CSS-grid square
+  // layout measures the tile's rect relative to the board (layout must be settled).
+  getSpaceCenter(spaceId) {
+    if (this.mapData.layoutType !== 'square') {
+      const pos = this.mapData.positions[spaceId];
+      return pos ? { x: pos.x, y: pos.y } : { x: 50, y: 50 };
+    }
+    // square/grid: measure the tile rect relative to the board
+    const tile = this.boardEl.querySelector(`.tile[data-space="${spaceId}"]`);
+    if (!tile) return { x: 50, y: 50 };
+    const b = this.boardEl.getBoundingClientRect();
+    const t = tile.getBoundingClientRect();
+    if (!b.width || !b.height) return { x: 50, y: 50 };
+    return {
+      x: ((t.left + t.width / 2) - b.left) / b.width * 100,
+      y: ((t.top + t.height / 2) - b.top) / b.height * 100,
+    };
+  }
+
+  // Persistent token overlay: keep one .token node per non-bankrupt player in
+  // #token-layer, repositioning (not rebuilding) it each tick via getSpaceCenter.
+  renderTokens(G) {
+    if (!this._tokenLayer) return;
+    this._lastG = G;
+    this._ensureTokenResizeObserver();
+
+    const active = G.players.filter(p => !p.bankrupt);
+    // group players by tile to offset stacked tokens
+    const byTile = {};
+    active.forEach(p => { (byTile[p.position] = byTile[p.position] || []).push(p); });
+
+    const liveIds = new Set(active.map(p => String(p.id)));
+    // remove token nodes for players no longer active (bankrupt / gone)
+    this._tokenLayer.querySelectorAll('.token[data-player]').forEach(el => {
+      if (!liveIds.has(el.dataset.player)) el.remove();
+    });
+
+    const isSquare = this.mapData.layoutType === 'square';
+    const hasTiles = isSquare ? this.boardEl.querySelector('.tile[data-space]') : true;
+    let needsRetry = false;
+
+    active.forEach(p => {
+      const id = String(p.id);
+      let el = this._tokenLayer.querySelector(`.token[data-player="${id}"]`);
+      if (!el) {
+        el = document.createElement('span');
+        el.className = 'token token--sm';
+        el.dataset.player = id;
+        this._tokenLayer.appendChild(el);
+      }
+      const color = this._playerColor(G, id);
+      const label = p.character ? p.character.name[0] : (parseInt(id) + 1);
+      el.style.setProperty('--tcol', color);
+      el.textContent = label;
+      const c = this.getSpaceCenter(p.position);
+      // measured grid center fell back to {50,50} while tiles exist → layout not settled
+      if (isSquare && hasTiles && c.x === 50 && c.y === 50) needsRetry = true;
+      // small cluster offset when multiple players share a tile
+      const peers = byTile[p.position];
+      const idx = peers.indexOf(p);
+      const off = (idx - (peers.length - 1) / 2) * 3; // % offset
+      el.style.left = (c.x + off) + '%';
+      el.style.top = (c.y + off) + '%';
+    });
+
+    // retry once on next frame if a square-board measurement was unsettled
+    if (needsRetry && !this._tokenRetried) {
+      this._tokenRetried = true;
+      requestAnimationFrame(() => { this._tokenRetried = false; if (this._lastG) this.renderTokens(this._lastG); });
+    }
+  }
+
+  // Reposition tokens when the board resizes (measured grid centers change).
+  _ensureTokenResizeObserver() {
+    if (this._tokenResizeObs || typeof ResizeObserver === 'undefined' || !this.boardEl) return;
+    this._tokenResizeObs = new ResizeObserver(() => {
+      if (this._lastG) this.renderTokens(this._lastG);
+    });
+    this._tokenResizeObs.observe(this.boardEl);
   }
 
   // ─────────────────────────────────────────────────────────
@@ -1528,6 +1608,8 @@ class MonopolyBoard {
   // ─────────────────────────────────────────────────────────
   exitToMenu() {
     if (this.client) { this.client.stop(); this.client = null; }
+    if (this._tokenResizeObs) { this._tokenResizeObs.disconnect(); this._tokenResizeObs = null; }
+    this._lastG = null;
     this.onlinePlayerID = null;
     this._pendingCharId = null;
     this.aiResponses = [];
