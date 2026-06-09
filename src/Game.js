@@ -271,7 +271,7 @@ function handleBankruptcy(G, ctx, player, creditorId) {
 
 function handleLanding(G, ctx) {
   const player = G.players[ctx.currentPlayer];
-  const space = _boardSpaces[player.position];
+  const space = G.board.spaces[player.position];
   const messages = G.messages;
 
   switch (space.type) {
@@ -330,7 +330,7 @@ function handleLanding(G, ctx) {
     }
 
     case 'chance': {
-      const card = drawCard(ctx, _chanceCards);
+      const card = drawCard(ctx, G.board.chanceCards);
       messages.push(`CHANCE: ${card.text}`);
       // Check if player can redraw (Cassian passive OR luck redraws)
       const canRedraw = (getPassive(player) === 'merchant') ||
@@ -346,7 +346,7 @@ function handleLanding(G, ctx) {
     }
 
     case 'community': {
-      const card = drawCard(ctx, _communityCards);
+      const card = drawCard(ctx, G.board.communityCards);
       messages.push(`COMMUNITY CHEST: ${card.text}`);
       const canRedraw = (getPassive(player) === 'merchant') ||
                         (player.luckRedraws > 0 && ['pay', 'payPercent', 'downgrade', 'goToJail'].includes(card.action));
@@ -361,7 +361,7 @@ function handleLanding(G, ctx) {
     }
 
     case 'goToJail':
-      player.position = _jailPosition;
+      player.position = G.board.jail;
       player.inJail = true;
       player.jailTurns = 0;
       messages.push('Go to Jail!');
