@@ -1535,8 +1535,12 @@ class MonopolyBoard {
     const saves = JSON.parse(localStorage.getItem('meinopoly_saves') || '{}');
     saves[saveName] = saveData;
     localStorage.setItem('meinopoly_saves', JSON.stringify(saves));
-    G.messages.push(`Game saved: ${saveName}`);
-    this.renderMessages(G);
+    // G is boardgame.io's frozen live state — never mutate it here. Confirm via the button.
+    if (this.saveBtnEl) {
+      const prev = this.saveBtnEl.textContent;
+      this.saveBtnEl.textContent = 'SAVED ✓';
+      setTimeout(() => { if (this.saveBtnEl) this.saveBtnEl.textContent = prev; }, 1200);
+    }
   }
 
   static getSaves() { return JSON.parse(localStorage.getItem('meinopoly_saves') || '{}'); }
@@ -1549,7 +1553,7 @@ class MonopolyBoard {
   loadGame(saveData) {
     const savedMap = AVAILABLE_MAPS.find(m => m.id === saveData.mapId) || classicMapJson;
     this.setMap(savedMap);
-    this.client.stop();
+    if (this.client) this.client.stop(); // null when loading from the menu (no active game)
     const savedG = saveData.G;
     const LoadedGame = { ...Monopoly, setup: () => savedG };
     this.client = Client({ game: LoadedGame, numPlayers: saveData.numPlayers, debug: false });
