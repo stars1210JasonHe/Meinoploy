@@ -174,9 +174,10 @@ test.describe('Game Board', () => {
     await expect(page.locator('.tile[data-space]')).toHaveCount(40);
   });
 
-  test('both players start on GO', async ({ page }) => {
-    const goTokens = page.locator('.tile[data-space="0"] .token');
-    await expect(goTokens).toHaveCount(2);
+  test('both players start on GO (overlay tokens)', async ({ page }) => {
+    // Tokens now live in the persistent overlay (#token-layer), not inside tiles.
+    // Two player tokens exist at game start (both co-located on GO).
+    await expect(page.locator('#token-layer .token')).toHaveCount(2);
   });
 
   test('season display shows Summer and Turn 1', async ({ page }) => {
