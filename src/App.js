@@ -676,6 +676,19 @@ class MonopolyBoard {
     else this._renderAbsoluteBoard(G, ctx);
   }
 
+  // Ensure boardEl has two persistent children: a grid wrapper (rebuilt each
+  // render) and #token-layer (created once, never wiped — tokens survive grid
+  // rebuilds so they can be repositioned/animated). The grid-wrap uses
+  // display:contents so it's transparent to layout and .board__grid still fills .board.
+  _ensureBoardChildren() {
+    if (!this._gridWrap || this._gridWrap.parentElement !== this.boardEl
+        || !this._tokenLayer || this._tokenLayer.parentElement !== this.boardEl) {
+      this.boardEl.innerHTML = '<div class="board__grid-wrap"></div><div id="token-layer"></div>';
+      this._gridWrap = this.boardEl.querySelector('.board__grid-wrap');
+      this._tokenLayer = this.boardEl.querySelector('#token-layer');
+    }
+  }
+
   _renderSquareBoard(G, ctx) {
     const gridDims = getGridDimensions(this.mapData.spaceCount, 'square');
     const gridSize = gridDims.rows;
@@ -684,6 +697,7 @@ class MonopolyBoard {
     const gridPositions = positionsToGrid(this.mapData.positions, this.mapData.spaceCount);
 
     this.boardEl.className = 'board';
+    this._ensureBoardChildren();
     let tiles = '';
     for (let id = 0; id < this.mapData.spaceCount; id++) {
       const gp = gridPositions[id];
@@ -699,11 +713,12 @@ class MonopolyBoard {
       tiles += this._tileHtml(id, G, { edge, style: `grid-row:${row + 1};grid-column:${col + 1};` });
     }
     const center = `<div class="board__center" style="grid-row:2 / ${gridSize};grid-column:2 / ${gridSize};">${this._centerHtml(G, ctx)}</div>`;
-    this.boardEl.innerHTML = `<div class="board__grid" style="grid-template-columns:1.4fr repeat(${innerRepeat},1fr) 1.4fr;grid-template-rows:1.4fr repeat(${innerRepeat},1fr) 1.4fr;">${tiles}${center}</div>`;
+    this._gridWrap.innerHTML = `<div class="board__grid" style="grid-template-columns:1.4fr repeat(${innerRepeat},1fr) 1.4fr;grid-template-rows:1.4fr repeat(${innerRepeat},1fr) 1.4fr;">${tiles}${center}</div>`;
   }
 
   _renderAbsoluteBoard(G, ctx) {
     this.boardEl.className = 'board';
+    this._ensureBoardChildren();
     let tiles = '';
     for (let i = 0; i < this.mapData.spaceCount; i++) {
       const pos = this.mapData.positions[i];
@@ -719,7 +734,7 @@ class MonopolyBoard {
       tiles += this._tileHtml(i, G, { edge, abs: true, style });
     }
     const center = `<div class="board__center board__center--abs">${this._centerHtml(G, ctx)}</div>`;
-    this.boardEl.innerHTML = `<div class="board__grid board__grid--absolute">${tiles}${center}</div>`;
+    this._gridWrap.innerHTML = `<div class="board__grid board__grid--absolute">${tiles}${center}</div>`;
   }
 
   // ─────────────────────────────────────────────────────────

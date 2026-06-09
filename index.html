@@ -304,11 +304,15 @@
 
     /* board */
     .game__center { display:flex; justify-content:center; }
-    .board { width:min(74vh, 780px); aspect-ratio:1/1; }
+    .board { width:min(74vh, 780px); aspect-ratio:1/1; position:relative; }
+    .board__grid-wrap { display:contents; }
     .board__grid { display:grid; width:100%; height:100%; position:relative;
       background:#0c1f12; border:4px solid #07140a;
       box-shadow:var(--bevel), 6px 6px 0 rgba(0,0,0,.5); padding:3px; gap:2px; }
     .board__grid--absolute { display:block; }
+    /* persistent token overlay — survives grid rebuilds, repositioned each tick */
+    #token-layer { position:absolute; inset:0; pointer-events:none; z-index:5; }
+    #token-layer .token { position:absolute; transform:translate(-50%,-50%); }
     .tile { position:relative; background:var(--bg2); border:1.5px solid #060a14; overflow:hidden; display:flex; }
     .tile--corner { background:var(--bg3); }
     .tile--abs { position:absolute; transform:translate(-50%,-50%); }
