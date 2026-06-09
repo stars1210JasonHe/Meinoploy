@@ -11,6 +11,8 @@ var _chanceCards = DEFAULT_CHANCE_CARDS;
 var _communityCards = DEFAULT_COMMUNITY_CARDS;
 var _boardSize = RULES.core.boardSize;
 var _jailPosition = RULES.core.jailPosition;
+var _mapVictory = null;        // victory config from the active map (map.json)
+var _victoryOverride = null;   // per-session override from the game-start selector
 
 export function setActiveMap(mapData) {
   _boardSpaces = mapData.spaces;
@@ -19,6 +21,26 @@ export function setActiveMap(mapData) {
   _communityCards = mapData.communityCards;
   _boardSize = mapData.spaceCount;
   _jailPosition = mapData.specialSpaces.jail;
+  _mapVictory = mapData.victory || null;
+}
+
+// Set a per-session victory override (from the game-start selector). Pass null to clear.
+export function setVictoryConfig(cfg) {
+  _victoryOverride = cfg || null;
+}
+
+// Resolve the active victory config: session override > map config > rules defaults.
+// Stored into G.victory at setup() so scoring stays per-match (safe for concurrent games).
+function resolveVictory() {
+  const base = RULES.victory;
+  const map = _mapVictory || {};
+  const mapGroups = map.params && map.params.groupsToWin;
+  const ovr = _victoryOverride || {};
+  return {
+    primary: ovr.primary || map.primary || base.primary,
+    maxTurns: (ovr.maxTurns != null ? ovr.maxTurns : (map.maxTurns != null ? map.maxTurns : base.maxTurns)) || 0,
+    groupsToWin: ovr.groupsToWin || mapGroups || base.groupsToWin || 3,
+  };
 }
 
 function createPlayer(id) {
@@ -342,13 +364,39 @@ function handleLanding(G, ctx) {
 function getTotalAssets(G, player) {
   let total = player.money;
   player.properties.forEach(pid => {
-    total += _boardSpaces[pid].price;
+    // A mortgaged property is worth its mortgage value (what the bank paid out),
+    // not its full price — otherwise net worth overstates a mortgaged player.
+    const mortgaged = G.mortgaged && G.mortgaged[pid];
+    total += mortgaged
+      ? Math.floor(_boardSpaces[pid].price * RULES.core.mortgageRate)
+      : _boardSpaces[pid].price;
     const level = G.buildings[pid] || 0;
     for (let i = 1; i <= level; i++) {
       total += Math.floor(_boardSpaces[pid].price * RULES.buildings.upgradeCostMultipliers[i - 1]);
     }
   });
   return total;
+}
+
+// Number of color groups fully owned by a player (for the 'monopoly'/dominion win).
+function countFullGroups(G, playerId) {
+  let n = 0;
+  for (const color in _colorGroups) {
+    if (ownsColorGroup(G, playerId, color)) n++;
+  }
+  return n;
+}
+
+// Rank players by net worth, with a deterministic tie-break (assets → cash → id).
+function rankStandings(G, players) {
+  return players
+    .map(p => ({ id: p.id, score: getTotalAssets(G, p), props: p.properties.length, groups: countFullGroups(G, p.id) }))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const am = G.players[parseInt(a.id)].money, bm = G.players[parseInt(b.id)].money;
+      if (bm !== am) return bm - am;
+      return parseInt(a.id) - parseInt(b.id);
+    });
 }
 
 function applyCard(G, ctx, player, card) {
@@ -522,16 +570,31 @@ function applyCard(G, ctx, player, card) {
 }
 
 function checkGameOver(G) {
+  // Fallback default keeps manually-constructed test states (no setup) working.
+  const v = G.victory || { primary: 'wealth', maxTurns: 0, groupsToWin: RULES.victory.groupsToWin };
   const activePlayers = G.players.filter(p => !p.bankrupt);
+
+  // Last player standing always wins, regardless of primary mode.
   if (activePlayers.length === 1) {
-    return { winner: activePlayers[0].id };
+    return { winner: activePlayers[0].id, reason: 'survival', standings: rankStandings(G, activePlayers) };
   }
-  // Max turns: compare total assets
-  if (RULES.core.maxTurns > 0 && G.totalTurns >= RULES.core.maxTurns) {
-    const sorted = activePlayers
-      .map(p => ({ id: p.id, assets: getTotalAssets(G, p) }))
-      .sort((a, b) => b.assets - a.assets);
-    return { winner: sorted[0].id, reason: 'maxTurns' };
+  if (activePlayers.length === 0) return undefined;
+
+  // Dominion: first to own `groupsToWin` full color groups wins instantly.
+  if (v.primary === 'monopoly') {
+    const need = v.groupsToWin || RULES.victory.groupsToWin;
+    const achievers = activePlayers.filter(p => countFullGroups(G, p.id) >= need);
+    if (achievers.length > 0) {
+      const ranked = rankStandings(G, achievers); // tie → higher net worth
+      return { winner: ranked[0].id, reason: 'dominion', standings: rankStandings(G, activePlayers) };
+    }
+  }
+
+  // Turn cap: session/map victory.maxTurns overrides the global core.maxTurns.
+  const turnLimit = v.maxTurns > 0 ? v.maxTurns : RULES.core.maxTurns;
+  if (turnLimit > 0 && G.totalTurns >= turnLimit) {
+    const standings = rankStandings(G, activePlayers);
+    return { winner: standings[0].id, reason: 'maxTurns', standings };
   }
   return undefined;
 }
@@ -619,6 +682,7 @@ export const Monopoly = {
       trade: null,
       auction: null,
       freeParkingPot: 0,
+      victory: resolveVictory(),
     };
   },
 

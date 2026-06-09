@@ -131,6 +131,23 @@ export const RULES = {
     auctionOnPass: true,
   },
 
+  // ── Victory Conditions ──────────────────────────────────
+  // primary: how the winner is decided.
+  //   'survival' — last non-bankrupt player wins (last standing).
+  //   'wealth'   — highest net worth (used at the turn cap, or as a tie-break).
+  //   'monopoly' — first player to own `groupsToWin` full color groups wins instantly.
+  // maxTurns: 0 = no turn cap (falls back to core.maxTurns); >0 caps the game and
+  //   ranks players by net worth (mortgage-corrected) when reached.
+  // Per-map `victory` in map.json overrides these defaults; the game-start selector
+  // can override per session. The resolved config is stored in G.victory (per-match).
+  victory: {
+    primary: 'survival',
+    maxTurns: 0,
+    groupsToWin: 3,
+    // Phase B scaffolding (weighted wealth/influence/stability) — not yet scored.
+    weights: { wealth: 1, influence: 0, stability: 0 },
+  },
+
   // ── Turn Timer (placeholder) ────────────────────────────
   turnTimer: {
     enabled: false,

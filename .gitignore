@@ -7,3 +7,6 @@ __pycache__/
 *.pyc
 .env
 docs/
+screenshots/
+test-results/
+mods/dominion/portraits/ChatGPT Image*.png

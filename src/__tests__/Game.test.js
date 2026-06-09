@@ -618,7 +618,7 @@ describe('endIf', () => {
     G.players[0].bankrupt = true;
 
     const result = Monopoly.endIf(G, {});
-    expect(result).toEqual({ winner: '1' });
+    expect(result).toMatchObject({ winner: '1', reason: 'survival' });
   });
 
   test('returns undefined when game is still going', () => {
@@ -635,6 +635,98 @@ describe('endIf', () => {
 
     const result = Monopoly.endIf(G, {});
     expect(result).toBeUndefined();
+  });
+});
+
+// ─── VICTORY CONDITIONS (Phase A) ────────────────────────
+describe('victory conditions', () => {
+  test('setup stores a resolved victory config in G', () => {
+    const ctx = { numPlayers: 2, playOrder: ['0', '1'] };
+    const G = Monopoly.setup(ctx);
+    expect(G.victory).toBeDefined();
+    expect(typeof G.victory.primary).toBe('string');
+    expect(typeof G.victory.maxTurns).toBe('number');
+    expect(typeof G.victory.groupsToWin).toBe('number');
+  });
+
+  test('survival win returns reason and ranked standings', () => {
+    const G = freshG();
+    G.players[0].bankrupt = true;
+    const r = Monopoly.endIf(G, {});
+    expect(r).toMatchObject({ winner: '1', reason: 'survival' });
+    expect(Array.isArray(r.standings)).toBe(true);
+  });
+
+  test('net worth counts an un-mortgaged property at full price', () => {
+    const G = freshG();
+    G.victory = { primary: 'wealth', maxTurns: 1, groupsToWin: 3 };
+    G.totalTurns = 1;
+    G.players[0].money = 500;
+    G.players[1].money = 500;
+    G.players[1].properties = [1]; // Mediterranean Ave
+    G.ownership[1] = '1';
+    const r = Monopoly.endIf(G, {});
+    const s1 = r.standings.find(s => s.id === '1');
+    expect(s1.score).toBe(500 + BOARD_SPACES[1].price);
+  });
+
+  test('net worth counts a mortgaged property at mortgage value', () => {
+    const G = freshG();
+    G.victory = { primary: 'wealth', maxTurns: 1, groupsToWin: 3 };
+    G.totalTurns = 1;
+    G.players[0].money = 500;
+    G.players[1].money = 500;
+    G.players[1].properties = [1];
+    G.ownership[1] = '1';
+    G.mortgaged[1] = true;
+    const r = Monopoly.endIf(G, {});
+    const s1 = r.standings.find(s => s.id === '1');
+    expect(s1.score).toBe(500 + Math.floor(BOARD_SPACES[1].price * RULES.core.mortgageRate));
+  });
+
+  test('dominion: first to own groupsToWin full color groups wins instantly', () => {
+    const G = freshG();
+    G.victory = { primary: 'monopoly', maxTurns: 0, groupsToWin: 1 };
+    const brown = COLOR_GROUPS['#8B4513']; // [1, 3]
+    brown.forEach(id => { G.ownership[id] = '0'; G.players[0].properties.push(id); });
+    const r = Monopoly.endIf(G, {});
+    expect(r).toMatchObject({ winner: '0', reason: 'dominion' });
+  });
+
+  test('dominion: does not trigger below the group threshold', () => {
+    const G = freshG();
+    G.victory = { primary: 'monopoly', maxTurns: 0, groupsToWin: 2 };
+    const brown = COLOR_GROUPS['#8B4513'];
+    brown.forEach(id => { G.ownership[id] = '0'; G.players[0].properties.push(id); });
+    expect(Monopoly.endIf(G, {})).toBeUndefined();
+  });
+
+  test('maxTurns ranks by net worth and tie-breaks deterministically', () => {
+    const G = freshG();
+    G.victory = { primary: 'wealth', maxTurns: 2, groupsToWin: 3 };
+    G.totalTurns = 2;
+    G.players[0].money = 1500;
+    G.players[1].money = 1500; // exact tie → lower id wins
+    const r = Monopoly.endIf(G, {});
+    expect(r.reason).toBe('maxTurns');
+    expect(r.winner).toBe('0');
+    expect(r.standings.map(s => s.id)).toEqual(['0', '1']);
+  });
+
+  test('victory.maxTurns overrides core.maxTurns', () => {
+    const origMax = RULES.core.maxTurns;
+    try {
+      RULES.core.maxTurns = 0; // global cap off
+      const G = freshG();
+      G.victory = { primary: 'wealth', maxTurns: 3, groupsToWin: 3 };
+      G.totalTurns = 3;
+      G.players[0].money = 2000;
+      G.players[1].money = 1000;
+      const r = Monopoly.endIf(G, {});
+      expect(r).toMatchObject({ winner: '0', reason: 'maxTurns' });
+    } finally {
+      RULES.core.maxTurns = origMax;
+    }
   });
 });
 
@@ -2317,7 +2409,7 @@ describe('N-Player support', () => {
     // Bankrupt player 4 too, leaving only 0
     G.players[4].bankrupt = true;
     const result = Monopoly.endIf(G, { numPlayers: 5 });
-    expect(result).toEqual({ winner: '0' });
+    expect(result).toMatchObject({ winner: '0', reason: 'survival' });
   });
 
   test('maxTurns compares all active players in 4-player game', () => {

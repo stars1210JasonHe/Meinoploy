@@ -15,8 +15,13 @@ A moddable Monopoly-style board game engine built with [boardgame.io](https://bo
 - **Mortgage/Unmortgage** — standard mortgage mechanics with season-adjusted values
 - **Enhanced Event Cards** — 6 extra card types: payPercent, gainAll, freeUpgrade, downgrade, forceBuy, gainPerProperty
 - **Config-Driven Rules** — all game rules live in a single config file (`mods/dominion/rules.js`), making the engine fully moddable
+- **2–10 Players** — local hot-seat or online multiplayer (boardgame.io server + lobby)
+- **Map System** — 4 board layouts (square, circle, hexagon, custom), data-driven via `map.json`
+- **AI Characters** — optional OpenAI-powered in-character event reactions and chat (bring your own key)
+- **Victory Conditions** — Last Standing, Timed/Richest, or Dominion (first to N color groups), chosen at game start
+- **Game Boy Color Pixel UI** — chunky 16-bit aesthetic with 3 palettes (Council/Verdant/Arcade) and a CRT toggle
 - **Character Lore Viewer** — click "View Lore" to read each character's full backstory in a modal
-- **157 Unit Tests** covering all game mechanics
+- **278 unit tests** (Jest) + **18 E2E tests** (Playwright) covering all game mechanics
 
 ## Characters
 
@@ -57,7 +62,7 @@ npx jest --no-coverage
 npm run build
 ```
 
-The game runs as a local 2-player hot-seat demo.
+Supports 2–10 players in local hot-seat or online multiplayer. For online play, run the server with `npm run server` (boardgame.io server on port 8088).
 
 ## Project Structure
 
@@ -66,7 +71,10 @@ src/
   Game.js          # boardgame.io game definition (moves, setup, turn logic)
   App.js           # DOM-based UI (board, panels, modals)
   constants.js     # Re-exports from mod rules (shim for backward compat)
-  __tests__/       # 157 Jest unit tests
+  Lobby.js         # Online multiplayer lobby UI
+  map-loader.js    # Map schema validation + position generators
+  character-ai.js  # OpenAI-backed character reactions + chat
+  __tests__/       # 278 Jest unit tests
 
 mods/dominion/
   index.js         # Re-exports all mod data
@@ -103,9 +111,11 @@ See [ROADMAP.md](docs/ROADMAP.md) for the full development plan. See also [RULES
 - **Phase 1** — Core Demo ✅
 - **Phase 2** — Character Integration ✅
 - **Phase 3** — Enhanced Gameplay ✅ (trading, auctions, config-driven rules)
-- **Phase 4** — Multiplayer & Polish (planned)
-- **Phase 5** — Advanced Features (planned)
-- **Phase 6** — Deployment (planned)
+- **Phase 4** — Multiplayer & N-Player ✅ (2–10 players, online server + lobby)
+- **Phase 5** — Map System ✅ (4 layouts, data-driven boards)
+- **Phase 6** — AI Character System ✅ (event reactions + chat)
+- **Phase 7** — Weighted Victory 🟡 (Phase A done: configurable win conditions + scoreboard; influence/stability TBD)
+- **Phase 8+** — AI bot players, advanced mechanics, deployment (planned)
 
 ## License
 

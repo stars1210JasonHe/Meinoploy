@@ -42,11 +42,15 @@
 
 ## Characters
 
-10 characters designed, 9 have lore files and pixel-art portraits. The 10th (Ophelia Nightveil) needs a portrait. Character data is in `data/Characters-v0.1.md` (Chinese). Each character has 6 stats (Capital, Luck, Negotiation, Charisma, Tech, Stamina) totaling the same sum, plus passive abilities.
+All 10 characters have lore files and pixel-art portraits (including Ophelia Nightveil). Character data is in `data/Characters-v0.1.md` (Chinese). Each character has 6 stats (Capital, Luck, Negotiation, Charisma, Tech, Stamina) totaling the same sum, plus passive abilities.
 
 ## Game Mechanics (Current)
 
-- 2-player local hot-seat (boardgame.io singleplayer client)
+- 2–10 players: local hot-seat or online multiplayer (server.js + Lobby.js)
+- Game Boy Color pixel UI (3 palettes + CRT toggle); ported from `data/design_handoff_pixel_ui/`
+- Map system: 4 board layouts (square/circle/hex/custom), data-driven via `map.json`
+- AI characters: optional OpenAI event reactions + chat (`character-ai.js`)
+- Victory conditions: Last Standing / Timed-Richest / Dominion, chosen at game start (`G.victory`)
 - Character selection with stat-based gameplay modifiers
 - 40 spaces, dice, property buying with negotiation discounts, rent with charisma discounts
 - 4-tier building system: House → Hotel → Skyscraper → Landmark
@@ -65,7 +69,8 @@
 ```bash
 npm start        # Dev server at localhost:1234
 npm run build    # Production build
-npx jest --no-coverage  # Run 157 unit tests
+npm run server   # Online multiplayer server (port 8088)
+npx jest --no-coverage  # Run 278 unit tests
 npx playwright test     # Run 18 E2E tests
 ```
 
@@ -87,11 +92,12 @@ cd data && uv run Split.py
 
 ## Known Issues / TODOs
 
-- The 10th character (Ophelia Nightveil) is missing a portrait
 - Parcel v1 is deprecated; consider migrating to Parcel v2 or Vite in the future
 - `data/` has its own `pyproject.toml` from uv init — this is for the Python split script only
 - Marcus (operator) and Ophelia (shadow) passives have config but no engine logic yet
-- Future: online multiplayer, AI bots, max turns, world disasters (see docs/PLAN.md, docs/ROADMAP.md)
+- Online trades/auctions: cross-player moves don't authorize over the wire yet (no `turn.activePlayers`/stages); local hot-seat works fully
+- Weighted victory Phase B (influence/stability axes) not started — only wealth/survival/dominion scored today
+- Future: AI bot players, alliances/voting, world disasters, deployment/CI (see docs/ROADMAP.md)
 
 ## GitHub
 

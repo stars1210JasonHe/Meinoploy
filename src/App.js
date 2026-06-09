@@ -1,6 +1,6 @@
 import { Client } from 'boardgame.io/client';
 import { SocketIO } from 'boardgame.io/multiplayer';
-import { Monopoly, setActiveMap } from './Game';
+import { Monopoly, setActiveMap, setVictoryConfig } from './Game';
 import { PLAYER_COLORS, BUILDING_ICONS, BUILDING_NAMES, UPGRADE_COST_MULTIPLIERS, RENT_MULTIPLIERS, SEASONS } from './constants';
 import { CHARACTERS, getLoreById, RULES } from '../mods/dominion';
 import { Lobby } from './Lobby';
@@ -10,6 +10,7 @@ import classicMapJson from '../mods/dominion/maps/classic/map.json';
 import stuttgartMapJson from '../mods/dominion/maps/stuttgart-fracture-loop/map.json';
 import outerRimMapJson from '../mods/dominion/maps/outer-rim-station/map.json';
 import nightveilMapJson from '../mods/dominion/maps/nightveil-intrigue/map.json';
+import keyArt from '../mods/dominion/keyart.png';
 
 // Available maps for selection
 const AVAILABLE_MAPS = [
@@ -18,6 +19,89 @@ const AVAILABLE_MAPS = [
   outerRimMapJson,
   nightveilMapJson,
 ];
+
+const STAT_KEYS = [
+  { key: 'capital', label: 'CAP' },
+  { key: 'luck', label: 'LCK' },
+  { key: 'negotiation', label: 'NEG' },
+  { key: 'charisma', label: 'CHA' },
+  { key: 'tech', label: 'TEC' },
+  { key: 'stamina', label: 'STA' },
+];
+
+// ─────────────────────────────────────────────────────────────
+// Pixel UI primitives (vanilla DOM → HTML strings)
+// ─────────────────────────────────────────────────────────────
+function esc(text) {
+  return String(text == null ? '' : text)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function money(amount, hidden) {
+  if (hidden) return '<span class="money money--hidden">$?,???</span>';
+  const n = typeof amount === 'number' ? amount.toLocaleString() : amount;
+  return `<span class="money">$${n}</span>`;
+}
+
+function tokenHtml(color, label, small) {
+  return `<span class="token ${small ? 'token--sm' : ''}" style="--tcol:${color}">${esc(label)}</span>`;
+}
+
+function glyphHtml(kind, color) {
+  return `<span class="glyph glyph--${kind}"${color ? ` style="--gcol:${color}"` : ''}></span>`;
+}
+
+// CSS-drawn pip dice
+const DIE_PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
+function dieHtml(value, rolling) {
+  const layout = DIE_PIPS[value] || [4];
+  let cells = '';
+  for (let i = 0; i < 9; i++) cells += `<span class="die__cell">${layout.includes(i) ? '<span class="pip"></span>' : ''}</span>`;
+  return `<div class="die ${rolling ? 'die--rolling' : ''}">${cells}</div>`;
+}
+
+function portraitHtml(char, size, selected) {
+  const color = char && char.color ? char.color : 'var(--accent)';
+  const inner = char && char.portrait
+    ? `<img src="${char.portrait}" alt="" draggable="false" />`
+    : `<div class="portrait__empty">${char ? esc(char.name[0]) : '?'}</div>`;
+  return `<div class="portrait ${selected ? 'portrait--sel' : ''}" style="width:${size}px;height:${size}px;--pcol:${color}">${inner}</div>`;
+}
+
+function statRowsHtml(stats, color) {
+  return STAT_KEYS.map(s => {
+    const value = stats[s.key];
+    let cells = '';
+    for (let i = 0; i < 10; i++) {
+      cells += `<span class="statcell ${i < value ? 'on' : ''}"${i < value ? ` style="background:${color}"` : ''}></span>`;
+    }
+    return `<div class="statrow"><span class="statrow__label">${s.label}</span><span class="statrow__cells">${cells}</span><span class="statrow__val">${value}</span></div>`;
+  }).join('');
+}
+
+// Tile glyph by space type (no emoji)
+function tileGlyph(type) {
+  switch (type) {
+    case 'go': return 'arrow';
+    case 'chance': return 'q';
+    case 'community': return 'chest';
+    case 'tax': return 'coin';
+    case 'railroad': return 'rail';
+    case 'utility': return 'bolt';
+    case 'jail': return 'bars';
+    case 'goToJail': return 'cuff';
+    case 'parking': return 'park';
+    default: return null;
+  }
+}
+
+// Event card kind from action
+function cardKind(action) {
+  if (['gain', 'gainAll', 'gainPerProperty', 'freeUpgrade'].includes(action)) return 'good';
+  if (['pay', 'payPercent', 'forceBuy', 'downgrade', 'goToJail'].includes(action)) return 'bad';
+  return 'neutral';
+}
 
 // Render Chinese lore text: paragraphs + bold markers
 function renderLoreText(text) {
@@ -36,163 +120,306 @@ function renderLoreText(text) {
     .join('');
 }
 
-// Simple stats bar renderer
-function renderStatBar(label, value, max) {
-  const pct = (value / max) * 100;
-  return `<div class="stat-row">
-    <span class="stat-label">${label}</span>
-    <div class="stat-bar"><div class="stat-fill" style="width:${pct}%;"></div></div>
-    <span class="stat-val">${value}</span>
-  </div>`;
-}
-
 class MonopolyBoard {
   constructor(rootElement) {
     this.rootElement = rootElement;
     this.mode = null; // 'local' or 'online'
     this.onlinePlayerID = null;
+    this._pendingCharId = null; // local character-select preview
     this.setMap(classicMapJson);
 
     // AI system
     const savedKey = localStorage.getItem('meinopoly_ai_key') || '';
     const savedVerbosity = localStorage.getItem('meinopoly_ai_verbosity') || VERBOSITY.MAJOR;
     this.characterAI = new CharacterAI(savedKey, { verbosity: savedVerbosity });
-    this.aiResponses = []; // { charName, charColor, portrait, text }
-    this.chatHistories = {}; // { charId: [{ role, content }] }
+    this.aiResponses = [];
+    this.chatHistories = {};
     this.activeChatCharId = null;
-    this._prevMessages = []; // Previous messages array for event detection
+    this._prevMessages = [];
     this._prevSeasonIdx = undefined;
 
     this.createLayout();
     this.showModeSelect();
   }
 
-  // Load a map config and prepare rendering data + engine data
   setMap(mapJson) {
     this.mapData = loadMap(mapJson);
     this.boardSpaces = this.mapData.spaces;
     this.colorGroups = this.mapData.colorGroupsFlat;
-    // Update Game.js engine references to use this map's data
     setActiveMap(this.mapData);
   }
 
-  showModeSelect() {
-    this.charSelectEl.style.display = 'none';
-    this.gameAreaEl.style.display = 'none';
-    this.seasonDisplayEl.style.display = 'none';
-    this.lobbyEl.style.display = 'none';
-    this.playerCountEl.style.display = 'block';
-    if (this.exitBtnEl) this.exitBtnEl.style.display = 'none';
+  // ─────────────────────────────────────────────────────────
+  // Layout shell
+  // ─────────────────────────────────────────────────────────
+  createLayout() {
+    this.rootElement.innerHTML = `
+      <div class="app app--scan app--crt" id="app-root">
+        <div class="topbar">
+          <span class="topbar__label">THEME</span>
+          <select id="theme-select">
+            <option value="council">COUNCIL</option>
+            <option value="verdant">VERDANT</option>
+            <option value="arcade">ARCADE</option>
+          </select>
+          <button id="btn-crt" class="pix-btn pix-btn--default">CRT</button>
+          <button id="btn-save" class="pix-btn pix-btn--default" style="display:none;">SAVE</button>
+          <button id="btn-load-menu" class="pix-btn pix-btn--default">LOAD</button>
+          <button id="btn-ai-settings" class="pix-btn pix-btn--default">AI</button>
+          <button id="btn-exit-game" class="pix-btn pix-btn--danger" style="display:none;">EXIT</button>
+        </div>
 
-    this.playerCountEl.innerHTML = `
-      <div class="count-select-header">
-        <h2>Select Game Mode</h2>
-        <p class="count-select-sub">Play locally or online with friends</p>
+        <div class="app__frame">
+          <div style="width:100%;">
+            <div id="menu-screen" style="display:none;"></div>
+            <div id="online-lobby" style="display:none;"></div>
+            <div id="character-select" style="display:none;"></div>
+            <div id="results-area" style="display:none;"></div>
+            <div id="game-area" class="screen screen--game" style="display:none;">
+              <div class="game__left">
+                <div class="game__panels-title">COUNCIL</div>
+                <div id="player-info"></div>
+                <div class="game__leftfoot">
+                  <button id="btn-exit-foot" class="pix-btn pix-btn--ghost pix-btn--full pix-btn--sm">EXIT TO MENU</button>
+                </div>
+              </div>
+              <div class="game__center">
+                <div id="board" class="board"></div>
+              </div>
+              <div class="game__right">
+                <div id="turnbox"></div>
+                <div id="manage"></div>
+                <div id="ai-responses"></div>
+                <div id="chat-panel"></div>
+                <div id="log"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal__scrim" id="state-modal"><div class="modal" id="state-modal-box"></div></div>
+        <div class="modal__scrim" id="ui-modal"><div class="modal" id="ui-modal-box"></div></div>
       </div>
-      <div class="count-grid">
-        <button class="count-btn mode-btn" id="btn-mode-local">Local Game</button>
-        <button class="count-btn mode-btn" id="btn-mode-online">Online Game</button>
-      </div>`;
+    `;
 
-    document.getElementById('btn-mode-local').onclick = () => {
-      this.mode = 'local';
-      this.showMapSelect();
+    this.appRootEl = document.getElementById('app-root');
+    this.menuEl = document.getElementById('menu-screen');
+    this.lobbyEl = document.getElementById('online-lobby');
+    this.charSelectEl = document.getElementById('character-select');
+    this.resultsEl = document.getElementById('results-area');
+    this.gameAreaEl = document.getElementById('game-area');
+    this.playerInfoEl = document.getElementById('player-info');
+    this.boardEl = document.getElementById('board');
+    this.turnboxEl = document.getElementById('turnbox');
+    this.manageEl = document.getElementById('manage');
+    this.messagesEl = document.getElementById('log');
+    this.aiResponsesEl = document.getElementById('ai-responses');
+    this.chatPanelEl = document.getElementById('chat-panel');
+    this.stateModalEl = document.getElementById('state-modal');
+    this.stateModalBoxEl = document.getElementById('state-modal-box');
+    this.uiModalEl = document.getElementById('ui-modal');
+    this.uiModalBoxEl = document.getElementById('ui-modal-box');
+
+    // Topbar buttons
+    this.exitBtnEl = document.getElementById('btn-exit-game');
+    this.saveBtnEl = document.getElementById('btn-save');
+    this.exitBtnEl.onclick = () => this.exitToMenu();
+    document.getElementById('btn-exit-foot').onclick = () => this.exitToMenu();
+    document.getElementById('btn-load-menu').onclick = () => this.showSavesModal();
+    document.getElementById('btn-ai-settings').onclick = () => this.showAISettings();
+
+    // Theme switcher
+    const savedTheme = localStorage.getItem('meinopoly_theme') || 'council';
+    document.body.setAttribute('data-theme', savedTheme);
+    const themeSel = document.getElementById('theme-select');
+    themeSel.value = savedTheme;
+    themeSel.onchange = () => {
+      document.body.setAttribute('data-theme', themeSel.value);
+      localStorage.setItem('meinopoly_theme', themeSel.value);
     };
-    document.getElementById('btn-mode-online').onclick = () => {
-      this.mode = 'online';
-      this.showOnlineLobby();
+
+    // CRT toggle
+    const crtOn = (localStorage.getItem('meinopoly_crt') || 'on') === 'on';
+    this._setCrt(crtOn);
+    document.getElementById('btn-crt').onclick = () => {
+      const next = !this.appRootEl.classList.contains('app--crt');
+      this._setCrt(next);
+      localStorage.setItem('meinopoly_crt', next ? 'on' : 'off');
     };
+
+    // Modal close on scrim click
+    this.stateModalEl.addEventListener('click', (e) => { if (e.target === this.stateModalEl) { /* state-driven; ignore */ } });
+    this.uiModalEl.addEventListener('click', (e) => { if (e.target === this.uiModalEl) this.closeUiModal(); });
+  }
+
+  _setCrt(on) {
+    this.appRootEl.classList.toggle('app--crt', on);
+    this.appRootEl.classList.toggle('app--scan', on);
+  }
+
+  _showScreen(name) {
+    this.menuEl.style.display = name === 'menu' ? 'block' : 'none';
+    this.lobbyEl.style.display = name === 'lobby' ? 'block' : 'none';
+    this.charSelectEl.style.display = name === 'select' ? 'block' : 'none';
+    this.gameAreaEl.style.display = name === 'game' ? 'grid' : 'none';
+    this.resultsEl.style.display = name === 'results' ? 'block' : 'none';
+    const inGame = name === 'game' || name === 'results';
+    this.exitBtnEl.style.display = inGame ? '' : 'none';
+    this.saveBtnEl.style.display = name === 'game' ? '' : 'none';
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Menu screens
+  // ─────────────────────────────────────────────────────────
+  showModeSelect() {
+    this._showScreen('menu');
+    this.menuEl.className = 'screen screen--hero';
+    this.menuEl.innerHTML = `
+      <img class="hero-art" src="${keyArt}" alt="Meinopoly: Dominion" draggable="false" />
+      <div class="hero-overlay">
+        <div class="mode-grid">
+          <button class="pix-btn pix-btn--primary pix-btn--lg mode-btn" id="btn-mode-local">LOCAL GAME</button>
+          <button class="pix-btn pix-btn--default pix-btn--lg mode-btn" id="btn-mode-online">ONLINE GAME</button>
+        </div>
+        <div class="title__press">&#9656; PRESS START</div>
+        <div class="title__foot">v0.4 · 10 CHARACTERS · 4 MAPS · TRADE &amp; AUCTION</div>
+      </div>
+    `;
+    document.getElementById('btn-mode-local').onclick = () => { this.mode = 'local'; this.showMapSelect(); };
+    document.getElementById('btn-mode-online').onclick = () => { this.mode = 'online'; this.showOnlineLobby(); };
   }
 
   showMapSelect() {
-    this.charSelectEl.style.display = 'none';
-    this.gameAreaEl.style.display = 'none';
-    this.seasonDisplayEl.style.display = 'none';
-    this.lobbyEl.style.display = 'none';
-    this.playerCountEl.style.display = 'block';
-
-    let html = '<div class="count-select-header">' +
-      '<h2>Select Map</h2>' +
-      '<p class="count-select-sub">Choose the board you want to play on</p>' +
-    '</div>' +
-    '<div class="map-grid">';
-
-    AVAILABLE_MAPS.forEach(function(mapJson, idx) {
-      var layoutLabel = mapJson.layout.type;
-      var spaceLabel = mapJson.spaceCount + ' spaces';
-      var catLabel = (mapJson.world && mapJson.world.category) || '';
-      html += '<div class="map-card" data-map-idx="' + idx + '">' +
-        '<div class="map-card-header" style="background:' + (mapJson.theme.boardBackground || '#2d5016') + ';color:' + (mapJson.theme.logoColor || '#f0c040') + ';">' +
-          '<div class="map-card-title">' + mapJson.name + '</div>' +
-        '</div>' +
-        '<div class="map-card-body">' +
-          '<div class="map-card-desc">' + (mapJson.description || '') + '</div>' +
-          '<div class="map-card-meta">' +
-            '<span class="map-tag">' + layoutLabel + '</span>' +
-            '<span class="map-tag">' + spaceLabel + '</span>' +
-            (catLabel ? '<span class="map-tag">' + catLabel + '</span>' : '') +
-          '</div>' +
-        '</div>' +
-      '</div>';
+    this._showScreen('menu');
+    this.menuEl.className = 'screen screen--menu';
+    let cards = '';
+    AVAILABLE_MAPS.forEach((mapJson, idx) => {
+      const layoutLabel = mapJson.layout.type;
+      const spaceLabel = mapJson.spaceCount + ' SPACES';
+      const catLabel = (mapJson.world && mapJson.world.category) || '';
+      cards += `
+        <div class="pix-panel map-card" data-map-idx="${idx}">
+          <div class="pix-panel__accent" style="background:${mapJson.theme.logoColor || 'var(--accent)'}"></div>
+          <div class="pix-panel__body">
+            <div class="map-card__title">${esc(mapJson.name)}</div>
+            <div class="map-card__desc">${esc(mapJson.description || '')}</div>
+            <div class="map-card__meta">
+              <span class="map-tag">${esc(layoutLabel)}</span>
+              <span class="map-tag">${esc(spaceLabel)}</span>
+              ${catLabel ? `<span class="map-tag">${esc(catLabel)}</span>` : ''}
+            </div>
+          </div>
+        </div>`;
     });
-
-    html += '</div>' +
-      '<div style="text-align:center;margin-top:16px;">' +
-        '<button id="btn-back-mode" class="btn btn-secondary" style="display:inline-block;width:auto;">Back</button>' +
-      '</div>';
-
-    this.playerCountEl.innerHTML = html;
-
-    var self = this;
-    this.playerCountEl.querySelectorAll('.map-card').forEach(function(card) {
-      card.onclick = function() {
-        var idx = parseInt(card.dataset.mapIdx);
-        self.setMap(AVAILABLE_MAPS[idx]);
-        self._themeApplied = false; // Reset theme for new map
-        self.showPlayerCountSelect();
+    this.menuEl.innerHTML = `
+      <div><div class="menu__heading">SELECT MAP</div><div class="menu__sub">Choose the board you want to play on</div></div>
+      <div class="map-grid">${cards}</div>
+      <button class="pix-btn pix-btn--ghost" id="btn-back-mode">&#9666; BACK</button>
+    `;
+    this.menuEl.querySelectorAll('.map-card').forEach(card => {
+      card.onclick = () => {
+        const idx = parseInt(card.dataset.mapIdx);
+        this.setMap(AVAILABLE_MAPS[idx]);
+        this.showPlayerCountSelect();
       };
     });
-    document.getElementById('btn-back-mode').onclick = function() { self.showModeSelect(); };
+    document.getElementById('btn-back-mode').onclick = () => this.showModeSelect();
   }
 
   showPlayerCountSelect() {
-    this.charSelectEl.style.display = 'none';
-    this.gameAreaEl.style.display = 'none';
-    this.seasonDisplayEl.style.display = 'none';
-    this.lobbyEl.style.display = 'none';
-    this.playerCountEl.style.display = 'block';
-
-    let html = `
-      <div class="count-select-header">
-        <h2>How Many Players?</h2>
-        <p class="count-select-sub">Select 2-10 players for local hot-seat play</p>
-      </div>
-      <div class="count-grid">`;
+    this._showScreen('menu');
+    this.menuEl.className = 'screen screen--menu';
+    let btns = '';
     for (let n = 2; n <= 10; n++) {
-      html += `<button class="count-btn" data-count="${n}">${n} Players</button>`;
+      btns += `<button class="pix-btn pix-btn--default count-btn" data-count="${n}">${n} PLAYERS</button>`;
     }
-    html += `</div>
-      <div style="text-align:center;margin-top:16px;">
-        <button id="btn-back-mode" class="btn btn-secondary" style="display:inline-block;width:auto;">Back</button>
-      </div>`;
-    this.playerCountEl.innerHTML = html;
-
-    this.playerCountEl.querySelectorAll('.count-btn').forEach(btn => {
-      if (btn.dataset.count) {
-        btn.onclick = () => {
-          this.startGameWithPlayers(parseInt(btn.dataset.count));
-        };
-      }
+    this.menuEl.innerHTML = `
+      <div><div class="menu__heading">HOW MANY PLAYERS?</div><div class="menu__sub">2–10 players for local hot-seat play</div></div>
+      <div class="count-grid">${btns}</div>
+      <button class="pix-btn pix-btn--ghost" id="btn-back-map">&#9666; BACK</button>
+    `;
+    this.menuEl.querySelectorAll('.count-btn').forEach(btn => {
+      btn.onclick = () => this.showVictorySelect(parseInt(btn.dataset.count));
     });
-    document.getElementById('btn-back-mode').onclick = () => this.showMapSelect();
+    document.getElementById('btn-back-map').onclick = () => this.showMapSelect();
+  }
+
+  showVictorySelect(playerCount) {
+    this._showScreen('menu');
+    this.menuEl.className = 'screen screen--menu';
+    this._pendingPlayerCount = playerCount;
+
+    // "Both": pre-fill from the active map's victory; treat the loader's bare
+    // wealth/no-cap default as Last Standing so the UI default matches the game's feel.
+    const mv = this.mapData.victory || {};
+    let defPrimary = mv.primary || 'survival';
+    if (defPrimary === 'wealth' && !mv.maxTurns) defPrimary = 'survival';
+    this._victorySel = {
+      primary: defPrimary,
+      maxTurns: mv.maxTurns || 30,
+      groupsToWin: (mv.params && mv.params.groupsToWin) || RULES.victory.groupsToWin || 3,
+    };
+    this._renderVictorySelect();
+  }
+
+  _renderVictorySelect() {
+    const s = this._victorySel;
+    const MODES = [
+      { id: 'survival', label: 'LAST STANDING', desc: 'Last player not bankrupt wins. Classic elimination.' },
+      { id: 'wealth', label: 'TIMED · RICHEST', desc: 'After a set number of turns, the highest net worth wins.' },
+      { id: 'monopoly', label: 'DOMINION', desc: 'First to control a set number of full color groups wins instantly.' },
+    ];
+    const cards = MODES.map(m => `
+      <div class="pix-panel map-card vic-card ${s.primary === m.id ? 'vic-card--sel' : ''}" data-mode="${m.id}">
+        <div class="pix-panel__body">
+          <div class="map-card__title">${m.label}</div>
+          <div class="map-card__desc">${m.desc}</div>
+          ${s.primary === m.id ? '<div class="charcard__seltag">SELECTED</div>' : ''}
+        </div>
+      </div>`).join('');
+
+    let param = '';
+    if (s.primary === 'wealth') {
+      param = `<div class="vic-param"><span class="aiset__label">TURN LIMIT</span>
+        <div class="trade__cashctl"><button id="vic-mt-dec">−</button><span class="trade__cashval">${s.maxTurns}</span><button id="vic-mt-inc">+</button></div></div>`;
+    } else if (s.primary === 'monopoly') {
+      param = `<div class="vic-param"><span class="aiset__label">GROUPS TO WIN</span>
+        <div class="trade__cashctl"><button id="vic-gw-dec">−</button><span class="trade__cashval">${s.groupsToWin}</span><button id="vic-gw-inc">+</button></div></div>`;
+    }
+
+    this.menuEl.innerHTML = `
+      <div><div class="menu__heading">VICTORY CONDITION</div><div class="menu__sub">How is the winner decided? (${this._pendingPlayerCount} players)</div></div>
+      <div class="map-grid" style="max-width:760px;">${cards}</div>
+      <div class="vic-paramrow">${param}</div>
+      <div class="vic-actions">
+        <button class="pix-btn pix-btn--ghost" id="btn-vic-back">&#9666; BACK</button>
+        <button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-vic-start">START GAME &#9656;</button>
+      </div>
+    `;
+
+    this.menuEl.querySelectorAll('.vic-card').forEach(card => {
+      card.onclick = () => { this._victorySel.primary = card.dataset.mode; this._renderVictorySelect(); };
+    });
+    const dec = (id, key, min) => { const el = document.getElementById(id); if (el) el.onclick = () => { this._victorySel[key] = Math.max(min, this._victorySel[key] - (key === 'maxTurns' ? 5 : 1)); this._renderVictorySelect(); }; };
+    const inc = (id, key, max) => { const el = document.getElementById(id); if (el) el.onclick = () => { this._victorySel[key] = Math.min(max, this._victorySel[key] + (key === 'maxTurns' ? 5 : 1)); this._renderVictorySelect(); }; };
+    dec('vic-mt-dec', 'maxTurns', 5); inc('vic-mt-inc', 'maxTurns', 200);
+    dec('vic-gw-dec', 'groupsToWin', 1); inc('vic-gw-inc', 'groupsToWin', 8);
+
+    document.getElementById('btn-vic-back').onclick = () => this.showPlayerCountSelect();
+    document.getElementById('btn-vic-start').onclick = () => {
+      const sel = this._victorySel;
+      setVictoryConfig({
+        primary: sel.primary,
+        maxTurns: sel.primary === 'wealth' ? sel.maxTurns : 0,
+        groupsToWin: sel.groupsToWin,
+      });
+      this.startGameWithPlayers(this._pendingPlayerCount);
+    };
   }
 
   showOnlineLobby() {
-    this.playerCountEl.style.display = 'none';
-    this.charSelectEl.style.display = 'none';
-    this.gameAreaEl.style.display = 'none';
-    this.lobbyEl.style.display = 'block';
-
+    this._showScreen('lobby');
+    this.lobbyEl.className = 'screen screen--menu';
     const serverUrl = window.location.protocol + '//' + window.location.hostname + ':8088';
     const lobby = new Lobby(this.lobbyEl, serverUrl, (matchID, playerID, credentials, numPlayers) => {
       this.startOnlineGame(serverUrl, matchID, playerID, credentials, numPlayers);
@@ -201,9 +428,7 @@ class MonopolyBoard {
   }
 
   startOnlineGame(serverUrl, matchID, playerID, credentials, numPlayers) {
-    this.lobbyEl.style.display = 'none';
     this.onlinePlayerID = playerID;
-    this.exitBtnEl.style.display = '';
     this.client = Client({
       game: Monopoly,
       numPlayers: numPlayers,
@@ -218,350 +443,861 @@ class MonopolyBoard {
   }
 
   startGameWithPlayers(numPlayers) {
-    this.playerCountEl.style.display = 'none';
-    this.exitBtnEl.style.display = '';
-    this.client = Client({
-      game: Monopoly,
-      numPlayers: numPlayers,
-      debug: false,
-    });
+    this.client = Client({ game: Monopoly, numPlayers: numPlayers, debug: false });
     this.client.start();
     this.client.subscribe(state => this.update(state));
   }
 
-  createLayout() {
-    this.rootElement.innerHTML = `
-      <div class="game-container">
-        <div class="header">
-          <h1>\u{1F3E0} MEINOPOLY \u{1F3E0}</h1>
-          <div class="header-buttons">
-            <button id="btn-exit-game" class="btn-header btn-header-exit" style="display:none;">Exit Game</button>
-            <button id="btn-load-menu" class="btn-header">Load Game</button>
-            <button id="btn-ai-settings" class="btn-header">AI Settings</button>
-          </div>
-          <div id="season-display" class="season-display"></div>
-        </div>
-        <div id="load-panel" class="load-panel" style="display:none;"></div>
-        <div id="player-count-select" class="character-select" style="display:none;"></div>
-        <div id="online-lobby" class="character-select" style="display:none;"></div>
-        <div id="character-select" class="character-select" style="display:none;"></div>
-        <div id="game-area" class="main-layout" style="display:none;">
-          <div class="left-panel">
-            <div id="player-info"></div>
-          </div>
-          <div class="board-wrapper">
-            <div id="board" class="board"></div>
-          </div>
-          <div class="right-panel">
-            <div id="dice-area"></div>
-            <div id="actions"></div>
-            <div id="messages"></div>
-            <div id="ai-responses"></div>
-            <div id="chat-panel"></div>
-          </div>
-        </div>
-        <div id="lore-modal" class="lore-modal">
-          <div class="lore-modal-content">
-            <button class="lore-close">&times;</button>
-            <div id="lore-body"></div>
-          </div>
-        </div>
-        <div id="ai-settings-modal" class="ai-settings-modal">
-          <div class="ai-settings-content">
-            <button class="lore-close" id="btn-ai-close">&times;</button>
-            <h3>AI Character Settings</h3>
-            <div id="ai-status-display"></div>
-            <div class="ai-field">
-              <label>OpenAI API Key</label>
-              <input type="password" id="ai-key-input" placeholder="sk-..." />
-              <div class="ai-hint">Stored locally in your browser. Never sent anywhere except OpenAI.</div>
-            </div>
-            <div class="ai-field">
-              <label>Character Response Verbosity</label>
-              <select id="ai-verbosity-select">
-                <option value="off">Off (no AI responses)</option>
-                <option value="major">Major events only (recommended)</option>
-                <option value="all">All events</option>
-              </select>
-              <div class="ai-hint">Controls how often characters comment on game events.</div>
-            </div>
-            <div class="ai-settings-actions">
-              <button id="btn-ai-save" class="btn btn-success" style="width:auto;display:inline-block;">Save</button>
-              <button id="btn-ai-cancel" class="btn btn-secondary" style="width:auto;display:inline-block;">Cancel</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-    this.playerCountEl = document.getElementById('player-count-select');
-    this.lobbyEl = document.getElementById('online-lobby');
-    this.charSelectEl = document.getElementById('character-select');
-    this.loadPanelEl = document.getElementById('load-panel');
-    this.gameAreaEl = document.getElementById('game-area');
-    this.seasonDisplayEl = document.getElementById('season-display');
-
-    // Header buttons
-    this.exitBtnEl = document.getElementById('btn-exit-game');
-    this.exitBtnEl.onclick = () => this.exitToMenu();
-    document.getElementById('btn-load-menu').onclick = () => this.toggleLoadPanel();
-    document.getElementById('btn-ai-settings').onclick = () => this.showAISettings();
-    this.boardEl = document.getElementById('board');
-    this.playerInfoEl = document.getElementById('player-info');
-    this.diceAreaEl = document.getElementById('dice-area');
-    this.actionsEl = document.getElementById('actions');
-    this.messagesEl = document.getElementById('messages');
-    this.aiResponsesEl = document.getElementById('ai-responses');
-    this.chatPanelEl = document.getElementById('chat-panel');
-    this.loreModalEl = document.getElementById('lore-modal');
-    this.loreBodyEl = document.getElementById('lore-body');
-    this.aiSettingsModalEl = document.getElementById('ai-settings-modal');
-
-    // Close lore modal on backdrop or X click
-    this.loreModalEl.addEventListener('click', (e) => {
-      if (e.target.classList.contains('lore-modal') || e.target.classList.contains('lore-close')) {
-        this.hideLoreModal();
-      }
-    });
-
-    // Close AI settings modal on backdrop or X click
-    this.aiSettingsModalEl.addEventListener('click', (e) => {
-      if (e.target.classList.contains('ai-settings-modal') || e.target.id === 'btn-ai-close') {
-        this.hideAISettings();
-      }
-    });
-    document.getElementById('btn-ai-cancel').onclick = () => this.hideAISettings();
-    document.getElementById('btn-ai-save').onclick = () => this.saveAISettings();
-  }
-
+  // ─────────────────────────────────────────────────────────
+  // Main render dispatch
+  // ─────────────────────────────────────────────────────────
   update(state) {
     if (state === null) return;
     const G = state.G;
     const ctx = state.ctx;
 
-    this.playerCountEl.style.display = 'none';
-
     if (G.phase === 'characterSelect') {
-      this.charSelectEl.style.display = 'block';
-      this.gameAreaEl.style.display = 'none';
-      this.seasonDisplayEl.style.display = 'none';
+      this._showScreen('select');
       this.renderCharacterSelect(G, ctx);
-    } else {
-      this.charSelectEl.style.display = 'none';
-      this.gameAreaEl.style.display = 'flex';
-      this.seasonDisplayEl.style.display = 'flex';
-      this.detectAndTriggerAI(G, ctx);
-      this.renderSeason(G);
-      this.renderBoard(G, ctx);
-      this.renderPlayerInfo(G, ctx);
-      this.renderDice(G);
-      this.renderActions(G, ctx);
-      this.renderMessages(G);
-      this._renderAIResponses();
-      this.renderChatPanel(G, ctx);
+      return;
     }
+
+    if (ctx.gameover) {
+      this._showScreen('results');
+      this.renderResults(G, ctx);
+      return;
+    }
+
+    this._showScreen('game');
+    this.detectAndTriggerAI(G, ctx);
+    this.renderBoard(G, ctx);
+    this.renderPlayerInfo(G, ctx);
+    this.renderTurnbox(G, ctx);
+    this.renderManage(G, ctx);
+    this.renderMessages(G);
+    this._renderAIResponses();
+    this.renderChatPanel(G, ctx);
+    this.renderStateModal(G, ctx);
+    this.wireActions(G, ctx);
   }
 
+  // ─────────────────────────────────────────────────────────
+  // Character select
+  // ─────────────────────────────────────────────────────────
   renderCharacterSelect(G, ctx) {
-    const currentPlayer = parseInt(ctx.currentPlayer) + 1;
-    const player = G.players[ctx.currentPlayer];
+    this.charSelectEl.className = 'screen screen--select';
+    const playerNo = parseInt(ctx.currentPlayer) + 1;
+    const takenIds = G.players.filter(p => p.character).map(p => p.character.id);
+    const remaining = G.players.filter(p => !p.character).length;
+    const isLast = remaining <= 1;
 
-    // Find already-taken character IDs
-    const takenIds = G.players
-      .filter(p => p.character)
-      .map(p => p.character.id);
-
-    let html = `
-      <div class="char-select-header">
-        <h2>Player ${currentPlayer}, Choose Your Character</h2>
-        <p class="char-select-sub">Each character has unique stats and a passive ability</p>
-      </div>
-      <div class="char-grid">`;
-
+    let cards = '';
     CHARACTERS.forEach(char => {
       const taken = takenIds.includes(char.id);
-      const takenBy = G.players.find(p => p.character && p.character.id === char.id);
-      const takenLabel = takenBy ? ` (Player ${parseInt(takenBy.id) + 1})` : '';
+      const selected = this._pendingCharId === char.id;
       const startMoney = RULES.core.baseStartingMoney + char.stats.capital * RULES.stats.capital.startingMoneyBonus;
-
-      html += `
-        <div class="char-card ${taken ? 'taken' : ''}" data-char-id="${char.id}">
-          <div class="char-portrait" style="border-color: ${char.color}">
-            ${char.portrait
-              ? `<img src="${char.portrait}" alt="${char.name}" />`
-              : `<div class="char-placeholder">${char.name[0]}</div>`
-            }
-          </div>
-          <div class="char-info">
-            <div class="char-name" style="color: ${char.color}">${char.name}</div>
-            <div class="char-title">${char.title}</div>
-            <div class="char-stats">
-              ${renderStatBar('CAP', char.stats.capital, 10)}
-              ${renderStatBar('LCK', char.stats.luck, 10)}
-              ${renderStatBar('NEG', char.stats.negotiation, 10)}
-              ${renderStatBar('CHA', char.stats.charisma, 10)}
-              ${renderStatBar('TEC', char.stats.tech, 10)}
-              ${renderStatBar('STA', char.stats.stamina, 10)}
+      cards += `
+        <div class="charcard ${selected ? 'charcard--sel' : ''} ${taken ? 'charcard--taken' : ''}" data-char-id="${char.id}">
+          <div class="charcard__top">
+            ${portraitHtml(char, 72, selected)}
+            <div class="charcard__id">
+              <span class="charcard__name" style="color:${char.color}">${esc(char.name)}</span>
+              <span class="charcard__title">${esc(char.title)}</span>
+              <span class="charcard__money">START ${money(startMoney)}</span>
             </div>
-            <div class="char-passive">${char.passive.name}: ${char.passive.description}</div>
-            <div class="char-money">Starting: $${startMoney}</div>
-            ${taken ? `<div class="char-taken">TAKEN${takenLabel}</div>` : ''}
-            <button class="char-lore-btn" data-char-id="${char.id}">View Lore</button>
-            ${this.characterAI.apiKey ? `<button class="char-chat-btn" data-char-id="${char.id}">Ask AI</button>` : ''}
-            <div id="char-chat-${char.id}" class="char-select-chat" style="display:none;"></div>
           </div>
+          <div class="charcard__stats">${statRowsHtml(char.stats, char.color)}</div>
+          <div class="charcard__passive">
+            <span class="charcard__passive-name">${esc(char.passive.name)}</span>
+            <span class="charcard__passive-desc">${esc(char.passive.description)}</span>
+          </div>
+          <div class="charcard__foot">
+            <button class="charcard__lore" data-char-id="${char.id}">VIEW LORE</button>
+            ${this.characterAI.apiKey ? `<button class="charcard__ai" data-char-id="${char.id}">ASK AI</button>` : ''}
+            ${taken ? '<span class="charcard__takentag">TAKEN</span>' : (selected ? '<span class="charcard__seltag">SELECTED</span>' : '')}
+          </div>
+          <div id="char-chat-${char.id}" style="display:none;"></div>
         </div>`;
     });
 
-    html += '</div>';
+    const picked = this._pendingCharId ? CHARACTERS.find(c => c.id === this._pendingCharId) : null;
+    const chosenHtml = picked
+      ? `${portraitHtml(picked, 40, false)}<span style="color:${picked.color}">${esc(picked.name)}</span><span class="select__chosen-title">${esc(picked.title)}</span>`
+      : '<span class="select__chosen-empty">Select a councillor to continue</span>';
 
-    // Show already selected players
-    const selected = G.players.filter(p => p.character);
-    if (selected.length > 0) {
-      html += '<div class="char-selected-list">';
-      selected.forEach(p => {
-        html += `<span class="char-selected-badge" style="border-color: ${p.character.color}">
-          Player ${parseInt(p.id) + 1}: ${p.character.name}
-        </span>`;
-      });
-      html += '</div>';
+    this.charSelectEl.innerHTML = `
+      <div class="select__head">
+        <div class="select__heading">
+          <span class="select__p">PLAYER ${playerNo}</span>
+          <span class="select__h">CHOOSE YOUR CHARACTER</span>
+        </div>
+        <div class="select__sub">Each councillor carries unique stats and a passive edge.</div>
+      </div>
+      <div class="select__grid">${cards}</div>
+      <div class="select__bar">
+        <button class="pix-btn pix-btn--ghost" id="btn-select-back">&#9666; BACK</button>
+        <div class="select__chosen">${chosenHtml}</div>
+        <button class="pix-btn pix-btn--primary" id="btn-select-confirm" ${picked ? '' : 'disabled'}>${isLast ? 'BEGIN GAME &#9656;' : 'NEXT PLAYER &#9656;'}</button>
+      </div>
+    `;
+
+    this.charSelectEl.querySelectorAll('.charcard:not(.charcard--taken)').forEach(card => {
+      card.onclick = () => {
+        this._pendingCharId = card.dataset.charId;
+        this.renderCharacterSelect(G, ctx);
+      };
+    });
+    this.charSelectEl.querySelectorAll('.charcard__lore').forEach(btn => {
+      btn.onclick = (e) => { e.stopPropagation(); this.showLoreModal(btn.dataset.charId); };
+    });
+    this.charSelectEl.querySelectorAll('.charcard__ai').forEach(btn => {
+      btn.onclick = (e) => { e.stopPropagation(); this._charSelectIntro(btn.dataset.charId); };
+    });
+    document.getElementById('btn-select-back').onclick = () => { this._pendingCharId = null; this.exitToMenu(); };
+    const confirmBtn = document.getElementById('btn-select-confirm');
+    confirmBtn.onclick = () => {
+      if (!this._pendingCharId) return;
+      const id = this._pendingCharId;
+      this._pendingCharId = null;
+      this.client.moves.selectCharacter(id);
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Board
+  // ─────────────────────────────────────────────────────────
+  _centerHtml(G, ctx) {
+    const season = SEASONS[G.seasonIndex];
+    const interval = RULES.seasons.changeInterval;
+    const cycle = (G.totalTurns % interval) + 1;
+    let fx = '';
+    if (season.priceMod !== 1.0) fx += `<span>PRICE ${season.priceMod > 1 ? '+' : ''}${Math.round((season.priceMod - 1) * 100)}%</span>`;
+    if (season.rentMod !== 1.0) fx += `<span>RENT +${Math.round((season.rentMod - 1) * 100)}%</span>`;
+    if (season.taxMod !== 1.0) fx += `<span>TAX x${season.taxMod}</span>`;
+    if (RULES.core.freeParkingPot && G.freeParkingPot > 0) fx += `<span>POT $${G.freeParkingPot}</span>`;
+
+    return `
+      <div class="board__logo">
+        <span class="board__logo-main">${esc(this.mapData.theme.logoText || 'MEINOPOLY')}</span>
+        <span class="board__logo-sub">${esc(this.mapData.theme.logoSubtitle || 'DOMINION · COUNCIL OF WORLDS')}</span>
+      </div>
+      <div class="board__season">
+        <span class="board__season-label">SEASON</span>
+        <span class="board__season-val">${esc(season.name)}</span>
+        <span class="board__season-turns">Cycle ${cycle}/${interval}${RULES.core.maxTurns > 0 ? ' · T' + G.totalTurns + '/' + RULES.core.maxTurns : ' · Turn ' + G.totalTurns}</span>
+        ${fx ? `<div class="board__season-fx">${fx}</div>` : ''}
+      </div>
+      <div class="board__centerslot">${this._centerSlotHtml(G, ctx)}</div>
+    `;
+  }
+
+  _centerSlotHtml(G, ctx) {
+    const player = G.players[ctx.currentPlayer];
+    const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
+    const d = G.lastDice;
+    const diceHtml = d
+      ? `${dieHtml(d.d1)}${dieHtml(d.d2)}`
+      : `${dieHtml(0)}${dieHtml(0)}`;
+    const total = d ? `<div class="centerslot__total">TOTAL ${d.total}${d.isDoubles ? ` · DOUBLES x${G.doublesCount}` : ''}</div>` : '';
+
+    let body = '';
+    if (G.canBuy && isMyTurn) {
+      const space = this.boardSpaces[player.position];
+      const price = G.effectivePrice || space.price;
+      body = `
+        <div class="centerslot__prompt">
+          <div class="cp__name">${esc(space.name)}</div>
+          <div class="cp__price">${money(price)}</div>
+          <div class="cp__btns">
+            <button class="pix-btn pix-btn--success pix-btn--sm" id="btn-buy">BUY</button>
+            <button class="pix-btn pix-btn--ghost pix-btn--sm" id="btn-pass">${RULES.auction.enabled && RULES.auction.auctionOnPass ? 'AUCTION' : 'PASS'}</button>
+          </div>
+        </div>`;
+    } else {
+      let hint = '';
+      if (!isMyTurn) hint = 'WAITING…';
+      else if (player.inJail && !G.hasRolled) hint = 'PAY FINE OR ROLL FOR DOUBLES';
+      else if (!G.hasRolled) hint = 'ROLL TO MOVE';
+      else if (G.pendingCard) hint = 'RESOLVE YOUR CARD';
+      else if (G.auction) hint = 'AUCTION IN PROGRESS';
+      else if (G.trade) hint = 'TRADE PENDING';
+      else hint = 'END TURN WHEN READY';
+      body = `<div class="centerslot__hint">${hint}</div>`;
     }
 
-    this.charSelectEl.innerHTML = html;
+    return `<div class="centerslot"><div class="centerslot__dice">${diceHtml}</div>${total}${body}</div>`;
+  }
 
-    // Attach click handlers
-    this.charSelectEl.querySelectorAll('.char-card:not(.taken)').forEach(card => {
-      card.onclick = () => {
-        const charId = card.dataset.charId;
-        this.client.moves.selectCharacter(charId);
-      };
+  _tileHtml(spaceId, G, opts) {
+    const space = this.boardSpaces[spaceId];
+    const isCorner = this.mapData.cornerIds.includes(spaceId);
+    const edge = opts.edge || (isCorner ? 'corner' : 'top');
+    const owner = G.ownership[spaceId];
+    const hasOwner = owner !== null && owner !== undefined;
+    const ownerColor = hasOwner ? this._playerColor(G, owner) : '';
+    const level = G.buildings[spaceId] || 0;
+    const mortgaged = G.mortgaged[spaceId] || false;
+
+    const bar = space.color ? `<div class="tile__bar tile__bar--${edge}" style="background:${space.color}"></div>` : '';
+    const g = tileGlyph(space.type);
+    const glyph = g ? `<span class="glyph glyph--${g}"></span>` : '';
+    const price = space.price > 0 ? `<span class="tile__price">$${space.price}</span>` : '';
+
+    let owned = '';
+    if (hasOwner) {
+      let pips = '';
+      const count = Math.max(1, level);
+      for (let i = 0; i < count; i++) pips += '<span class="tile__house"></span>';
+      owned = `<div class="tile__owner" style="--ocol:${ownerColor}">${pips}</div>`;
+    }
+    const mort = mortgaged ? '<div class="tile__mort">M</div>' : '';
+
+    const tokens = G.players
+      .filter(p => !p.bankrupt && p.position === spaceId)
+      .map(p => tokenHtml(this._playerColor(G, p.id), p.character ? p.character.name[0] : (parseInt(p.id) + 1), true))
+      .join('');
+    const tokensHtml = tokens ? `<div class="tile__tokens">${tokens}</div>` : '';
+
+    const pot = (space.type === 'parking' && RULES.core.freeParkingPot && G.freeParkingPot > 0)
+      ? `<div class="tile__pot">$${G.freeParkingPot}</div>` : '';
+
+    const cls = `tile tile--${edge} ${isCorner ? 'tile--corner' : ''} ${mortgaged ? 'tile--mortgaged' : ''} ${opts.abs ? 'tile--abs' : ''} tile--click`;
+    const style = opts.style ? ` style="${opts.style}"` : '';
+    return `<div class="${cls}" data-space="${spaceId}"${style}>${bar}<div class="tile__inner">${glyph}<span class="tile__name">${esc(space.name)}</span>${price}</div>${owned}${mort}${tokensHtml}${pot}</div>`;
+  }
+
+  _playerColor(G, id) {
+    const p = G.players[parseInt(id)];
+    return p && p.character ? p.character.color : PLAYER_COLORS[parseInt(id)];
+  }
+
+  renderBoard(G, ctx) {
+    if (this.mapData.layoutType === 'square') this._renderSquareBoard(G, ctx);
+    else this._renderAbsoluteBoard(G, ctx);
+  }
+
+  _renderSquareBoard(G, ctx) {
+    const gridDims = getGridDimensions(this.mapData.spaceCount, 'square');
+    const gridSize = gridDims.rows;
+    const lastIdx = gridSize - 1;
+    const innerRepeat = gridSize - 2;
+    const gridPositions = positionsToGrid(this.mapData.positions, this.mapData.spaceCount);
+
+    this.boardEl.className = 'board';
+    let tiles = '';
+    for (let id = 0; id < this.mapData.spaceCount; id++) {
+      const gp = gridPositions[id];
+      if (!gp) continue;
+      const row = gp.row, col = gp.col;
+      let edge = 'corner';
+      if (!this.mapData.cornerIds.includes(id)) {
+        if (row === lastIdx) edge = 'bottom';
+        else if (row === 0) edge = 'top';
+        else if (col === 0) edge = 'left';
+        else if (col === lastIdx) edge = 'right';
+      }
+      tiles += this._tileHtml(id, G, { edge, style: `grid-row:${row + 1};grid-column:${col + 1};` });
+    }
+    const center = `<div class="board__center" style="grid-row:2 / ${gridSize};grid-column:2 / ${gridSize};">${this._centerHtml(G, ctx)}</div>`;
+    this.boardEl.innerHTML = `<div class="board__grid" style="grid-template-columns:1.4fr repeat(${innerRepeat},1fr) 1.4fr;grid-template-rows:1.4fr repeat(${innerRepeat},1fr) 1.4fr;">${tiles}${center}</div>`;
+  }
+
+  _renderAbsoluteBoard(G, ctx) {
+    this.boardEl.className = 'board';
+    let tiles = '';
+    for (let i = 0; i < this.mapData.spaceCount; i++) {
+      const pos = this.mapData.positions[i];
+      if (!pos) continue;
+      // Determine inward-facing edge from position relative to center
+      const dx = pos.x - 50, dy = pos.y - 50;
+      let edge;
+      if (this.mapData.cornerIds.includes(i)) edge = 'corner';
+      else if (Math.abs(dy) >= Math.abs(dx)) edge = dy > 0 ? 'bottom' : 'top';
+      else edge = dx > 0 ? 'right' : 'left';
+      const size = this.mapData.cornerIds.includes(i) ? 9 : 7.5;
+      const style = `left:${pos.x}%;top:${pos.y}%;width:${size}%;height:${size}%;`;
+      tiles += this._tileHtml(i, G, { edge, abs: true, style });
+    }
+    const center = `<div class="board__center board__center--abs">${this._centerHtml(G, ctx)}</div>`;
+    this.boardEl.innerHTML = `<div class="board__grid board__grid--absolute">${tiles}${center}</div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Left column — council player cards
+  // ─────────────────────────────────────────────────────────
+  renderPlayerInfo(G, ctx) {
+    let html = '';
+    G.players.forEach((player, i) => {
+      const isCurrent = ctx.currentPlayer === String(i);
+      const char = player.character;
+      const color = this._playerColor(G, i);
+      const name = char ? char.name : `Player ${i + 1}`;
+
+      const isOphelia = char && char.passive.id === 'shadow';
+      const hideMoney = isOphelia && !isCurrent;
+
+      const props = player.properties.map(pid => {
+        const sp = this.boardSpaces[pid];
+        const lvl = G.buildings[pid] || 0;
+        const mort = G.mortgaged[pid] || false;
+        return `<span class="propchip ${mort ? 'propchip--mortgaged' : ''}" style="border-left-color:${sp.color || 'var(--line)'}">${esc(sp.name)}${lvl > 0 ? ' ·' + lvl : ''}</span>`;
+      }).join('');
+
+      let abilities = [];
+      if (char) {
+        if (player.rerollsLeft > 0) abilities.push(`REROLL ${player.rerollsLeft}`);
+        if (player.luckRedraws > 0) abilities.push(`REDRAW ${player.luckRedraws}`);
+        if (player.regulatedProperty !== null && player.regulatedProperty !== undefined) abilities.push(`REG: ${this.boardSpaces[player.regulatedProperty].name}`);
+      }
+
+      html += `
+        <div class="pcard ${isCurrent ? 'pcard--active' : ''} ${player.bankrupt ? 'pcard--bankrupt' : ''}" style="--pc:${color}">
+          <div class="pcard__head">
+            ${portraitHtml(char, 48, isCurrent)}
+            <div class="pcard__id">
+              <span class="pcard__name" style="color:${color}">${esc(name)}</span>
+              ${char ? `<span class="pcard__title">${esc(char.title)}</span>` : ''}
+            </div>
+            ${isCurrent ? '<span class="pcard__turn">TURN</span>' : ''}
+            ${player.bankrupt ? '<span class="pcard__bankrupt">OUT</span>' : ''}
+          </div>
+          <div class="pcard__money">${money(hideMoney ? null : player.money, hideMoney)}</div>
+          <div class="pcard__meta">
+            <span>${tokenHtml(color, char ? char.name[0] : i + 1, true)} ${player.properties.length} DEEDS</span>
+            ${char ? `<span class="pcard__passive">${esc(char.passive.name)}</span>` : ''}
+          </div>
+          ${player.inJail ? '<div class="pcard__jail">IN JAIL</div>' : ''}
+          ${abilities.length ? `<div class="pcard__abilities">${abilities.join(' · ')}</div>` : ''}
+          ${props ? `<div class="pcard__props">${props}</div>` : ''}
+        </div>`;
+    });
+    this.playerInfoEl.innerHTML = html;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Right column — turn box
+  // ─────────────────────────────────────────────────────────
+  renderTurnbox(G, ctx) {
+    const player = G.players[ctx.currentPlayer];
+    const char = player.character;
+    const color = this._playerColor(G, ctx.currentPlayer);
+    const name = char ? char.name : `Player ${parseInt(ctx.currentPlayer) + 1}`;
+    const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
+
+    let html = `<div class="turnbox"><div class="turnbox__who">${tokenHtml(color, char ? char.name[0] : parseInt(ctx.currentPlayer) + 1, true)} <span style="color:${color}">${esc(name)}</span></div>`;
+
+    if (!isMyTurn) {
+      html += `<div class="turnbox__waiting">WAITING FOR<br/>${esc(name)}…</div></div>`;
+      this.turnboxEl.innerHTML = html;
+      return;
+    }
+
+    // Jail / roll
+    if (player.inJail && !G.hasRolled) {
+      html += `<button class="pix-btn pix-btn--primary pix-btn--full pix-btn--lg" id="btn-roll">ROLL FOR DOUBLES</button>`;
+      html += `<button class="pix-btn pix-btn--default pix-btn--full" id="btn-jail">PAY $${RULES.core.jailFine} FINE</button>`;
+    } else if (!G.hasRolled && G.turnPhase === 'roll') {
+      html += `<button class="pix-btn pix-btn--primary pix-btn--full pix-btn--lg" id="btn-roll">ROLL DICE</button>`;
+    }
+
+    // Card accept/redraw (also surfaced in modal; keep buttons here as fallback)
+    if (G.pendingCard) {
+      html += `<div class="turnbox__btnrow"><button class="pix-btn pix-btn--success" id="btn-accept-card">ACCEPT</button><button class="pix-btn pix-btn--default" id="btn-redraw-card">REDRAW</button></div>`;
+    }
+
+    // Reroll
+    if (G.hasRolled && player.rerollsLeft > 0 && !G.canBuy && !G.pendingCard && G.turnPhase === 'done') {
+      html += `<button class="pix-btn pix-btn--default pix-btn--full" id="btn-reroll">REROLL (${player.rerollsLeft})</button>`;
+    }
+
+    // Trade + end turn
+    const canTrade = RULES.trading.enabled && G.hasRolled && !G.canBuy && !G.pendingCard && !G.trade && !G.auction && G.turnPhase === 'done'
+      && G.players.filter(p => p.id !== ctx.currentPlayer && !p.bankrupt).length > 0 && player.properties.length > 0;
+    const canEnd = G.hasRolled && !G.canBuy && !G.pendingCard && !G.trade && !G.auction && G.turnPhase === 'done';
+    html += `<div class="turnbox__btnrow">`;
+    if (canTrade) html += `<button class="pix-btn pix-btn--default" id="btn-propose-trade">TRADE</button>`;
+    html += `<button class="pix-btn pix-btn--primary" id="btn-end" ${canEnd ? '' : 'disabled'}>END TURN &#9656;</button>`;
+    html += `</div>`;
+
+    html += `</div>`;
+    this.turnboxEl.innerHTML = html;
+  }
+
+  // Property management list
+  renderManage(G, ctx) {
+    const player = G.players[ctx.currentPlayer];
+    const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
+    if (!isMyTurn || !G.hasRolled || G.canBuy || G.pendingCard || player.properties.length === 0) {
+      this.manageEl.innerHTML = '';
+      return;
+    }
+
+    let rows = '';
+    player.properties.forEach(pid => {
+      const space = this.boardSpaces[pid];
+      const level = G.buildings[pid] || 0;
+      const mortgaged = G.mortgaged[pid] || false;
+      let actions = '';
+
+      if (mortgaged) {
+        const cost = Math.floor(space.price * RULES.core.unmortgageRate);
+        actions += `<button class="pix-btn pix-btn--default pix-btn--sm btn-unmortgage" data-pid="${pid}">UNMORT $${cost}</button>`;
+      } else {
+        if (space.type === 'property' && space.color && this.colorGroups[space.color]) {
+          const groupIds = this.colorGroups[space.color];
+          const ownsGroup = groupIds.every(id => G.ownership[id] === ctx.currentPlayer);
+          const minLevel = Math.min(...groupIds.map(id => G.buildings[id] || 0));
+          const noMortgaged = !groupIds.some(id => G.mortgaged[id]);
+          if (ownsGroup && level <= minLevel && level < RULES.core.maxBuildingLevel && noMortgaged) {
+            const upgCost = Math.floor(space.price * UPGRADE_COST_MULTIPLIERS[level]);
+            actions += `<button class="pix-btn pix-btn--success pix-btn--sm btn-upgrade" data-pid="${pid}" title="~$${upgCost}">+${esc(BUILDING_NAMES[level + 1])}</button>`;
+          }
+        }
+        if (level > 0) {
+          let canSell = true;
+          if (space.color && this.colorGroups[space.color]) {
+            const maxLevel = Math.max(...this.colorGroups[space.color].map(id => G.buildings[id] || 0));
+            if (level < maxLevel) canSell = false;
+          }
+          if (canSell) actions += `<button class="pix-btn pix-btn--default pix-btn--sm btn-sell" data-pid="${pid}">SELL</button>`;
+        }
+        let canMortgage = true;
+        if (space.color && this.colorGroups[space.color]) {
+          canMortgage = !this.colorGroups[space.color].some(id => (G.buildings[id] || 0) > 0);
+        }
+        if (canMortgage && level === 0) {
+          const val = Math.floor(space.price * RULES.core.mortgageRate);
+          actions += `<button class="pix-btn pix-btn--default pix-btn--sm btn-mortgage" data-pid="${pid}">MORT $${val}</button>`;
+        }
+      }
+
+      rows += `<div class="manage__row"><span class="manage__name" style="border-left-color:${space.color || 'var(--line)'}">${esc(space.name)}${level > 0 ? ' ·' + level : ''}${mortgaged ? ' (M)' : ''}</span><span class="manage__actions">${actions}</span></div>`;
     });
 
-    // Lore button handlers
-    this.charSelectEl.querySelectorAll('.char-lore-btn').forEach(btn => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        this.showLoreModal(btn.dataset.charId);
-      };
-    });
+    this.manageEl.innerHTML = `<div class="pix-panel"><div class="pix-panel__titlebar"><span class="pix-panel__title">MANAGE</span></div><div class="pix-panel__body manage">${rows}</div></div>`;
+  }
 
-    // AI intro button handlers
-    this.charSelectEl.querySelectorAll('.char-chat-btn').forEach(btn => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        const chatEl = document.getElementById('char-chat-' + btn.dataset.charId);
-        if (chatEl) chatEl.style.display = 'block';
-        this._charSelectIntro(btn.dataset.charId);
+  renderMessages(G) {
+    const lines = G.messages.map(m => {
+      const lo = m.toLowerCase();
+      let kind = 'neutral';
+      if (/(collect|bought|wins|received|\+\$|salary|dividend|matures|inherit|refund)/.test(lo)) kind = 'good';
+      else if (/(pay|paid|rent|tax|fine|bankrupt|jail|lost|-\$)/.test(lo)) kind = 'bad';
+      return `<div class="logline logline--${kind}">${esc(m)}</div>`;
+    }).reverse().join('');
+    this.messagesEl.innerHTML = `<div class="logbox"><div class="logbox__title">EVENT LOG</div><div class="logbox__list">${lines}</div></div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Wire all action handlers (buttons live across center/turnbox/manage)
+  // ─────────────────────────────────────────────────────────
+  wireActions(G, ctx) {
+    const click = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
+    click('btn-roll', () => this.client.moves.rollDice());
+    click('btn-buy', () => this.client.moves.buyProperty());
+    click('btn-pass', () => this.client.moves.passProperty());
+    click('btn-end', () => this.client.moves.endTurn());
+    click('btn-jail', () => this.client.moves.payJailFine());
+    click('btn-reroll', () => this.client.moves.useReroll());
+    click('btn-accept-card', () => this.client.moves.acceptCard());
+    click('btn-redraw-card', () => this.client.moves.redrawCard());
+    click('btn-propose-trade', () => this.showTradeModal(G, ctx));
+    click('btn-save', () => this.saveGame(G, ctx));
+    if (this.saveBtnEl) this.saveBtnEl.onclick = () => this.saveGame(G, ctx);
+
+    document.querySelectorAll('.btn-upgrade').forEach(b => b.onclick = () => this.client.moves.upgradeProperty(parseInt(b.dataset.pid)));
+    document.querySelectorAll('.btn-mortgage').forEach(b => b.onclick = () => this.client.moves.mortgageProperty(parseInt(b.dataset.pid)));
+    document.querySelectorAll('.btn-unmortgage').forEach(b => b.onclick = () => this.client.moves.unmortgageProperty(parseInt(b.dataset.pid)));
+    document.querySelectorAll('.btn-sell').forEach(b => b.onclick = () => this.client.moves.sellBuilding(parseInt(b.dataset.pid)));
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // State-driven modal: event card / auction / trade accept
+  // ─────────────────────────────────────────────────────────
+  renderStateModal(G, ctx) {
+    const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
+
+    if (G.pendingCard) {
+      const card = G.pendingCard.card;
+      const deck = G.pendingCard.deck;
+      const kind = cardKind(card.action);
+      const player = G.players[ctx.currentPlayer];
+      const canRedraw = (player.rerollsLeft >= 0); // redraw availability handled by engine; show both
+      this.stateModalBoxEl.innerHTML = `
+        <div class="evcard evcard--${kind}">
+          <div class="evcard__deck">${deck === 'chance' ? 'CHANCE' : 'COMMUNITY CHEST'}</div>
+          <div class="evcard__glyph">${glyphHtml(deck === 'chance' ? 'q' : 'chest')}</div>
+          <div class="evcard__text">${esc(card.text)}</div>
+          <div class="evcard__tag evcard__tag--${kind}">${kind === 'good' ? 'FORTUNE' : kind === 'bad' ? 'HAZARD' : 'EVENT'}</div>
+          <div class="evcard__btns">
+            <button class="pix-btn pix-btn--primary" id="ev-accept">ACCEPT</button>
+            <button class="pix-btn pix-btn--default" id="ev-redraw">REDRAW</button>
+          </div>
+        </div>`;
+      this.stateModalEl.classList.add('open');
+      document.getElementById('ev-accept').onclick = () => this.client.moves.acceptCard();
+      document.getElementById('ev-redraw').onclick = () => this.client.moves.redrawCard();
+      return;
+    }
+
+    if (G.auction && G.turnPhase === 'auction') {
+      const a = G.auction;
+      const space = this.boardSpaces[a.propertyId];
+      const currentBidder = a.bidders[a.currentBidderIndex];
+      const minBid = a.currentBid === 0 ? RULES.auction.startingBid : a.currentBid + RULES.auction.minimumIncrement;
+      const leaderId = a.currentBidder;
+      const biddersHtml = a.bidders.map(b => {
+        const p = G.players[b.playerId];
+        const nm = p.character ? p.character.name : `Player ${parseInt(b.playerId) + 1}`;
+        const isLead = leaderId !== null && String(leaderId) === String(b.playerId);
+        const state = b.passed ? 'PASS' : (isLead ? 'LEADS' : 'IN');
+        return `<div class="auction__bidder ${b.passed ? 'out' : ''} ${isLead ? 'lead' : ''}">${tokenHtml(this._playerColor(G, b.playerId), p.character ? p.character.name[0] : parseInt(b.playerId) + 1, true)}<span>${esc(nm)}</span><span class="auction__bstate">${state}</span></div>`;
+      }).join('');
+      const curName = G.players[currentBidder.playerId].character ? G.players[currentBidder.playerId].character.name : `Player ${parseInt(currentBidder.playerId) + 1}`;
+      this.stateModalBoxEl.innerHTML = `
+        <div class="auction">
+          <div class="auction__head">AUCTION</div>
+          <div class="auction__lot">
+            <span class="auction__bar" style="background:${space.color || 'var(--accent)'}"></span>
+            <div class="auction__lotname">${esc(space.name)}</div>
+            <div class="auction__listed">Listed $${space.price}</div>
+          </div>
+          <div class="auction__bidbox">
+            <span class="auction__bidlabel">CURRENT BID</span>
+            <span class="auction__bidval">$${a.currentBid || 0}</span>
+            <span class="auction__leader">TO BID: ${esc(curName)}</span>
+          </div>
+          <div class="auction__bidders">${biddersHtml}</div>
+          <div class="auction__bidctl"><input type="number" id="bid-amount" min="${minBid}" value="${minBid}" step="${RULES.auction.minimumIncrement}" /></div>
+          <div class="auction__actions">
+            <button class="pix-btn pix-btn--ghost" id="btn-pass-auction">PASS</button>
+            <button class="pix-btn pix-btn--primary" id="btn-bid">BID</button>
+          </div>
+        </div>`;
+      this.stateModalEl.classList.add('open');
+      document.getElementById('btn-bid').onclick = () => {
+        const amount = parseInt(document.getElementById('bid-amount').value);
+        if (!isNaN(amount)) this.client.moves.placeBid(amount);
       };
-    });
+      document.getElementById('btn-pass-auction').onclick = () => this.client.moves.passAuction();
+      return;
+    }
+
+    if (G.trade && G.turnPhase === 'trade') {
+      const t = G.trade;
+      const proposer = G.players[t.proposerId];
+      const target = G.players[t.targetPlayerId];
+      const pName = proposer.character ? proposer.character.name : `Player ${parseInt(t.proposerId) + 1}`;
+      const tName = target.character ? target.character.name : `Player ${parseInt(t.targetPlayerId) + 1}`;
+      const propList = (ids, mny) => {
+        let h = ids.map(pid => `<div class="trade__prop"><span class="trade__propbar" style="background:${this.boardSpaces[pid].color || 'var(--ink-dim)'}"></span><span class="trade__propname">${esc(this.boardSpaces[pid].name)}</span></div>`).join('');
+        if (mny > 0) h += `<div class="trade__prop"><span class="trade__propname">${money(mny)}</span></div>`;
+        return h || '<div class="trade__empty">Nothing</div>';
+      };
+      this.stateModalBoxEl.innerHTML = `
+        <div class="trade">
+          <div class="trade__head">TRADE PROPOSAL</div>
+          <div class="trade__cols">
+            <div class="trade__side">
+              <div class="trade__sidehead">${tokenHtml(this._playerColor(G, t.proposerId), proposer.character ? proposer.character.name[0] : parseInt(t.proposerId) + 1, true)}<span style="color:${this._playerColor(G, t.proposerId)}">${esc(pName)}</span></div>
+              <div class="trade__proplist">${propList(t.offeredProperties, t.offeredMoney)}</div>
+            </div>
+            <div class="trade__swap">${glyphHtml('swap')}</div>
+            <div class="trade__side">
+              <div class="trade__sidehead">${tokenHtml(this._playerColor(G, t.targetPlayerId), target.character ? target.character.name[0] : parseInt(t.targetPlayerId) + 1, true)}<span style="color:${this._playerColor(G, t.targetPlayerId)}">${esc(tName)}</span></div>
+              <div class="trade__proplist">${propList(t.requestedProperties, t.requestedMoney)}</div>
+            </div>
+          </div>
+          <div class="trade__actions">
+            <button class="pix-btn pix-btn--ghost" id="btn-cancel-trade">CANCEL</button>
+            <button class="pix-btn pix-btn--danger" id="btn-reject-trade">REJECT</button>
+            <button class="pix-btn pix-btn--success" id="btn-accept-trade">ACCEPT</button>
+          </div>
+        </div>`;
+      this.stateModalEl.classList.add('open');
+      document.getElementById('btn-accept-trade').onclick = () => this.client.moves.acceptTrade();
+      document.getElementById('btn-reject-trade').onclick = () => this.client.moves.rejectTrade();
+      document.getElementById('btn-cancel-trade').onclick = () => this.client.moves.cancelTrade();
+      return;
+    }
+
+    this.stateModalEl.classList.remove('open');
+    this.stateModalBoxEl.innerHTML = '';
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Results
+  // ─────────────────────────────────────────────────────────
+  renderResults(G, ctx) {
+    // Prefer the engine's computed standings (mortgage-corrected net worth + tie-break).
+    let standings = ctx.gameover.standings;
+    if (!standings) {
+      standings = G.players.filter(p => !p.bankrupt).map(p => ({ id: p.id, score: p.money, props: p.properties.length, groups: 0 }));
+    }
+    const winnerId = String(ctx.gameover.winner);
+    const winnerEntry = standings.find(s => String(s.id) === winnerId) || standings[0];
+    const wIdx = parseInt(winnerEntry.id);
+    const wChar = G.players[wIdx].character;
+    const wName = wChar ? wChar.name : `Player ${wIdx + 1}`;
+    const wColor = this._playerColor(G, wIdx);
+
+    let reason;
+    if (ctx.gameover.reason === 'dominion') reason = `${wName} controls ${winnerEntry.groups} color groups.`;
+    else if (ctx.gameover.reason === 'maxTurns') reason = `Turn limit reached — richest wins.`;
+    else if (ctx.gameover.reason === 'survival') reason = `${wName} is the last one standing.`;
+    else reason = `${wName} controls the Council.`;
+
+    const rows = standings.map((s, idx) => {
+      const i = parseInt(s.id);
+      const ch = G.players[i].character;
+      const nm = ch ? ch.name : `Player ${i + 1}`;
+      const col = this._playerColor(G, i);
+      return `<div class="standrow">
+        <span class="standrow__rank">${idx + 1}</span>
+        ${tokenHtml(col, ch ? ch.name[0] : i + 1, true)}
+        <span class="standrow__name" style="color:${col}">${esc(nm)}</span>
+        <span class="standrow__props">${s.props} PROPS</span>
+        <span class="standrow__net">${money(s.score)}</span>
+      </div>`;
+    }).join('');
+
+    this.resultsEl.className = 'screen screen--results';
+    this.resultsEl.innerHTML = `
+      <div class="results__crown">${glyphHtml('crown')}</div>
+      <div class="results__victory">VICTORY</div>
+      ${portraitHtml(wChar, 120, true)}
+      <div class="results__winner" style="color:${wColor}">${esc(wName)}</div>
+      <div class="results__sub">${esc(reason)}</div>
+      <div class="pix-panel results__table">
+        <div class="pix-panel__titlebar"><span class="pix-panel__title">FINAL STANDINGS</span></div>
+        <div class="pix-panel__body">${rows}</div>
+      </div>
+      <button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-replay">PLAY AGAIN</button>
+    `;
+    document.getElementById('btn-replay').onclick = () => this.exitToMenu();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // UI modals (lore / trade builder / AI settings / saves)
+  // ─────────────────────────────────────────────────────────
+  openUiModal(html, wide) {
+    this.uiModalBoxEl.className = `modal ${wide ? 'modal--wide' : ''}`;
+    this.uiModalBoxEl.innerHTML = html;
+    this.uiModalEl.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  closeUiModal() {
+    this.uiModalEl.classList.remove('open');
+    this.uiModalBoxEl.innerHTML = '';
+    document.body.style.overflow = '';
   }
 
   showLoreModal(charId) {
     const char = CHARACTERS.find(c => c.id === charId);
     const lore = getLoreById(charId);
     if (!char || !lore) return;
-
-    this.loreBodyEl.innerHTML = `
-      <div class="lore-header">
-        <div class="lore-portrait" style="border-color: ${char.color}">
-          ${char.portrait
-            ? `<img src="${char.portrait}" alt="${char.name}" />`
-            : `<div class="char-placeholder">${char.name[0]}</div>`
-          }
-        </div>
-        <div class="lore-title-block">
-          <div class="lore-name" style="color: ${char.color}">${lore.nameZh}（${char.name}）</div>
-          <div class="lore-title-zh">${lore.titleZh}</div>
-          <div class="lore-identity">${lore.identity}</div>
-          <div class="lore-alignment">${lore.alignment}</div>
-        </div>
-      </div>
-
-      <div class="lore-section">
-        <h3>角色背景故事</h3>
-        ${renderLoreText(lore.background)}
-      </div>
-
-      ${lore.noticed ? `<div class="lore-section">
-        <h3>被议会注意到的原因</h3>
-        ${renderLoreText(lore.noticed)}
-      </div>` : ''}
-
-      <div class="lore-section">
-        <h3>加入维度议会</h3>
-        ${renderLoreText(lore.joining)}
-      </div>
-
-      <div class="lore-section">
-        <h3>行事风格</h3>
-        ${lore.styleIntro ? renderLoreText(lore.styleIntro) : ''}
-        <ol class="lore-beliefs">
-          ${lore.style.map(s => `<li>${s.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</li>`).join('')}
-        </ol>
-        ${lore.styleOutro ? renderLoreText(lore.styleOutro) : ''}
-      </div>
-
-      <div class="lore-section">
-        <h3>与其他代理人的关系</h3>
-        <ul class="lore-relations">
-          ${lore.relationships.map(r =>
-            `<li><strong>${r.target}</strong>：${r.description}</li>`
-          ).join('')}
-        </ul>
-      </div>
-
-      <div class="lore-quote">
-        <blockquote>${lore.themeSummary.replace(/\n/g, '<br/>')}</blockquote>
-      </div>
+    const sections = `
+      <div class="lore__sectlabel">背景故事</div>
+      <div class="lore__body">${renderLoreText(lore.background)}</div>
+      ${lore.noticed ? `<div class="lore__sectlabel">被议会注意到的原因</div><div class="lore__body">${renderLoreText(lore.noticed)}</div>` : ''}
+      <div class="lore__sectlabel">加入维度议会</div>
+      <div class="lore__body">${renderLoreText(lore.joining)}</div>
+      <div class="lore__sectlabel">行事风格</div>
+      <div class="lore__body">${lore.styleIntro ? renderLoreText(lore.styleIntro) : ''}<ol>${lore.style.map(s => `<li>${s.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</li>`).join('')}</ol>${lore.styleOutro ? renderLoreText(lore.styleOutro) : ''}</div>
+      <div class="lore__sectlabel">与其他代理人的关系</div>
+      <div class="lore__body"><ul>${lore.relationships.map(r => `<li><strong>${esc(r.target)}</strong>：${esc(r.description)}</li>`).join('')}</ul></div>
+      <div class="lore__body"><blockquote>${lore.themeSummary.replace(/\n/g, '<br/>')}</blockquote></div>
     `;
-
-    this.loreModalEl.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
+    const startMoney = RULES.core.baseStartingMoney + char.stats.capital * RULES.stats.capital.startingMoneyBonus;
+    this.openUiModal(`
+      <div class="lore">
+        <div class="lore__left">
+          ${portraitHtml(char, 150, true)}
+          <div class="lore__name" style="color:${char.color}">${esc(lore.nameZh)}<br/>${esc(char.name)}</div>
+          <div class="lore__title">${esc(lore.titleZh)}</div>
+          <div class="lore__stats">${statRowsHtml(char.stats, char.color)}</div>
+        </div>
+        <div class="lore__right">
+          <div class="lore__sectlabel">PASSIVE · ${esc(char.passive.name)}</div>
+          <div class="lore__passive">${esc(char.passive.description)}</div>
+          <div class="lore__sectlabel">STARTING CAPITAL</div>
+          <div class="lore__money">${money(startMoney)}</div>
+          ${sections}
+          <div class="lore__close"><button class="pix-btn pix-btn--primary" id="btn-lore-close">CLOSE</button></div>
+        </div>
+      </div>`, true);
+    document.getElementById('btn-lore-close').onclick = () => this.closeUiModal();
   }
 
-  hideLoreModal() {
-    this.loreModalEl.style.display = 'none';
-    document.body.style.overflow = '';
-  }
-
-  // ── AI Settings ──────────────────────────────────────
   showAISettings() {
-    const keyInput = document.getElementById('ai-key-input');
-    const verbSelect = document.getElementById('ai-verbosity-select');
-    keyInput.value = this.characterAI.apiKey;
-    verbSelect.value = this.characterAI.verbosity;
+    const connected = !!this.characterAI.apiKey;
+    this.openUiModal(`
+      <div class="aiset">
+        <div class="aiset__head">AI CHARACTER SETTINGS</div>
+        <div class="aiset__status ${connected ? 'on' : 'off'}">${connected ? 'CONNECTED' : 'NO API KEY'}</div>
+        <div class="aiset__field">
+          <span class="aiset__label">OpenAI API Key</span>
+          <input type="password" id="ai-key-input" placeholder="sk-..." value="${esc(this.characterAI.apiKey)}" />
+          <span class="aiset__hint">Stored locally in your browser. Sent only to OpenAI.</span>
+        </div>
+        <div class="aiset__field">
+          <span class="aiset__label">Response Verbosity</span>
+          <select id="ai-verbosity-select">
+            <option value="off">Off (no AI responses)</option>
+            <option value="major">Major events only (recommended)</option>
+            <option value="all">All events</option>
+          </select>
+          <span class="aiset__hint">How often characters comment on game events.</span>
+        </div>
+        <div class="aiset__actions">
+          <button class="pix-btn pix-btn--ghost" id="btn-ai-cancel">CANCEL</button>
+          <button class="pix-btn pix-btn--primary" id="btn-ai-save">SAVE</button>
+        </div>
+      </div>`);
+    document.getElementById('ai-verbosity-select').value = this.characterAI.verbosity;
+    document.getElementById('btn-ai-cancel').onclick = () => this.closeUiModal();
+    document.getElementById('btn-ai-save').onclick = () => {
+      const key = document.getElementById('ai-key-input').value.trim();
+      const verbosity = document.getElementById('ai-verbosity-select').value;
+      this.characterAI.setApiKey(key);
+      this.characterAI.setVerbosity(verbosity);
+      localStorage.setItem('meinopoly_ai_key', key);
+      localStorage.setItem('meinopoly_ai_verbosity', verbosity);
+      this.closeUiModal();
+    };
+  }
 
-    const statusEl = document.getElementById('ai-status-display');
-    if (this.characterAI.apiKey) {
-      statusEl.innerHTML = '<span class="ai-status connected">Connected</span>';
+  showSavesModal() {
+    const saves = MonopolyBoard.getSaves();
+    const entries = Object.entries(saves).sort((a, b) => b[1].timestamp - a[1].timestamp);
+    let body;
+    if (entries.length === 0) {
+      body = '<div class="saves__empty">No saved games. Save during play to see them here.</div>';
     } else {
-      statusEl.innerHTML = '<span class="ai-status disconnected">No API key</span>';
+      body = entries.map(([name, data]) => {
+        const date = new Date(data.timestamp).toLocaleString();
+        return `<div class="saves__row">
+          <div><div class="saves__name">${esc(name.replace('meinopoly_save_', ''))}</div><div class="saves__meta">${data.numPlayers} players · Turn ${data.G.totalTurns} · ${esc(date)}</div></div>
+          <div class="saves__actions"><button class="pix-btn pix-btn--success pix-btn--sm btn-load-save" data-save="${esc(name)}">LOAD</button><button class="pix-btn pix-btn--danger pix-btn--sm btn-delete-save" data-save="${esc(name)}">DEL</button></div>
+        </div>`;
+      }).join('');
     }
-
-    this.aiSettingsModalEl.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
+    this.openUiModal(`<div class="saves"><div class="saves__head">SAVED GAMES</div>${body}<div class="aiset__actions"><button class="pix-btn pix-btn--ghost" id="btn-saves-close">CLOSE</button></div></div>`);
+    document.getElementById('btn-saves-close').onclick = () => this.closeUiModal();
+    this.uiModalBoxEl.querySelectorAll('.btn-load-save').forEach(btn => {
+      btn.onclick = () => {
+        const data = MonopolyBoard.getSaves()[btn.dataset.save];
+        if (data) { this.loadGame(data); this.closeUiModal(); }
+      };
+    });
+    this.uiModalBoxEl.querySelectorAll('.btn-delete-save').forEach(btn => {
+      btn.onclick = () => { MonopolyBoard.deleteSave(btn.dataset.save); this.showSavesModal(); };
+    });
   }
 
-  hideAISettings() {
-    this.aiSettingsModalEl.style.display = 'none';
-    document.body.style.overflow = '';
+  // Trade builder modal
+  showTradeModal(G, ctx) {
+    const player = G.players[ctx.currentPlayer];
+    const opponents = G.players.filter(p => p.id !== ctx.currentPlayer && !p.bankrupt);
+    if (opponents.length === 0) return;
+    this._tradeState = { G, ctx, player, opponents, selectedIndex: 0, myPicks: [], oppPicks: [], myCash: 0, oppCash: 0 };
+    this._renderTradeBuilder();
   }
 
-  saveAISettings() {
-    const key = document.getElementById('ai-key-input').value.trim();
-    const verbosity = document.getElementById('ai-verbosity-select').value;
-    this.characterAI.setApiKey(key);
-    this.characterAI.setVerbosity(verbosity);
-    localStorage.setItem('meinopoly_ai_key', key);
-    localStorage.setItem('meinopoly_ai_verbosity', verbosity);
-    this.hideAISettings();
+  _renderTradeBuilder() {
+    const s = this._tradeState;
+    const { G, ctx, player, opponents, selectedIndex } = s;
+    const target = opponents[selectedIndex];
+    const tradeable = (pl) => pl.properties
+      .filter(pid => (G.buildings[pid] || 0) === 0 && (!G.mortgaged[pid] || RULES.trading.allowMortgagedProperties))
+      .map(pid => this.boardSpaces[pid]);
+    const myProps = tradeable(player);
+    const targetProps = tradeable(target);
+    const pName = player.character ? player.character.name : `Player ${parseInt(ctx.currentPlayer) + 1}`;
+    const tName = target.character ? target.character.name : `Player ${parseInt(target.id) + 1}`;
+    const pColor = this._playerColor(G, ctx.currentPlayer);
+    const tColor = this._playerColor(G, target.id);
+
+    const sideHtml = (props, picks, who) => {
+      if (props.length === 0) return '<div class="trade__empty">No deeds to offer</div>';
+      return props.map(sp => `<button class="trade__prop ${picks.includes(sp.id) ? 'on' : ''}" data-side="${who}" data-pid="${sp.id}"><span class="trade__propbar" style="background:${sp.color || 'var(--ink-dim)'}"></span><span class="trade__propname">${esc(sp.name)}</span><span class="trade__propprice">$${sp.price}</span></button>`).join('');
+    };
+    const cashHtml = (who, val) => RULES.trading.allowMoneyInTrade
+      ? `<div class="trade__cash"><span>CASH</span><div class="trade__cashctl"><button data-cash="${who}" data-d="-50">−</button><span class="trade__cashval">$${val}</span><button data-cash="${who}" data-d="50">+</button></div></div>`
+      : '';
+
+    const fair = s.myPicks.length + s.myCash / 100 - s.oppPicks.length - s.oppCash / 100;
+    const balCls = fair > 0.5 ? 'pos' : fair < -0.5 ? 'neg' : 'even';
+    const balTxt = fair > 0.5 ? 'IN YOUR FAVOUR' : fair < -0.5 ? 'FAVOURS RIVAL' : 'ROUGHLY EVEN';
+
+    const targetSelector = opponents.length > 1
+      ? `<div class="trade__target">TRADE WITH <select id="trade-target-select">${opponents.map((o, i) => `<option value="${i}" ${i === selectedIndex ? 'selected' : ''}>${esc(o.character ? o.character.name : 'Player ' + (parseInt(o.id) + 1))}</option>`).join('')}</select></div>`
+      : '';
+
+    this.openUiModal(`
+      <div class="trade">
+        <div class="trade__head">PROPOSE TRADE</div>
+        ${targetSelector}
+        <div class="trade__cols">
+          <div class="trade__side">
+            <div class="trade__sidehead">${tokenHtml(pColor, player.character ? player.character.name[0] : parseInt(ctx.currentPlayer) + 1, true)}<span style="color:${pColor}">${esc(pName)}</span></div>
+            <div class="trade__proplist">${sideHtml(myProps, s.myPicks, 'my')}</div>
+            ${cashHtml('my', s.myCash)}
+          </div>
+          <div class="trade__swap">${glyphHtml('swap')}</div>
+          <div class="trade__side">
+            <div class="trade__sidehead">${tokenHtml(tColor, target.character ? target.character.name[0] : parseInt(target.id) + 1, true)}<span style="color:${tColor}">${esc(tName)}</span></div>
+            <div class="trade__proplist">${sideHtml(targetProps, s.oppPicks, 'opp')}</div>
+            ${cashHtml('opp', s.oppCash)}
+          </div>
+        </div>
+        <div class="trade__bal"><span>BALANCE</span><span class="trade__balval ${balCls}">${balTxt}</span></div>
+        <div class="trade__actions">
+          <button class="pix-btn pix-btn--ghost" id="btn-trade-cancel">CANCEL</button>
+          <button class="pix-btn pix-btn--primary" id="btn-trade-send">PROPOSE &#9656;</button>
+        </div>
+      </div>`, true);
+
+    const sel = document.getElementById('trade-target-select');
+    if (sel) sel.onchange = () => { s.selectedIndex = parseInt(sel.value); s.oppPicks = []; s.oppCash = 0; this._renderTradeBuilder(); };
+    this.uiModalBoxEl.querySelectorAll('.trade__prop').forEach(btn => {
+      btn.onclick = () => {
+        const pid = parseInt(btn.dataset.pid);
+        const arr = btn.dataset.side === 'my' ? s.myPicks : s.oppPicks;
+        const idx = arr.indexOf(pid);
+        if (idx >= 0) arr.splice(idx, 1); else arr.push(pid);
+        this._renderTradeBuilder();
+      };
+    });
+    this.uiModalBoxEl.querySelectorAll('[data-cash]').forEach(btn => {
+      btn.onclick = () => {
+        const d = parseInt(btn.dataset.d);
+        if (btn.dataset.cash === 'my') s.myCash = Math.max(0, Math.min(player.money, s.myCash + d));
+        else s.oppCash = Math.max(0, Math.min(target.money, s.oppCash + d));
+        this._renderTradeBuilder();
+      };
+    });
+    document.getElementById('btn-trade-cancel').onclick = () => this.closeUiModal();
+    document.getElementById('btn-trade-send').onclick = () => {
+      if (s.myPicks.length === 0 && s.oppPicks.length === 0 && s.myCash === 0 && s.oppCash === 0) return;
+      this.client.moves.proposeTrade({
+        targetPlayerId: target.id,
+        offeredProperties: s.myPicks.slice(),
+        requestedProperties: s.oppPicks.slice(),
+        offeredMoney: s.myCash,
+        requestedMoney: s.oppCash,
+      });
+      this.closeUiModal();
+    };
   }
 
-  // ── AI Event Detection ───────────────────────────────
+  // ─────────────────────────────────────────────────────────
+  // AI event detection (unchanged logic)
+  // ─────────────────────────────────────────────────────────
   detectAndTriggerAI(G, ctx) {
     if (!this.characterAI.isEnabled()) return;
     if (G.phase !== 'play') return;
 
-    // Snapshot current messages for comparison
     const currentMessages = G.messages.slice();
     const prevMessages = this._prevMessages || [];
     this._prevMessages = currentMessages;
@@ -581,20 +1317,16 @@ class MonopolyBoard {
       propertyCount: player.properties.length,
     };
 
-    // Find new messages by comparing content (handles array replacement on new turns)
     let newMessages = [];
     if (currentMessages.length >= prevMessages.length &&
         currentMessages.slice(0, prevMessages.length).every((m, i) => m === prevMessages[i])) {
-      // Messages were appended
       newMessages = currentMessages.slice(prevMessages.length);
     } else {
-      // Messages were replaced (new turn) — all current messages are new
       newMessages = currentMessages;
     }
 
     if (newMessages.length === 0 && G.seasonIndex === prevSeasonIndex) return;
 
-    // Parse new messages to determine event types
     for (const msg of newMessages) {
       const lowerMsg = msg.toLowerCase();
       let eventType = null;
@@ -602,9 +1334,7 @@ class MonopolyBoard {
 
       if (lowerMsg.includes('rolled') && lowerMsg.includes('+')) {
         eventType = EVENT_TYPES.ROLL_DICE;
-        if (G.lastDice) {
-          eventData = { d1: G.lastDice.d1, d2: G.lastDice.d2, total: G.lastDice.total, isDoubles: G.lastDice.isDoubles };
-        }
+        if (G.lastDice) eventData = { d1: G.lastDice.d1, d2: G.lastDice.d2, total: G.lastDice.total, isDoubles: G.lastDice.isDoubles };
       } else if (lowerMsg.includes('available') && (lowerMsg.includes('buy or pass') || lowerMsg.includes('listed'))) {
         eventType = EVENT_TYPES.LAND_PROPERTY_BUY;
         eventData = { spaceName: msg, price: 0, money: player.money };
@@ -640,12 +1370,9 @@ class MonopolyBoard {
         eventData = { playerName: msg };
       }
 
-      if (eventType) {
-        this._triggerAIResponse(char, eventType, eventData, gameState);
-      }
+      if (eventType) this._triggerAIResponse(char, eventType, eventData, gameState);
     }
 
-    // Season change detection
     if (prevSeasonIndex !== undefined && G.seasonIndex !== prevSeasonIndex) {
       const newSeason = SEASONS[G.seasonIndex] ? SEASONS[G.seasonIndex].name : '';
       this._triggerAIResponse(char, EVENT_TYPES.SEASON_CHANGE, { newSeason }, gameState);
@@ -654,175 +1381,103 @@ class MonopolyBoard {
 
   async _triggerAIResponse(char, eventType, eventData, gameState) {
     const lore = getLoreById(char.id);
-
-    // Add loading indicator
     this._nextAIId = (this._nextAIId || 0) + 1;
     const loadingId = this._nextAIId;
-    this.aiResponses.push({
-      id: loadingId,
-      charName: char.name,
-      charColor: char.color,
-      portrait: char.portrait,
-      text: null, // null = loading
-    });
+    this.aiResponses.push({ id: loadingId, charName: char.name, charColor: char.color, portrait: char.portrait, text: null });
     this._renderAIResponses();
 
     const text = await this.characterAI.respondToEvent(char, lore, eventType, eventData, gameState);
-
-    // Update the loading entry with the actual response
     const entry = this.aiResponses.find(r => r.id === loadingId);
     if (entry) {
-      if (text) {
-        entry.text = text;
-      } else {
-        // Remove failed/null responses
-        this.aiResponses = this.aiResponses.filter(r => r.id !== loadingId);
-      }
+      if (text) entry.text = text;
+      else this.aiResponses = this.aiResponses.filter(r => r.id !== loadingId);
     }
-
-    // Keep only last 8 responses
-    if (this.aiResponses.length > 8) {
-      this.aiResponses = this.aiResponses.slice(-8);
-    }
-
+    if (this.aiResponses.length > 8) this.aiResponses = this.aiResponses.slice(-8);
     this._renderAIResponses();
   }
 
   _renderAIResponses() {
     if (!this.aiResponsesEl) return;
-    if (this.aiResponses.length === 0) {
-      this.aiResponsesEl.innerHTML = '';
-      return;
-    }
-
-    let html = '';
+    if (this.aiResponses.length === 0) { this.aiResponsesEl.innerHTML = ''; return; }
+    let items = '';
     this.aiResponses.forEach(r => {
       const avatar = r.portrait
-        ? `<img class="ai-response-avatar" src="${r.portrait}" alt="${r.charName}" />`
-        : `<div class="ai-response-avatar-placeholder" style="background:${r.charColor}">${r.charName[0]}</div>`;
-
+        ? `<div class="aibubble__av"><img src="${r.portrait}" alt="" /></div>`
+        : `<div class="aibubble__av aibubble__avph" style="background:${r.charColor}">${esc(r.charName[0])}</div>`;
       const textHtml = r.text === null
-        ? '<div class="ai-response-loading">Thinking...</div>'
-        : `<div class="ai-response-text">${this._escapeHtml(r.text)}</div>`;
-
-      html += `<div class="ai-response">
-        ${avatar}
-        <div class="ai-response-body">
-          <div class="ai-response-name" style="color:${r.charColor}">${r.charName}</div>
-          ${textHtml}
-        </div>
-      </div>`;
+        ? '<div class="aibubble__loading">Thinking…</div>'
+        : `<div class="aibubble__text">${esc(r.text)}</div>`;
+      items += `<div class="aibubble">${avatar}<div class="aibubble__body"><div class="aibubble__name" style="color:${r.charColor}">${esc(r.charName)}</div>${textHtml}</div></div>`;
     });
-
-    this.aiResponsesEl.innerHTML = html;
+    this.aiResponsesEl.innerHTML = `<div class="airesp"><div class="airesp__title">COUNCIL CHATTER</div><div class="airesp__list">${items}</div></div>`;
   }
 
-  _escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
+  _escapeHtml(text) { return esc(text); }
 
-  // ── Chat Panel ───────────────────────────────────────
+  // ─────────────────────────────────────────────────────────
+  // Chat panel (unchanged logic, pixel markup)
+  // ─────────────────────────────────────────────────────────
   renderChatPanel(G, ctx) {
     if (!this.chatPanelEl) return;
-    if (!G || G.phase !== 'play') {
-      this.chatPanelEl.innerHTML = '';
-      return;
-    }
+    if (!G || G.phase !== 'play') { this.chatPanelEl.innerHTML = ''; return; }
+    const chars = G.players.filter(p => p.character).map(p => p.character);
+    if (chars.length === 0) { this.chatPanelEl.innerHTML = ''; return; }
 
-    // Build list of chattable characters
-    const chars = G.players
-      .filter(p => p.character)
-      .map(p => p.character);
-
-    if (chars.length === 0) {
-      this.chatPanelEl.innerHTML = '';
-      return;
-    }
-
-    // Default to current player's character
-    if (!this.activeChatCharId || !chars.find(c => c.id === this.activeChatCharId)) {
-      this.activeChatCharId = chars[0].id;
-    }
-
+    if (!this.activeChatCharId || !chars.find(c => c.id === this.activeChatCharId)) this.activeChatCharId = chars[0].id;
     const activeChar = chars.find(c => c.id === this.activeChatCharId);
     const history = this.chatHistories[this.activeChatCharId] || [];
 
-    // Tabs
-    let tabsHtml = '';
-    chars.forEach(c => {
-      const isActive = c.id === this.activeChatCharId;
-      tabsHtml += `<div class="chat-tab ${isActive ? 'active' : ''}" data-chat-char="${c.id}" style="${isActive ? '' : 'border-color:' + c.color + '33;'}">${c.name.split(' ')[0]}</div>`;
-    });
+    const tabs = chars.map(c => `<div class="chat__tab ${c.id === this.activeChatCharId ? 'active' : ''}" data-chat-char="${c.id}" style="${c.id === this.activeChatCharId ? 'color:' + c.color + ';border-color:' + c.color : ''}">${esc(c.name.split(' ')[0])}</div>`).join('');
 
-    // Messages
-    let msgsHtml = '';
+    let msgs;
     if (history.length === 0) {
-      msgsHtml = '<div class="chat-empty">Start a conversation with ' + activeChar.name + '</div>';
+      msgs = `<div class="chat__empty">Start a conversation with ${esc(activeChar.name)}</div>`;
     } else {
-      history.forEach(msg => {
-        if (msg.role === 'user') {
-          msgsHtml += `<div class="chat-msg user"><div class="chat-sender">You</div>${this._escapeHtml(msg.content)}</div>`;
-        } else {
-          msgsHtml += `<div class="chat-msg ai"><div class="chat-sender" style="color:${activeChar.color}">${activeChar.name}</div>${this._escapeHtml(msg.content)}</div>`;
-        }
-      });
+      msgs = history.map(m => m.role === 'user'
+        ? `<div class="chat__msg user"><div class="chat__sender">YOU</div>${esc(m.content)}</div>`
+        : `<div class="chat__msg ai"><div class="chat__sender" style="color:${activeChar.color}">${esc(activeChar.name)}</div>${esc(m.content)}</div>`).join('');
     }
 
     const disabled = !this.characterAI.apiKey ? 'disabled' : '';
-    const placeholder = !this.characterAI.apiKey ? 'Set API key in AI Settings first' : 'Type a message...';
-
+    const placeholder = !this.characterAI.apiKey ? 'Set API key in AI settings' : 'Type a message…';
     this.chatPanelEl.innerHTML = `
-      <div class="chat-panel">
-        <h3>Chat</h3>
-        <div class="chat-tabs">${tabsHtml}</div>
-        <div class="chat-messages" id="chat-messages-scroll">${msgsHtml}</div>
-        <div class="chat-input-row">
-          <input class="chat-input" id="chat-input" type="text" placeholder="${placeholder}" ${disabled} />
-          <button class="btn-chat-send" id="btn-chat-send" ${disabled}>Send</button>
+      <div class="chat">
+        <div class="chat__title">CHAT</div>
+        <div class="chat__tabs">${tabs}</div>
+        <div class="chat__msgs" id="chat-scroll">${msgs}</div>
+        <div class="chat__inputrow">
+          <input type="text" id="chat-input" placeholder="${placeholder}" ${disabled} />
+          <button class="pix-btn pix-btn--primary pix-btn--sm" id="btn-chat-send" ${disabled}>SEND</button>
         </div>
       </div>`;
 
-    // Auto-scroll to bottom
-    const scrollEl = document.getElementById('chat-messages-scroll');
+    const scrollEl = document.getElementById('chat-scroll');
     if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
 
-    // Tab click handlers
-    this.chatPanelEl.querySelectorAll('.chat-tab').forEach(tab => {
-      tab.onclick = () => {
-        this.activeChatCharId = tab.dataset.chatChar;
-        this.renderChatPanel(G, ctx);
-      };
+    this.chatPanelEl.querySelectorAll('.chat__tab').forEach(tab => {
+      tab.onclick = () => { this.activeChatCharId = tab.dataset.chatChar; this.renderChatPanel(G, ctx); };
     });
-
-    // Send handler
     const inputEl = document.getElementById('chat-input');
     const sendBtn = document.getElementById('btn-chat-send');
-    const sendMessage = () => {
+    const send = () => {
       const text = inputEl.value.trim();
       if (!text) return;
       inputEl.value = '';
       this._sendChat(this.activeChatCharId, text, G, ctx);
     };
-    if (sendBtn) sendBtn.onclick = sendMessage;
-    if (inputEl) inputEl.onkeydown = (e) => { if (e.key === 'Enter') sendMessage(); };
+    if (sendBtn) sendBtn.onclick = send;
+    if (inputEl) inputEl.onkeydown = (e) => { if (e.key === 'Enter') send(); };
   }
 
   async _sendChat(charId, userMessage, G, ctx) {
     const char = CHARACTERS.find(c => c.id === charId);
     if (!char) return;
     const lore = getLoreById(charId);
-
-    // Initialize history for this character if needed
     if (!this.chatHistories[charId]) this.chatHistories[charId] = [];
     const history = this.chatHistories[charId];
-
-    // Add user message
     history.push({ role: 'user', content: userMessage });
     this.renderChatPanel(G, ctx);
 
-    // Build game state context
     const player = G.players[ctx.currentPlayer];
     const gameState = {
       turnNumber: G.totalTurns,
@@ -837,45 +1492,29 @@ class MonopolyBoard {
     };
 
     const response = await this.characterAI.chat(char, lore, userMessage, history.slice(0, -1), gameState);
-    if (response) {
-      history.push({ role: 'assistant', content: response });
-    } else {
-      history.push({ role: 'assistant', content: '(No response — check your API key in AI Settings)' });
-    }
-
+    history.push({ role: 'assistant', content: response || '(No response — check your API key in AI settings)' });
     this.renderChatPanel(G, ctx);
   }
 
-  // ── Character Selection Chat ─────────────────────────
   async _charSelectIntro(charId) {
     if (!this.characterAI.apiKey) return;
-
     const char = CHARACTERS.find(c => c.id === charId);
     if (!char) return;
     const lore = getLoreById(charId);
-
-    // Set loading state
     const chatEl = document.getElementById('char-chat-' + charId);
-    if (chatEl) chatEl.innerHTML = '<div class="char-select-chat-loading">Thinking...</div>';
-
+    if (chatEl) { chatEl.style.display = 'block'; chatEl.innerHTML = '<div class="charcard__intro">Thinking…</div>'; }
     const text = await this.characterAI.introduce(char, lore);
     const el = document.getElementById('char-chat-' + charId);
-    if (el) {
-      if (text) {
-        el.innerHTML = `<div class="char-select-chat-text">"${this._escapeHtml(text)}"</div>`;
-      } else {
-        el.innerHTML = '';
-      }
-    }
+    if (el) el.innerHTML = text ? `<div class="charcard__intro">"${esc(text)}"</div>` : '';
   }
 
+  // ─────────────────────────────────────────────────────────
+  // Lifecycle / save-load
+  // ─────────────────────────────────────────────────────────
   exitToMenu() {
-    if (this.client) {
-      this.client.stop();
-      this.client = null;
-    }
+    if (this.client) { this.client.stop(); this.client = null; }
     this.onlinePlayerID = null;
-    this._themeApplied = false;
+    this._pendingCharId = null;
     this.aiResponses = [];
     this.chatHistories = {};
     this.activeChatCharId = null;
@@ -883,742 +1522,15 @@ class MonopolyBoard {
     this._prevSeasonIdx = undefined;
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
-    this.exitBtnEl.style.display = 'none';
+    this.closeUiModal();
+    this.stateModalEl.classList.remove('open');
+    setVictoryConfig(null);
     this.setMap(classicMapJson);
     this.showModeSelect();
   }
 
-  showTradeModal(G, ctx) {
-    const player = G.players[ctx.currentPlayer];
-    const opponents = G.players.filter(p => p.id !== ctx.currentPlayer && !p.bankrupt);
-    if (opponents.length === 0) return;
-
-    this._tradeState = { G, ctx, player, opponents, selectedIndex: 0 };
-    this._renderTradeModalContent();
-    this.loreModalEl.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-  }
-
-  _renderTradeModalContent() {
-    const { G, ctx, player, opponents, selectedIndex } = this._tradeState;
-    const target = opponents[selectedIndex];
-
-    const myProps = player.properties
-      .filter(pid => (G.buildings[pid] || 0) === 0 && (!G.mortgaged[pid] || RULES.trading.allowMortgagedProperties))
-      .map(pid => this.boardSpaces[pid]);
-    const targetProps = target.properties
-      .filter(pid => (G.buildings[pid] || 0) === 0 && (!G.mortgaged[pid] || RULES.trading.allowMortgagedProperties))
-      .map(pid => this.boardSpaces[pid]);
-
-    const playerName = player.character ? player.character.name : `Player ${parseInt(ctx.currentPlayer) + 1}`;
-    const targetName = target.character ? target.character.name : `Player ${parseInt(target.id) + 1}`;
-
-    // Target selector (dropdown for 3+ players)
-    const targetSelector = opponents.length > 1
-      ? `<div class="trade-target-select">
-          <label>Trade with:
-            <select id="trade-target-select">
-              ${opponents.map((opp, i) => {
-                const oppName = opp.character ? opp.character.name : `Player ${parseInt(opp.id) + 1}`;
-                return `<option value="${i}" ${i === selectedIndex ? 'selected' : ''}>${oppName}</option>`;
-              }).join('')}
-            </select>
-          </label>
-        </div>`
-      : '';
-
-    this.loreBodyEl.innerHTML = `
-      <div class="trade-modal-content">
-        <h3>Propose Trade</h3>
-        ${targetSelector}
-        <div class="trade-builder">
-          <div class="trade-col">
-            <h4>${playerName} Offers:</h4>
-            <div class="trade-props-select">
-              ${myProps.map(sp => `
-                <label class="trade-prop-option">
-                  <input type="checkbox" value="${sp.id}" class="offer-prop" />
-                  <span style="border-left: 3px solid ${sp.color || '#666'}; padding-left: 4px;">${sp.name}</span>
-                </label>
-              `).join('') || '<p>No tradeable properties</p>'}
-            </div>
-            ${RULES.trading.allowMoneyInTrade ? `
-              <div class="trade-money-input">
-                <label>Offer $: <input type="number" id="offer-money" min="0" max="${player.money}" value="0" /></label>
-              </div>
-            ` : ''}
-          </div>
-          <div class="trade-col">
-            <h4>Request from ${targetName}:</h4>
-            <div class="trade-props-select">
-              ${targetProps.map(sp => `
-                <label class="trade-prop-option">
-                  <input type="checkbox" value="${sp.id}" class="request-prop" />
-                  <span style="border-left: 3px solid ${sp.color || '#666'}; padding-left: 4px;">${sp.name}</span>
-                </label>
-              `).join('') || '<p>No tradeable properties</p>'}
-            </div>
-            ${RULES.trading.allowMoneyInTrade ? `
-              <div class="trade-money-input">
-                <label>Request $: <input type="number" id="request-money" min="0" max="${target.money}" value="0" /></label>
-              </div>
-            ` : ''}
-          </div>
-        </div>
-        <div class="trade-submit">
-          <button id="btn-submit-trade" class="btn btn-success">Send Proposal</button>
-          <button id="btn-cancel-trade-modal" class="btn btn-secondary">Cancel</button>
-        </div>
-      </div>
-    `;
-
-    // Target selector change handler
-    const selectEl = document.getElementById('trade-target-select');
-    if (selectEl) {
-      selectEl.onchange = () => {
-        this._tradeState.selectedIndex = parseInt(selectEl.value);
-        this._renderTradeModalContent();
-      };
-    }
-
-    // Submit/cancel handlers
-    document.getElementById('btn-submit-trade').onclick = () => {
-      const offeredProperties = Array.from(document.querySelectorAll('.offer-prop:checked')).map(cb => parseInt(cb.value));
-      const requestedProperties = Array.from(document.querySelectorAll('.request-prop:checked')).map(cb => parseInt(cb.value));
-      const offerMoneyEl = document.getElementById('offer-money');
-      const requestMoneyEl = document.getElementById('request-money');
-      const offeredMoney = parseInt((offerMoneyEl && offerMoneyEl.value) || '0');
-      const requestedMoney = parseInt((requestMoneyEl && requestMoneyEl.value) || '0');
-
-      if (offeredProperties.length === 0 && requestedProperties.length === 0 && offeredMoney === 0 && requestedMoney === 0) {
-        return;
-      }
-
-      this.client.moves.proposeTrade({
-        targetPlayerId: target.id,
-        offeredProperties,
-        requestedProperties,
-        offeredMoney,
-        requestedMoney,
-      });
-      this.hideLoreModal();
-    };
-    document.getElementById('btn-cancel-trade-modal').onclick = () => {
-      this.hideLoreModal();
-    };
-  }
-
-  renderSeason(G) {
-    const season = SEASONS[G.seasonIndex];
-    let effects = '';
-    if (season.priceMod !== 1.0) {
-      const pct = Math.round((season.priceMod - 1) * 100);
-      effects += `<span class="season-effect">Prices ${pct > 0 ? '+' : ''}${pct}%</span>`;
-    }
-    if (season.rentMod !== 1.0) {
-      const pct = Math.round((season.rentMod - 1) * 100);
-      effects += `<span class="season-effect">Rent +${pct}%</span>`;
-    }
-    if (season.taxMod !== 1.0) {
-      effects += `<span class="season-effect">Tax x${season.taxMod}</span>`;
-    }
-    const turnLabel = RULES.core.maxTurns > 0
-      ? `Turn ${G.totalTurns} / ${RULES.core.maxTurns}`
-      : `Turn ${G.totalTurns}`;
-    this.seasonDisplayEl.innerHTML = `
-      <span class="season-icon">${season.icon}</span>
-      <span class="season-name">${season.name}</span>
-      <span class="season-turn">${turnLabel}</span>
-      ${effects}
-      ${RULES.core.freeParkingPot && G.freeParkingPot > 0
-        ? `<span class="season-effect">Parking Pot: $${G.freeParkingPot}</span>`
-        : ''}
-    `;
-  }
-
-  // Apply map theme as CSS custom properties on the board wrapper
-  applyTheme() {
-    const t = this.mapData.theme;
-    const wrapper = this.boardEl.parentElement;
-    wrapper.style.setProperty('--board-bg', t.boardBackground);
-    wrapper.style.setProperty('--board-border', t.boardBorder);
-    wrapper.style.setProperty('--cell-bg', t.cellBackground);
-    wrapper.style.setProperty('--cell-border', t.cellBorder);
-    wrapper.style.setProperty('--corner-bg', t.cornerBackground);
-    wrapper.style.setProperty('--text-color', t.textColor);
-    wrapper.style.setProperty('--center-bg', t.centerBackground);
-    wrapper.style.setProperty('--logo-color', t.logoColor);
-    wrapper.style.setProperty('--logo-sub-color', t.logoSubColor);
-  }
-
-  // Build HTML for a single board cell
-  _renderCell(spaceId, G, options) {
-    const space = this.boardSpaces[spaceId];
-    const isCorner = this.mapData.cornerIds.includes(spaceId);
-    const owner = G.ownership[spaceId];
-    const ownerColor = owner !== null && owner !== undefined ? PLAYER_COLORS[parseInt(owner)] : '';
-    const buildingLevel = G.buildings[spaceId] || 0;
-    const isMortgaged = G.mortgaged[spaceId] || false;
-
-    const playersHere = G.players
-      .filter(function(p) { return !p.bankrupt && p.position === spaceId; })
-      .map(function(p) {
-        const color = p.character ? p.character.color : PLAYER_COLORS[parseInt(p.id)];
-        const label = p.character ? p.character.name[0] : parseInt(p.id) + 1;
-        return '<span class="player-token" style="background:' + color + '">' + label + '</span>';
-      })
-      .join('');
-
-    const colorBar = space.color
-      ? '<div class="color-bar" style="background:' + space.color + '"></div>'
-      : '';
-    const ownerDot = ownerColor
-      ? '<div class="owner-dot" style="background:' + ownerColor + '"></div>'
-      : '';
-    const buildingTag = buildingLevel > 0
-      ? '<div class="building-icon">' + BUILDING_ICONS[buildingLevel] + '</div>'
-      : '';
-    const mortgageTag = isMortgaged
-      ? '<div class="mortgage-badge">M</div>'
-      : '';
-
-    const icon = space.icon || '';
-    const priceTag = space.price > 0 ? '<div class="price">$' + space.price + '</div>' : '';
-    const parkingPot = (space.type === 'parking' && RULES.core.freeParkingPot && G.freeParkingPot > 0)
-      ? '<div class="parking-pot">$' + G.freeParkingPot + '</div>'
-      : '';
-
-    const sideClass = options.side ? ' side-' + options.side : '';
-    const posStyle = options.posStyle || '';
-
-    return '<div class="cell' + (isCorner ? ' corner' : '') + (isMortgaged ? ' mortgaged' : '') + sideClass + '" data-space="' + spaceId + '"' + (posStyle ? ' style="' + posStyle + '"' : '') + '>' +
-      colorBar +
-      '<div class="cell-content">' +
-        '<div class="space-name">' + icon + ' ' + space.name + '</div>' +
-        priceTag +
-        buildingTag + mortgageTag +
-        parkingPot +
-        ownerDot +
-        '<div class="tokens">' + playersHere + '</div>' +
-      '</div>' +
-    '</div>';
-  }
-
-  renderBoard(G, ctx) {
-    const layoutType = this.mapData.layoutType;
-
-    // Apply theme on first render
-    if (!this._themeApplied) {
-      this.applyTheme();
-      this._themeApplied = true;
-    }
-
-    if (layoutType === 'square') {
-      this._renderSquareBoard(G, ctx);
-    } else {
-      this._renderAbsoluteBoard(G, ctx);
-    }
-  }
-
-  // CSS Grid rendering for square layouts (classic Monopoly style)
-  _renderSquareBoard(G, ctx) {
-    const gridDims = getGridDimensions(this.mapData.spaceCount, 'square');
-    const gridSize = gridDims.rows; // square: rows === cols
-    const perSide = gridSize - 1;
-    const gridPositions = positionsToGrid(this.mapData.positions, this.mapData.spaceCount);
-
-    // Set grid template dynamically
-    const cornerPx = 90;
-    const cellPx = 68;
-    const innerRepeat = perSide - 1;
-    this.boardEl.style.gridTemplateColumns = cornerPx + 'px repeat(' + innerRepeat + ', ' + cellPx + 'px) ' + cornerPx + 'px';
-    this.boardEl.style.gridTemplateRows = cornerPx + 'px repeat(' + innerRepeat + ', ' + cellPx + 'px) ' + cornerPx + 'px';
-    this.boardEl.className = 'board board-grid';
-
-    let html = '';
-    const lastIdx = gridSize - 1;
-
-    for (let row = 0; row < gridSize; row++) {
-      for (let col = 0; col < gridSize; col++) {
-        // Find which space is at this grid position
-        let foundId = null;
-        for (let id in gridPositions) {
-          if (gridPositions[id].row === row && gridPositions[id].col === col) {
-            foundId = parseInt(id);
-            break;
-          }
-        }
-
-        if (foundId !== null) {
-          // Determine which side for color-bar orientation
-          let side = '';
-          if (row === lastIdx && col > 0 && col < lastIdx) side = 'bottom';
-          else if (row === 0 && col > 0 && col < lastIdx) side = 'top';
-          else if (col === 0 && row > 0 && row < lastIdx) side = 'left';
-          else if (col === lastIdx && row > 0 && row < lastIdx) side = 'right';
-
-          html += this._renderCell(foundId, G, { side: side });
-        } else {
-          // Center area or empty cell
-          const innerStart = 1;
-          const innerEnd = lastIdx;
-          const centerTriggerRow = Math.floor(gridSize / 2) - 1;
-          const centerTriggerCol = Math.floor(gridSize / 2) - 1;
-
-          if (row === centerTriggerRow && col === centerTriggerCol) {
-            html += '<div class="center-area" style="grid-row: 2 / ' + lastIdx + '; grid-column: 2 / ' + lastIdx + ';">' +
-              '<div class="center-logo">' +
-                '<div class="logo-text">' + this.mapData.theme.logoText + '</div>' +
-                '<div class="logo-sub">' + (this.mapData.theme.logoSubtitle || '') + '</div>' +
-              '</div>' +
-            '</div>';
-          } else if (row >= innerStart && row < innerEnd && col >= innerStart && col < innerEnd) {
-            continue;
-          } else {
-            html += '<div class="cell empty"></div>';
-          }
-        }
-      }
-    }
-
-    this.boardEl.innerHTML = html;
-  }
-
-  // Absolute positioning for circle/hexagon/custom layouts
-  _renderAbsoluteBoard(G, ctx) {
-    this.boardEl.className = 'board board-absolute';
-    // Clear grid template (not used)
-    this.boardEl.style.gridTemplateColumns = '';
-    this.boardEl.style.gridTemplateRows = '';
-
-    let html = '';
-
-    // Render each space as absolutely positioned cell
-    for (let i = 0; i < this.mapData.spaceCount; i++) {
-      const pos = this.mapData.positions[i];
-      if (!pos) continue;
-      const posStyle = 'left:' + pos.x + '%;top:' + pos.y + '%;';
-      html += this._renderCell(i, G, { side: '', posStyle: posStyle });
-    }
-
-    // Center logo
-    html += '<div class="center-logo-absolute">' +
-      '<div class="logo-text">' + this.mapData.theme.logoText + '</div>' +
-      '<div class="logo-sub">' + (this.mapData.theme.logoSubtitle || '') + '</div>' +
-    '</div>';
-
-    this.boardEl.innerHTML = html;
-  }
-
-  renderPlayerInfo(G, ctx) {
-    let html = '<h2>Players</h2>';
-    G.players.forEach((player, i) => {
-      const isCurrent = ctx.currentPlayer === String(i);
-      const propCount = player.properties.length;
-      const propList = player.properties
-        .map(pid => {
-          const sp = this.boardSpaces[pid];
-          const lvl = G.buildings[pid] || 0;
-          const mort = G.mortgaged[pid] || false;
-          const bIcon = lvl > 0 ? BUILDING_ICONS[lvl] + ' ' : '';
-          const mTag = mort ? ' [M]' : '';
-          return `<span class="prop-badge ${mort ? 'prop-mortgaged' : ''}" style="border-color:${sp.color || '#666'}">${bIcon}${sp.name}${mTag}</span>`;
-        })
-        .join('');
-
-      const char = player.character;
-      const displayName = char ? char.name : `Player ${i + 1}`;
-      const charColor = char ? char.color : PLAYER_COLORS[i];
-
-      // Ophelia: hide money from other players
-      const isOphelia = char && char.passive.id === 'shadow';
-      const hideFromOthers = isOphelia && !isCurrent;
-      const moneyDisplay = hideFromOthers ? '$???' : `$${player.money}`;
-
-      html += `
-        <div class="player-card ${isCurrent ? 'active' : ''} ${player.bankrupt ? 'bankrupt' : ''}">
-          <div class="player-header">
-            ${char && char.portrait
-              ? `<img class="player-avatar" src="${char.portrait}" alt="${char.name}" />`
-              : `<span class="player-dot" style="background:${charColor}"></span>`
-            }
-            <div>
-              <strong style="color:${charColor}">${displayName}</strong>
-              ${char ? `<div class="player-title">${char.title}</div>` : ''}
-            </div>
-            ${isCurrent ? '<span class="turn-badge">\u{25C0} TURN</span>' : ''}
-            ${player.bankrupt ? '<span class="bankrupt-badge">BANKRUPT</span>' : ''}
-          </div>
-          <div class="player-money ${hideFromOthers ? 'money-hidden' : ''}">${moneyDisplay}</div>
-          <div class="player-position">Position: ${this.boardSpaces[player.position].name}</div>
-          ${player.inJail ? '<div class="jail-badge">\u{1F46E} IN JAIL</div>' : ''}`;
-
-      // Show abilities status
-      if (char) {
-        let abilities = [];
-        if (player.rerollsLeft > 0) abilities.push(`Rerolls: ${player.rerollsLeft}`);
-        if (player.luckRedraws > 0) abilities.push(`Redraws: ${player.luckRedraws}`);
-        if (player.regulatedProperty !== null) {
-          abilities.push(`Regulated: ${this.boardSpaces[player.regulatedProperty].name}`);
-        }
-        if (abilities.length > 0) {
-          html += `<div class="player-abilities">${abilities.join(' | ')}</div>`;
-        }
-        html += `<div class="player-passive">${char.passive.name}</div>`;
-      }
-
-      html += `<div class="player-props">${propCount} properties ${propList ? '<br>' + propList : ''}</div>
-        </div>`;
-    });
-    this.playerInfoEl.innerHTML = html;
-  }
-
-  renderDice(G) {
-    if (!G.lastDice) {
-      this.diceAreaEl.innerHTML = '<div class="dice-display"><div class="dice">?</div><div class="dice">?</div></div>';
-      return;
-    }
-    const d = G.lastDice;
-    this.diceAreaEl.innerHTML = `
-      <div class="dice-display">
-        <div class="dice">${this.getDiceFace(d.d1)}</div>
-        <div class="dice">${this.getDiceFace(d.d2)}</div>
-      </div>
-      <div class="dice-total">Total: ${d.total}${d.isDoubles ? ` (DOUBLES! x${G.doublesCount})` : ''}</div>
-    `;
-  }
-
-  getDiceFace(n) {
-    const faces = ['\u2680', '\u2681', '\u2682', '\u2683', '\u2684', '\u2685'];
-    return faces[n - 1] || n;
-  }
-
-  renderActions(G, ctx) {
-    if (ctx.gameover) {
-      const winner = G.players[ctx.gameover.winner];
-      const winnerName = winner.character ? winner.character.name : `Player ${parseInt(ctx.gameover.winner) + 1}`;
-      const reason = ctx.gameover.reason === 'maxTurns'
-        ? `<p class="game-over-reason">Turn limit reached (${RULES.core.maxTurns} turns)</p>`
-        : '';
-      this.actionsEl.innerHTML = `
-        <div class="game-over">
-          <h2>\u{1F3C6} Game Over!</h2>
-          <p>${winnerName} wins!</p>
-          ${reason}
-        </div>`;
-      return;
-    }
-
-    const player = G.players[ctx.currentPlayer];
-    const displayName = player.character ? player.character.name : `Player ${parseInt(ctx.currentPlayer) + 1}`;
-    let html = `<h3>${displayName}'s Turn</h3>`;
-
-    // Online mode: show waiting message if it's not our turn
-    const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
-    if (!isMyTurn) {
-      html += `<div class="waiting-message">Waiting for ${displayName}...</div>`;
-      this.actionsEl.innerHTML = html;
-      return;
-    }
-
-    // Jail options
-    if (player.inJail && !G.hasRolled) {
-      html += `<button id="btn-jail" class="btn btn-warning">Pay $${RULES.core.jailFine} Fine</button>`;
-      html += `<button id="btn-roll" class="btn btn-primary">Roll for Doubles</button>`;
-    } else if (!G.hasRolled && G.turnPhase === 'roll') {
-      html += `<button id="btn-roll" class="btn btn-primary">\u{1F3B2} Roll Dice</button>`;
-    }
-
-    // Pending card: accept or redraw
-    if (G.pendingCard) {
-      html += `<button id="btn-accept-card" class="btn btn-success">Accept Card</button>`;
-      html += `<button id="btn-redraw-card" class="btn btn-warning">Redraw Card</button>`;
-    }
-
-    // Buy/pass
-    if (G.canBuy) {
-      const space = this.boardSpaces[player.position];
-      const price = G.effectivePrice || space.price;
-      html += `<button id="btn-buy" class="btn btn-success">\u{1F3E0} Buy ${space.name} ($${price})</button>`;
-      html += `<button id="btn-pass" class="btn btn-secondary">Pass</button>`;
-    }
-
-    // Auction UI
-    if (G.auction && G.turnPhase === 'auction') {
-      const auctionSpace = this.boardSpaces[G.auction.propertyId];
-      const currentBidder = G.auction.bidders[G.auction.currentBidderIndex];
-      const bidderPlayer = G.players[currentBidder.playerId];
-      const bidderName = bidderPlayer.character ? bidderPlayer.character.name : `Player ${parseInt(currentBidder.playerId) + 1}`;
-      const minBid = G.auction.currentBid === 0
-        ? RULES.auction.startingBid
-        : G.auction.currentBid + RULES.auction.minimumIncrement;
-
-      html += `<div class="auction-panel">
-        <h4>Auction: ${auctionSpace.name}</h4>
-        <div class="auction-info">
-          <div>Current bid: <strong>$${G.auction.currentBid || 'None'}</strong></div>
-          <div>Bidder: <strong>${bidderName}</strong></div>
-          <div>Min bid: $${minBid}</div>
-        </div>
-        <div class="auction-controls">
-          <input type="number" id="bid-amount" min="${minBid}" value="${minBid}" step="${RULES.auction.minimumIncrement}" class="bid-input" />
-          <button id="btn-bid" class="btn btn-success">Place Bid</button>
-          <button id="btn-pass-auction" class="btn btn-secondary">Pass</button>
-        </div>
-      </div>`;
-    }
-
-    // Trade pending UI (accept/reject for target player)
-    if (G.trade && G.turnPhase === 'trade') {
-      const proposer = G.players[G.trade.proposerId];
-      const target = G.players[G.trade.targetPlayerId];
-      const proposerName = proposer.character ? proposer.character.name : `Player ${parseInt(G.trade.proposerId) + 1}`;
-      const targetName = target.character ? target.character.name : `Player ${parseInt(G.trade.targetPlayerId) + 1}`;
-
-      html += `<div class="trade-panel">
-        <h4>Trade Proposal</h4>
-        <div class="trade-details">
-          <div class="trade-side">
-            <strong>${proposerName} offers:</strong>
-            <ul>
-              ${G.trade.offeredProperties.map(pid => `<li>${this.boardSpaces[pid].name}</li>`).join('') || '<li>No properties</li>'}
-              ${G.trade.offeredMoney > 0 ? `<li>$${G.trade.offeredMoney}</li>` : ''}
-            </ul>
-          </div>
-          <div class="trade-arrow">&#x21C4;</div>
-          <div class="trade-side">
-            <strong>${targetName} gives:</strong>
-            <ul>
-              ${G.trade.requestedProperties.map(pid => `<li>${this.boardSpaces[pid].name}</li>`).join('') || '<li>No properties</li>'}
-              ${G.trade.requestedMoney > 0 ? `<li>$${G.trade.requestedMoney}</li>` : ''}
-            </ul>
-          </div>
-        </div>
-        <div class="trade-actions">
-          <button id="btn-accept-trade" class="btn btn-success">Accept</button>
-          <button id="btn-reject-trade" class="btn btn-danger">Reject</button>
-          <button id="btn-cancel-trade" class="btn btn-secondary">Cancel</button>
-        </div>
-      </div>`;
-    }
-
-    // Reroll button (stamina ability)
-    if (G.hasRolled && player.rerollsLeft > 0 && !G.canBuy && !G.pendingCard && G.turnPhase === 'done') {
-      html += `<button id="btn-reroll" class="btn btn-warning">\u{1F3B2} Reroll (${player.rerollsLeft} left)</button>`;
-    }
-
-    // Trade propose button (during 'done' phase, if trading enabled)
-    if (RULES.trading.enabled && G.hasRolled && !G.canBuy && !G.pendingCard && !G.trade && !G.auction && G.turnPhase === 'done') {
-      const opponents = G.players.filter(p => p.id !== ctx.currentPlayer && !p.bankrupt);
-      if (opponents.length > 0 && player.properties.length > 0) {
-        html += `<button id="btn-propose-trade" class="btn btn-trade">Propose Trade</button>`;
-      }
-    }
-
-    // End turn
-    if (G.hasRolled && !G.canBuy && !G.pendingCard && !G.trade && !G.auction && G.turnPhase === 'done') {
-      html += `<button id="btn-end" class="btn btn-end">End Turn \u{27A1}\u{FE0F}</button>`;
-    }
-
-    // Save button (always visible during play phase)
-    if (G.phase === 'play') {
-      html += `<button id="btn-save" class="btn btn-save">Save Game</button>`;
-    }
-
-    // Property management panel (after rolling, during 'done' phase)
-    if (G.hasRolled && !G.canBuy && !G.pendingCard && player.properties.length > 0) {
-      html += '<div class="prop-management"><h4>Manage Properties</h4>';
-      player.properties.forEach(pid => {
-        const space = this.boardSpaces[pid];
-        const level = G.buildings[pid] || 0;
-        const mortgaged = G.mortgaged[pid] || false;
-        const bIcon = level > 0 ? BUILDING_ICONS[level] + ' ' : '';
-
-        html += `<div class="prop-mgmt-row">
-          <span class="prop-mgmt-name" style="border-left: 3px solid ${space.color || '#666'}">
-            ${bIcon}${space.name} ${mortgaged ? '<em>(M)</em>' : ''}
-          </span>
-          <span class="prop-mgmt-actions">`;
-
-        if (mortgaged) {
-          const cost = Math.floor(space.price * RULES.core.unmortgageRate);
-          html += `<button class="btn-small btn-unmortgage" data-pid="${pid}" title="Unmortgage for $${cost}">Unmortgage $${cost}</button>`;
-        } else {
-          // Upgrade check
-          if (space.type === 'property' && space.color && this.colorGroups[space.color]) {
-            const groupIds = this.colorGroups[space.color];
-            const ownsGroup = groupIds.every(id => G.ownership[id] === ctx.currentPlayer);
-            const minLevel = Math.min(...groupIds.map(id => G.buildings[id] || 0));
-            const noMortgaged = !groupIds.some(id => G.mortgaged[id]);
-            if (ownsGroup && level <= minLevel && level < RULES.core.maxBuildingLevel && noMortgaged) {
-              const upgCost = Math.floor(space.price * UPGRADE_COST_MULTIPLIERS[level]);
-              html += `<button class="btn-small btn-upgrade" data-pid="${pid}" title="Build ${BUILDING_NAMES[level + 1]} for ~$${upgCost}">\u{2B06} ${BUILDING_NAMES[level + 1]}</button>`;
-            }
-          }
-          // Sell building check (even-building in reverse: can only sell from highest in group)
-          if (level > 0) {
-            let canSell = true;
-            if (space.color && this.colorGroups[space.color]) {
-              const groupIds = this.colorGroups[space.color];
-              const maxLevel = Math.max(...groupIds.map(id => G.buildings[id] || 0));
-              if (level < maxLevel) canSell = false;
-            }
-            if (canSell) {
-              html += `<button class="btn-small btn-sell" data-pid="${pid}" title="Sell ${BUILDING_NAMES[level]}">Sell</button>`;
-            }
-          }
-          // Mortgage check (no buildings on this or group)
-          let canMortgage = true;
-          if (space.color && this.colorGroups[space.color]) {
-            canMortgage = !this.colorGroups[space.color].some(id => (G.buildings[id] || 0) > 0);
-          }
-          if (canMortgage && level === 0) {
-            const val = Math.floor(space.price * RULES.core.mortgageRate);
-            html += `<button class="btn-small btn-mortgage" data-pid="${pid}" title="Mortgage for $${val}">Mortgage $${val}</button>`;
-          }
-        }
-
-        html += '</span></div>';
-      });
-      html += '</div>';
-    }
-
-    this.actionsEl.innerHTML = html;
-
-    // Attach event listeners
-    const rollBtn = document.getElementById('btn-roll');
-    const buyBtn = document.getElementById('btn-buy');
-    const passBtn = document.getElementById('btn-pass');
-    const endBtn = document.getElementById('btn-end');
-    const jailBtn = document.getElementById('btn-jail');
-    const rerollBtn = document.getElementById('btn-reroll');
-    const acceptCardBtn = document.getElementById('btn-accept-card');
-    const redrawCardBtn = document.getElementById('btn-redraw-card');
-
-    if (rollBtn) rollBtn.onclick = () => this.client.moves.rollDice();
-    if (buyBtn) buyBtn.onclick = () => this.client.moves.buyProperty();
-    if (passBtn) passBtn.onclick = () => this.client.moves.passProperty();
-    if (endBtn) endBtn.onclick = () => this.client.moves.endTurn();
-    if (jailBtn) jailBtn.onclick = () => this.client.moves.payJailFine();
-    if (rerollBtn) rerollBtn.onclick = () => this.client.moves.useReroll();
-    if (acceptCardBtn) acceptCardBtn.onclick = () => this.client.moves.acceptCard();
-    if (redrawCardBtn) redrawCardBtn.onclick = () => this.client.moves.redrawCard();
-
-    // Auction buttons
-    const bidBtn = document.getElementById('btn-bid');
-    const passAuctionBtn = document.getElementById('btn-pass-auction');
-    if (bidBtn) bidBtn.onclick = () => {
-      const amount = parseInt(document.getElementById('bid-amount').value);
-      if (!isNaN(amount)) this.client.moves.placeBid(amount);
-    };
-    if (passAuctionBtn) passAuctionBtn.onclick = () => this.client.moves.passAuction();
-
-    // Trade buttons
-    const proposeTradeBtn = document.getElementById('btn-propose-trade');
-    const acceptTradeBtn = document.getElementById('btn-accept-trade');
-    const rejectTradeBtn = document.getElementById('btn-reject-trade');
-    const cancelTradeBtn = document.getElementById('btn-cancel-trade');
-    if (proposeTradeBtn) proposeTradeBtn.onclick = () => this.showTradeModal(G, ctx);
-    if (acceptTradeBtn) acceptTradeBtn.onclick = () => this.client.moves.acceptTrade();
-    if (rejectTradeBtn) rejectTradeBtn.onclick = () => this.client.moves.rejectTrade();
-    if (cancelTradeBtn) cancelTradeBtn.onclick = () => this.client.moves.cancelTrade();
-
-    // Property management buttons
-    document.querySelectorAll('.btn-upgrade').forEach(btn => {
-      btn.onclick = () => this.client.moves.upgradeProperty(parseInt(btn.dataset.pid));
-    });
-    document.querySelectorAll('.btn-mortgage').forEach(btn => {
-      btn.onclick = () => this.client.moves.mortgageProperty(parseInt(btn.dataset.pid));
-    });
-    document.querySelectorAll('.btn-unmortgage').forEach(btn => {
-      btn.onclick = () => this.client.moves.unmortgageProperty(parseInt(btn.dataset.pid));
-    });
-    document.querySelectorAll('.btn-sell').forEach(btn => {
-      btn.onclick = () => this.client.moves.sellBuilding(parseInt(btn.dataset.pid));
-    });
-
-    // Save game
-    const saveBtn = document.getElementById('btn-save');
-    if (saveBtn) saveBtn.onclick = () => this.saveGame(G, ctx);
-  }
-
-  renderMessages(G) {
-    const html = G.messages
-      .map(m => `<div class="message">${m}</div>`)
-      .join('');
-    this.messagesEl.innerHTML = `<h3>\u{1F4DC} Log</h3><div class="message-list">${html}</div>`;
-  }
-
-  toggleLoadPanel() {
-    if (this.loadPanelEl.style.display === 'none') {
-      const saves = MonopolyBoard.getSaves();
-      const entries = Object.entries(saves);
-      if (entries.length === 0) {
-        this.loadPanelEl.innerHTML = `
-          <div class="load-content">
-            <h3>No Saved Games</h3>
-            <p>Save a game during play to see it here.</p>
-            <button class="btn btn-secondary" id="btn-close-load">Close</button>
-          </div>`;
-      } else {
-        let listHtml = entries
-          .sort((a, b) => b[1].timestamp - a[1].timestamp)
-          .map(([name, data]) => {
-            const date = new Date(data.timestamp).toLocaleString();
-            const players = data.numPlayers;
-            const turn = data.G.totalTurns;
-            return `<div class="save-entry">
-              <div class="save-info">
-                <div class="save-name">${name}</div>
-                <div class="save-meta">${players} players | Turn ${turn} | ${date}</div>
-              </div>
-              <div class="save-actions">
-                <button class="btn-small btn-upgrade btn-load-save" data-save="${name}">Load</button>
-                <button class="btn-small btn-mortgage btn-delete-save" data-save="${name}">Delete</button>
-              </div>
-            </div>`;
-          }).join('');
-        this.loadPanelEl.innerHTML = `
-          <div class="load-content">
-            <h3>Saved Games</h3>
-            ${listHtml}
-            <button class="btn btn-secondary" id="btn-close-load" style="margin-top:10px;">Close</button>
-          </div>`;
-      }
-      this.loadPanelEl.style.display = 'block';
-
-      // Attach handlers
-      document.getElementById('btn-close-load').onclick = () => {
-        this.loadPanelEl.style.display = 'none';
-      };
-      this.loadPanelEl.querySelectorAll('.btn-load-save').forEach(btn => {
-        btn.onclick = () => {
-          const saves = MonopolyBoard.getSaves();
-          const saveData = saves[btn.dataset.save];
-          if (saveData) {
-            this.loadGame(saveData);
-            this.loadPanelEl.style.display = 'none';
-          }
-        };
-      });
-      this.loadPanelEl.querySelectorAll('.btn-delete-save').forEach(btn => {
-        btn.onclick = () => {
-          MonopolyBoard.deleteSave(btn.dataset.save);
-          this.toggleLoadPanel(); // Refresh
-        };
-      });
-    } else {
-      this.loadPanelEl.style.display = 'none';
-    }
-  }
-
   saveGame(G, ctx) {
-    const saveData = {
-      G: G,
-      currentPlayer: ctx.currentPlayer,
-      numPlayers: G.players.length,
-      timestamp: Date.now(),
-    };
+    const saveData = { G: G, currentPlayer: ctx.currentPlayer, numPlayers: G.players.length, timestamp: Date.now() };
     const saveName = `meinopoly_save_${new Date().toLocaleString().replace(/[/:]/g, '-')}`;
     const saves = JSON.parse(localStorage.getItem('meinopoly_saves') || '{}');
     saves[saveName] = saveData;
@@ -1627,10 +1539,7 @@ class MonopolyBoard {
     this.renderMessages(G);
   }
 
-  static getSaves() {
-    return JSON.parse(localStorage.getItem('meinopoly_saves') || '{}');
-  }
-
+  static getSaves() { return JSON.parse(localStorage.getItem('meinopoly_saves') || '{}'); }
   static deleteSave(name) {
     const saves = JSON.parse(localStorage.getItem('meinopoly_saves') || '{}');
     delete saves[name];
@@ -1638,19 +1547,10 @@ class MonopolyBoard {
   }
 
   loadGame(saveData) {
-    // Stop current client
     this.client.stop();
-    // Re-create client with saved state injected via setup override
     const savedG = saveData.G;
-    const LoadedGame = {
-      ...Monopoly,
-      setup: () => savedG,
-    };
-    this.client = Client({
-      game: LoadedGame,
-      numPlayers: saveData.numPlayers,
-      debug: false,
-    });
+    const LoadedGame = { ...Monopoly, setup: () => savedG };
+    this.client = Client({ game: LoadedGame, numPlayers: saveData.numPlayers, debug: false });
     this.client.start();
     this.client.subscribe(state => this.update(state));
   }
