@@ -9,4 +9,5 @@ __pycache__/
 docs/
 screenshots/
 test-results/
+.superpowers/
 mods/dominion/portraits/ChatGPT Image*.png
