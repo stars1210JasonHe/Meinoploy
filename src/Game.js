@@ -23,6 +23,7 @@ var _pendingMap = {
   communityCards: DEFAULT_COMMUNITY_CARDS,
   boardSize: RULES.core.boardSize,
   jail: RULES.core.jailPosition,
+  mapMechanics: { incomeMultiplier: 1, rentMultiplier: 1, taxMultiplier: 1, priceMultiplier: 1, upgradeCostMultiplier: 1 },
 };
 
 export function setActiveMap(mapData) {
@@ -33,6 +34,7 @@ export function setActiveMap(mapData) {
     communityCards: mapData.communityCards,
     boardSize: mapData.spaceCount,
     jail: mapData.specialSpaces.jail,
+    mapMechanics: mapData.mapMechanics || { incomeMultiplier: 1, rentMultiplier: 1, taxMultiplier: 1, priceMultiplier: 1, upgradeCostMultiplier: 1 },
   };
   _mapVictory = mapData.victory || null;
 }
@@ -684,6 +686,7 @@ export const Monopoly = {
         communityCards: _pendingMap.communityCards,
         boardSize: _pendingMap.boardSize,
         jail: _pendingMap.jail,
+        mapMechanics: _pendingMap.mapMechanics,
       },
       players,
       ownership,

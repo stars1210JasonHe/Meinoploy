@@ -123,6 +123,11 @@ describe('board-in-G', () => {
     expect(restored.board.boardSize).toBe(28);
     expect(restored.board.jail).toBe(7);
   });
+
+  test('G.board carries mapMechanics (default all 1.0)', () => {
+    const G = Monopoly.setup({ numPlayers: 2, playOrder: ['0', '1'] });
+    expect(G.board.mapMechanics).toEqual({ incomeMultiplier: 1, rentMultiplier: 1, taxMultiplier: 1, priceMultiplier: 1, upgradeCostMultiplier: 1 });
+  });
 });
 
 // ─── CHARACTER SELECTION ─────────────────────────────────
