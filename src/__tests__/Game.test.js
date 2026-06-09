@@ -1406,6 +1406,79 @@ describe('season system', () => {
   });
 });
 
+// ─── MAP MECHANICS (applyEconMods) ──────────────────────
+describe('applyEconMods (map mechanics)', () => {
+  // Build a fresh play-phase G with a neutral season (Summer, index 0) so the
+  // ONLY active factor is the mapMechanics multiplier under test.
+  function freshEconG(overrides) {
+    const ctx = { numPlayers: 2, playOrder: ['0', '1'] };
+    const G = Monopoly.setup(ctx);
+    G.phase = 'play';
+    G.seasonIndex = 0; // Summer — all season mods 1.0
+    G.board = {
+      ...G.board,
+      mapMechanics: {
+        incomeMultiplier: 1, rentMultiplier: 1, taxMultiplier: 1,
+        priceMultiplier: 1, upgradeCostMultiplier: 1,
+        ...overrides,
+      },
+    };
+    return G;
+  }
+
+  test('priceMultiplier doubles the effective buy price', () => {
+    const G = freshEconG({ priceMultiplier: 2 });
+    // Drive the real landing path: roll lands the player and computes effectivePrice.
+    G.players[0].position = 39;
+    const ctx = makeCtx('0', 1, 1); // 39 + 2 = 41 → wraps to 1 (Mediterranean Ave, base price $60)
+    Monopoly.moves.rollDice(G, ctx);
+
+    expect(G.players[0].position).toBe(1);
+    // Base $60 × 2 (priceMultiplier) = $120, no season/character discount.
+    expect(G.effectivePrice).toBe(120);
+  });
+
+  test('rentMultiplier scales rent paid on an owned space', () => {
+    const G = freshEconG({ rentMultiplier: 3 });
+    G.ownership[1] = '1';
+    G.players[1].properties.push(1);
+    G.players[0].position = 39;
+    const ctx = makeCtx('0', 1, 1); // 39 + 2 = 41 → wraps to 1 (Mediterranean, base rent $4)
+
+    Monopoly.moves.rollDice(G, ctx);
+
+    // Player passes GO (+$200), then pays rent. Base rent $4 × 3 = $12 → floor $12.
+    expect(G.players[0].money).toBe(1500 + 200 - 12);
+  });
+
+  test('taxMultiplier scales tax deducted on a tax space', () => {
+    const G = freshEconG({ taxMultiplier: 3 });
+    G.players[0].position = 0;
+    const ctx = makeCtx('0', 2, 2); // total 4 → Income Tax space ($200)
+
+    Monopoly.moves.rollDice(G, ctx);
+
+    // Income Tax $200 × 3 (taxMultiplier) = $600.
+    expect(G.players[0].money).toBe(1500 - 600);
+  });
+
+  test('upgradeCostMultiplier scales the upgrade cost', () => {
+    const G = freshEconG({ upgradeCostMultiplier: 2 });
+    G.hasRolled = true;
+    const groupIds = COLOR_GROUPS['#8B4513'];
+    groupIds.forEach(id => {
+      G.ownership[id] = '0';
+      G.players[0].properties.push(id);
+    });
+
+    Monopoly.moves.upgradeProperty(G, makeCtx('0'), 1);
+
+    // House cost = $60 × 0.5 = $30, × 2 (upgradeCostMultiplier) = $60.
+    expect(G.buildings[1]).toBe(1);
+    expect(G.players[0].money).toBe(1500 - 60);
+  });
+});
+
 // ─── ENHANCED EVENT CARDS ───────────────────────────────
 describe('enhanced event cards', () => {
   test('payPercent action takes percentage of total assets', () => {

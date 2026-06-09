@@ -94,7 +94,7 @@ function getEffectiveBuyPrice(G, player, space) {
   let price = space.price;
 
   // Season price modifier
-  price *= getSeasonPriceMod(G);
+  price = applyEconMods(G, 'price', price);
 
   if (!player.character) return Math.floor(price);
 
@@ -116,7 +116,7 @@ function getUpgradeCost(G, player, space, targetLevel) {
   let cost = space.price * RULES.buildings.upgradeCostMultipliers[targetLevel - 1];
 
   // Season price modifier affects upgrade cost
-  cost *= getSeasonPriceMod(G);
+  cost = applyEconMods(G, 'upgrade', cost);
 
   if (player.character) {
     // Tech stat discount
@@ -136,16 +136,19 @@ function getCurrentSeason(G) {
   return RULES.seasons.list[G.seasonIndex];
 }
 
-function getSeasonPriceMod(G) {
-  return getCurrentSeason(G).priceMod;
-}
-
-function getSeasonRentMod(G) {
-  return getCurrentSeason(G).rentMod;
-}
-
-function getSeasonTaxMod(G) {
-  return getCurrentSeason(G).taxMod;
+// Single economic-multiplier choke point. Stack order: base × season × mapMechanics × phase × affinity.
+// phase/affinity are 1.0 today. Does NOT floor — callers floor once at the end (preserves behavior).
+function applyEconMods(G, kind, value) {
+  const season = getCurrentSeason(G);
+  const seasonMod = kind === 'rent' ? season.rentMod
+                  : kind === 'tax'  ? season.taxMod
+                  : season.priceMod; // 'price' and 'upgrade' use the season price mod (matches current behavior)
+  const mech = G.board.mapMechanics || {};
+  const mechMod = kind === 'rent' ? (mech.rentMultiplier === undefined ? 1 : mech.rentMultiplier)
+                : kind === 'tax'  ? (mech.taxMultiplier === undefined ? 1 : mech.taxMultiplier)
+                : kind === 'upgrade' ? (mech.upgradeCostMultiplier === undefined ? 1 : mech.upgradeCostMultiplier)
+                : (mech.priceMultiplier === undefined ? 1 : mech.priceMultiplier); // 'price'
+  return value * seasonMod * mechMod;
 }
 
 // --- Dice & cards ---
@@ -204,7 +207,7 @@ function calculateRent(G, space, diceTotal, visitor) {
   }
 
   // Season rent modifier (Winter: +20%)
-  rent *= getSeasonRentMod(G);
+  rent = applyEconMods(G, 'rent', rent);
 
   // Character effects only apply if visitor has a character
   if (visitor && visitor.character) {
@@ -305,7 +308,7 @@ function handleLanding(G, ctx) {
     case 'tax': {
       let taxAmount = space.rent;
       // Season tax modifier (Winter: double tax)
-      taxAmount = Math.floor(taxAmount * getSeasonTaxMod(G));
+      taxAmount = Math.floor(applyEconMods(G, 'tax', taxAmount));
       // Albert Victor passive: financial negative event loss reduction
       if (getPassive(player) === 'financier') {
         taxAmount = Math.floor(taxAmount * (1 - RULES.passives.financier.negativeEventReduction));
@@ -976,7 +979,7 @@ export const Monopoly = {
       }
 
       G.mortgaged[propertyId] = true;
-      const mortgageValue = Math.floor(space.price * RULES.core.mortgageRate * getSeasonPriceMod(G));
+      const mortgageValue = Math.floor(applyEconMods(G, 'price', space.price * RULES.core.mortgageRate));
       player.money += mortgageValue;
       G.messages.push(`Mortgaged ${space.name} for $${mortgageValue}.`);
     },
@@ -991,7 +994,7 @@ export const Monopoly = {
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
       if (!G.mortgaged[propertyId]) return INVALID_MOVE;
 
-      const unmortgageCost = Math.floor(space.price * RULES.core.unmortgageRate * getSeasonPriceMod(G));
+      const unmortgageCost = Math.floor(applyEconMods(G, 'price', space.price * RULES.core.unmortgageRate));
       if (player.money < unmortgageCost) return INVALID_MOVE;
 
       player.money -= unmortgageCost;
