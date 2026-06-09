@@ -4,13 +4,10 @@ import { CHANCE_CARDS as DEFAULT_CHANCE_CARDS, COMMUNITY_CARDS as DEFAULT_COMMUN
 import { RULES } from '../mods/dominion/rules';
 import { getCharacterById, getStartingMoney } from '../mods/dominion/characters-data';
 
-// Active map data — defaults to classic mod, can be overridden via setActiveMap()
-var _boardSpaces = DEFAULT_BOARD_SPACES;
-var _colorGroups = DEFAULT_COLOR_GROUPS;
-var _chanceCards = DEFAULT_CHANCE_CARDS;
-var _communityCards = DEFAULT_COMMUNITY_CARDS;
-var _boardSize = RULES.core.boardSize;
-var _jailPosition = RULES.core.jailPosition;
+// Active map data — defaults to classic mod, can be overridden via setActiveMap().
+// Per-match board config is snapshotted into G.board at setup(); all engine readers
+// use G.board.* — only setup()'s ownership init reads _pendingMap directly (G.board
+// does not exist yet at that point).
 var _mapVictory = null;        // victory config from the active map (map.json)
 var _victoryOverride = null;   // per-session override from the game-start selector
 
@@ -37,12 +34,6 @@ export function setActiveMap(mapData) {
     boardSize: mapData.spaceCount,
     jail: mapData.specialSpaces.jail,
   };
-  _boardSpaces = mapData.spaces;
-  _colorGroups = mapData.colorGroupsFlat;
-  _chanceCards = mapData.chanceCards;
-  _communityCards = mapData.communityCards;
-  _boardSize = mapData.spaceCount;
-  _jailPosition = mapData.specialSpaces.jail;
   _mapVictory = mapData.victory || null;
 }
 
@@ -679,7 +670,7 @@ export const Monopoly = {
     }
 
     const ownership = {};
-    _boardSpaces.forEach(space => {
+    _pendingMap.spaces.forEach(space => {
       if (space.type === 'property' || space.type === 'railroad' || space.type === 'utility') {
         ownership[space.id] = null;
       }
