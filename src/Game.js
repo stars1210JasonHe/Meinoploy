@@ -390,11 +390,11 @@ function getTotalAssets(G, player) {
     // not its full price — otherwise net worth overstates a mortgaged player.
     const mortgaged = G.mortgaged && G.mortgaged[pid];
     total += mortgaged
-      ? Math.floor(_boardSpaces[pid].price * RULES.core.mortgageRate)
-      : _boardSpaces[pid].price;
+      ? Math.floor(G.board.spaces[pid].price * RULES.core.mortgageRate)
+      : G.board.spaces[pid].price;
     const level = G.buildings[pid] || 0;
     for (let i = 1; i <= level; i++) {
-      total += Math.floor(_boardSpaces[pid].price * RULES.buildings.upgradeCostMultipliers[i - 1]);
+      total += Math.floor(G.board.spaces[pid].price * RULES.buildings.upgradeCostMultipliers[i - 1]);
     }
   });
   return total;
@@ -403,7 +403,7 @@ function getTotalAssets(G, player) {
 // Number of color groups fully owned by a player (for the 'monopoly'/dominion win).
 function countFullGroups(G, playerId) {
   let n = 0;
-  for (const color in _colorGroups) {
+  for (const color in G.board.colorGroups) {
     if (ownsColorGroup(G, playerId, color)) n++;
   }
   return n;
