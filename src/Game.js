@@ -14,8 +14,11 @@ var _jailPosition = RULES.core.jailPosition;
 var _mapVictory = null;        // victory config from the active map (map.json)
 var _victoryOverride = null;   // per-session override from the game-start selector
 
-// Per-match board snapshot source. setup() copies this into G.board so each match
-// owns its board (instead of reading process-global mutable state).
+// Active-board source for setup(). setup() wraps these into a fresh per-match G.board
+// object so each match reads its OWN board config (not process-global mutable state).
+// The board arrays (spaces/colorGroups/cards) are static, read-only map data, so they
+// are shared by reference across matches by design — only the wrapper is per-match;
+// per-match MUTABLE state (ownership, buildings, mortgaged) already lives elsewhere in G.
 var _pendingMap = {
   spaces: DEFAULT_BOARD_SPACES,
   colorGroups: DEFAULT_COLOR_GROUPS,
