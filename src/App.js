@@ -1610,6 +1610,7 @@ class MonopolyBoard {
     if (this.client) { this.client.stop(); this.client = null; }
     if (this._tokenResizeObs) { this._tokenResizeObs.disconnect(); this._tokenResizeObs = null; }
     this._lastG = null;
+    this._tokenRetried = false;
     this.onlinePlayerID = null;
     this._pendingCharId = null;
     this.aiResponses = [];
@@ -1651,8 +1652,18 @@ class MonopolyBoard {
     const savedMap = AVAILABLE_MAPS.find(m => m.id === saveData.mapId) || classicMapJson;
     this.setMap(savedMap);
     if (this.client) this.client.stop(); // null when loading from the menu (no active game)
+    // Reset per-game UI caches so a load (possibly from a different prior game) doesn't replay
+    // the entire saved log as fresh AI chatter or carry over stale chat history.
+    this.aiResponses = [];
+    this.chatHistories = {};
+    this.activeChatCharId = null;
+    this._prevMessages = [];
+    this._prevSeasonIdx = undefined;
+    if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
+    if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
     const savedG = saveData.G;
-    const LoadedGame = { ...Monopoly, setup: () => savedG };
+    // _resumeLoad: tells turn.onBegin to skip the turn/season bump on the first turn after load.
+    const LoadedGame = { ...Monopoly, setup: () => ({ ...savedG, _resumeLoad: true }) };
     this.client = Client({ game: LoadedGame, numPlayers: saveData.numPlayers, debug: false });
     this.client.start();
     this.client.subscribe(state => this.update(state));

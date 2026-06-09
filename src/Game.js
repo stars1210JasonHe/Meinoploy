@@ -710,6 +710,7 @@ export const Monopoly = {
       auction: null,
       freeParkingPot: 0,
       victory: resolveVictory(),
+      _resumeLoad: false, // one-shot: set true by loadGame so the first onBegin doesn't bump turn/season
     };
   },
 
@@ -724,13 +725,19 @@ export const Monopoly = {
       G.pendingCard = null;
       G.doublesCount = 0;
 
-      // Track total turns and advance season
-      G.totalTurns++;
-      const newSeasonIndex = Math.floor(G.totalTurns / RULES.seasons.changeInterval) % RULES.seasons.list.length;
-      if (newSeasonIndex !== G.seasonIndex) {
-        G.seasonIndex = newSeasonIndex;
-        const season = RULES.seasons.list[G.seasonIndex];
-        G.messages.push(`${season.icon} Season changed to ${season.name}!`);
+      // Track total turns and advance season. Skipped once after a load (loadGame sets
+      // G._resumeLoad) so resuming a saved game doesn't bump the turn counter or flip the season —
+      // the loaded board/money/ownership is preserved and play continues with a clean fresh turn.
+      if (G._resumeLoad) {
+        G._resumeLoad = false;
+      } else {
+        G.totalTurns++;
+        const newSeasonIndex = Math.floor(G.totalTurns / RULES.seasons.changeInterval) % RULES.seasons.list.length;
+        if (newSeasonIndex !== G.seasonIndex) {
+          G.seasonIndex = newSeasonIndex;
+          const season = RULES.seasons.list[G.seasonIndex];
+          G.messages.push(`${season.icon} Season changed to ${season.name}!`);
+        }
       }
 
       const player = G.players[ctx.currentPlayer];

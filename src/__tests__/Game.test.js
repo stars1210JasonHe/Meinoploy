@@ -2607,3 +2607,25 @@ describe('N-Player support', () => {
     expect(G.players).toHaveLength(10);
   });
 });
+
+// ─── LOAD RESUME (onBegin _resumeLoad guard) ─────────────
+describe('load resume', () => {
+  test('first onBegin after a load does NOT bump totalTurns or season', () => {
+    const G = freshG();            // play phase
+    G.totalTurns = 5;
+    G.seasonIndex = 0;
+    G._resumeLoad = true;          // set by loadGame's setup override
+    Monopoly.turn.onBegin(G, { currentPlayer: '0' });
+    expect(G.totalTurns).toBe(5);        // turn counter preserved
+    expect(G.seasonIndex).toBe(0);       // season preserved
+    expect(G._resumeLoad).toBe(false);   // one-shot flag cleared
+    expect(G.turnPhase).toBe('roll');    // per-turn flags still reset (clean fresh turn)
+  });
+
+  test('normal onBegin (no _resumeLoad) bumps totalTurns', () => {
+    const G = freshG();
+    G.totalTurns = 5;
+    Monopoly.turn.onBegin(G, { currentPlayer: '0' });
+    expect(G.totalTurns).toBe(6);
+  });
+});
