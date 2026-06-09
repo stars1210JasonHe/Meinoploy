@@ -445,7 +445,7 @@ function applyCard(G, ctx, player, card) {
     case 'moveTo': {
       const oldPos = player.position;
       player.position = card.value;
-      if (card.value < oldPos && card.value !== _jailPosition) {
+      if (card.value < oldPos && card.value !== G.board.jail) {
         let goBonus = RULES.core.goSalary;
         // Mira Dawnlight passive: GO bonus
         if (getPassive(player) === 'idealist') {
@@ -459,7 +459,7 @@ function applyCard(G, ctx, player, card) {
       break;
     }
     case 'goToJail':
-      player.position = _jailPosition;
+      player.position = G.board.jail;
       player.inJail = true;
       player.jailTurns = 0;
       break;
@@ -509,23 +509,23 @@ function applyCard(G, ctx, player, card) {
       // Auto-upgrade the cheapest upgradeable property
       const upgradeable = player.properties
         .filter(pid => {
-          const sp = _boardSpaces[pid];
+          const sp = G.board.spaces[pid];
           if (sp.type !== 'property' || !sp.color) return false;
           if (!ownsColorGroup(G, player.id, sp.color)) return false;
           const level = G.buildings[pid] || 0;
           if (level >= RULES.core.maxBuildingLevel) return false;
-          const groupIds = _colorGroups[sp.color];
+          const groupIds = G.board.colorGroups[sp.color];
           if (groupIds.some(id => G.mortgaged[id])) return false;
           const minLevel = Math.min(...groupIds.map(id => G.buildings[id] || 0));
           return level <= minLevel;
         })
-        .sort((a, b) => _boardSpaces[a].price - _boardSpaces[b].price);
+        .sort((a, b) => G.board.spaces[a].price - G.board.spaces[b].price);
 
       if (upgradeable.length > 0) {
         const pid = upgradeable[0];
         const level = (G.buildings[pid] || 0) + 1;
         G.buildings[pid] = level;
-        G.messages.push(`Free upgrade! ${_boardSpaces[pid].name} upgraded to ${RULES.buildings.names[level]}!`);
+        G.messages.push(`Free upgrade! ${G.board.spaces[pid].name} upgraded to ${RULES.buildings.names[level]}!`);
       } else {
         G.messages.push('No properties eligible for free upgrade.');
       }
@@ -543,7 +543,7 @@ function applyCard(G, ctx, player, card) {
         G.buildings[pid]--;
         if (G.buildings[pid] === 0) delete G.buildings[pid];
         const newLevel = G.buildings[pid] || 0;
-        G.messages.push(`Market Crash! ${_boardSpaces[pid].name} downgraded to ${RULES.buildings.names[newLevel]}.`);
+        G.messages.push(`Market Crash! ${G.board.spaces[pid].name} downgraded to ${RULES.buildings.names[newLevel]}.`);
       } else {
         G.messages.push('No buildings to downgrade.');
       }
@@ -563,8 +563,8 @@ function applyCard(G, ctx, player, card) {
       let targetOwner = null;
       opponents.forEach(opp => {
         opp.properties.forEach(pid => {
-          if (_boardSpaces[pid].price < cheapestPrice) {
-            cheapestPrice = _boardSpaces[pid].price;
+          if (G.board.spaces[pid].price < cheapestPrice) {
+            cheapestPrice = G.board.spaces[pid].price;
             cheapestPid = pid;
             targetOwner = opp;
           }
@@ -581,7 +581,7 @@ function applyCard(G, ctx, player, card) {
           player.properties.push(cheapestPid);
           G.ownership[cheapestPid] = player.id;
           // Transfer buildings & mortgage status
-          G.messages.push(`Hostile Takeover! Bought ${_boardSpaces[cheapestPid].name} from ${playerName(targetOwner)} for $${cost}!`);
+          G.messages.push(`Hostile Takeover! Bought ${G.board.spaces[cheapestPid].name} from ${playerName(targetOwner)} for $${cost}!`);
         } else {
           G.messages.push(`Can't afford hostile takeover ($${cost} needed).`);
         }
