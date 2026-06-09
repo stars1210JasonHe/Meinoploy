@@ -803,7 +803,7 @@ export const Monopoly = {
       if (dice.isDoubles) {
         G.doublesCount++;
         if (G.doublesCount >= RULES.core.doublesJailThreshold) {
-          player.position = _jailPosition;
+          player.position = G.board.jail;
           player.inJail = true;
           player.jailTurns = 0;
           G.messages.push('Triple doubles! Go to Jail!');
@@ -840,9 +840,9 @@ export const Monopoly = {
       }
 
       const oldPos = player.position;
-      player.position = (player.position + dice.total) % _boardSize;
+      player.position = (player.position + dice.total) % G.board.boardSize;
 
-      if (player.position < oldPos && _boardSpaces[player.position].type !== 'goToJail') {
+      if (player.position < oldPos && G.board.spaces[player.position].type !== 'goToJail') {
         let goBonus = RULES.core.goSalary;
         // Mira Dawnlight passive: GO bonus
         if (getPassive(player) === 'idealist') {
@@ -853,7 +853,7 @@ export const Monopoly = {
         G.messages.push(`Passed GO! Collect $${goBonus}.`);
       }
 
-      G.messages.push(`Landed on ${_boardSpaces[player.position].name}.`);
+      G.messages.push(`Landed on ${G.board.spaces[player.position].name}.`);
       handleLanding(G, ctx);
 
       // Set turnPhase based on what happened
@@ -907,7 +907,7 @@ export const Monopoly = {
         player.luckRedraws--;
       }
 
-      const deck = G.pendingCard.deck === 'chance' ? _chanceCards : _communityCards;
+      const deck = G.pendingCard.deck === 'chance' ? G.board.chanceCards : G.board.communityCards;
       const newCard = drawCard(ctx, deck);
       const deckName = G.pendingCard.deck === 'chance' ? 'CHANCE' : 'COMMUNITY CHEST';
       G.messages.push(`Redraw! ${deckName}: ${newCard.text}`);
@@ -926,7 +926,7 @@ export const Monopoly = {
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
       // Can only regulate one at a time
       player.regulatedProperty = propertyId;
-      G.messages.push(`${playerName(player)} regulates ${_boardSpaces[propertyId].name}! (+${RULES.passives.enforcer.regulatedRentBonus * 100}% rent)`);
+      G.messages.push(`${playerName(player)} regulates ${G.board.spaces[propertyId].name}! (+${RULES.passives.enforcer.regulatedRentBonus * 100}% rent)`);
     },
 
     // --- Property upgrades ---
@@ -935,14 +935,14 @@ export const Monopoly = {
       if (!G.hasRolled) return INVALID_MOVE;
 
       const player = G.players[ctx.currentPlayer];
-      const space = _boardSpaces[propertyId];
+      const space = G.board.spaces[propertyId];
 
       if (!space || space.type !== 'property') return INVALID_MOVE;
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
       if (!space.color || !ownsColorGroup(G, ctx.currentPlayer, space.color)) return INVALID_MOVE;
 
       // No mortgaged properties in group
-      const groupIds = _colorGroups[space.color];
+      const groupIds = G.board.colorGroups[space.color];
       if (groupIds.some(id => G.mortgaged[id])) return INVALID_MOVE;
 
       const currentLevel = G.buildings[propertyId] || 0;
@@ -965,7 +965,7 @@ export const Monopoly = {
       if (G.phase !== 'play') return INVALID_MOVE;
 
       const player = G.players[ctx.currentPlayer];
-      const space = _boardSpaces[propertyId];
+      const space = G.board.spaces[propertyId];
       if (!space) return INVALID_MOVE;
 
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
@@ -975,8 +975,8 @@ export const Monopoly = {
       if ((G.buildings[propertyId] || 0) > 0) return INVALID_MOVE;
 
       // Can't mortgage if any property in color group has buildings
-      if (space.color && _colorGroups[space.color]) {
-        if (_colorGroups[space.color].some(id => (G.buildings[id] || 0) > 0)) {
+      if (space.color && G.board.colorGroups[space.color]) {
+        if (G.board.colorGroups[space.color].some(id => (G.buildings[id] || 0) > 0)) {
           return INVALID_MOVE;
         }
       }
@@ -991,7 +991,7 @@ export const Monopoly = {
       if (G.phase !== 'play') return INVALID_MOVE;
 
       const player = G.players[ctx.currentPlayer];
-      const space = _boardSpaces[propertyId];
+      const space = G.board.spaces[propertyId];
       if (!space) return INVALID_MOVE;
 
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
@@ -1010,7 +1010,7 @@ export const Monopoly = {
       if (!G.hasRolled) return INVALID_MOVE;
 
       const player = G.players[ctx.currentPlayer];
-      const space = _boardSpaces[propertyId];
+      const space = G.board.spaces[propertyId];
 
       if (!space || space.type !== 'property') return INVALID_MOVE;
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
@@ -1019,8 +1019,8 @@ export const Monopoly = {
       if (currentLevel <= 0) return INVALID_MOVE;
 
       // Even building in reverse: can only sell from highest level in group
-      if (space.color && _colorGroups[space.color]) {
-        const groupIds = _colorGroups[space.color];
+      if (space.color && G.board.colorGroups[space.color]) {
+        const groupIds = G.board.colorGroups[space.color];
         const maxLevel = Math.max(...groupIds.map(id => G.buildings[id] || 0));
         if (currentLevel < maxLevel) return INVALID_MOVE;
       }
@@ -1040,7 +1040,7 @@ export const Monopoly = {
     buyProperty: (G, ctx) => {
       if (!G.canBuy) return INVALID_MOVE;
       const player = G.players[ctx.currentPlayer];
-      const space = _boardSpaces[player.position];
+      const space = G.board.spaces[player.position];
 
       const effectivePrice = G.effectivePrice || getEffectiveBuyPrice(G, player, space);
       if (player.money < effectivePrice) return INVALID_MOVE;
@@ -1062,7 +1062,7 @@ export const Monopoly = {
 
       if (RULES.auction.enabled && RULES.auction.auctionOnPass) {
         const player = G.players[ctx.currentPlayer];
-        const space = _boardSpaces[player.position];
+        const space = G.board.spaces[player.position];
         const activeBidders = G.players
           .filter(p => !p.bankrupt)
           .map(p => ({ playerId: p.id, passed: false }));
