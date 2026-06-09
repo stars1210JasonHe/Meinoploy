@@ -11,3 +11,4 @@ screenshots/
 test-results/
 .superpowers/
 mods/dominion/portraits/ChatGPT Image*.png
+.claude/
