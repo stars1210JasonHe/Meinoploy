@@ -93,8 +93,8 @@ function playerName(player) {
 }
 
 function ownsColorGroup(G, playerId, color) {
-  if (!color || !_colorGroups[color]) return false;
-  return _colorGroups[color].every(id => G.ownership[id] === playerId);
+  if (!color || !G.board.colorGroups[color]) return false;
+  return G.board.colorGroups[color].every(id => G.ownership[id] === playerId);
 }
 
 function getEffectiveBuyPrice(G, player, space) {
@@ -172,13 +172,13 @@ function drawCard(ctx, deck) {
 
 function countOwnedRailroads(G, ownerID) {
   return G.players[ownerID].properties.filter(pid => {
-    return _boardSpaces[pid].type === 'railroad';
+    return G.board.spaces[pid].type === 'railroad';
   }).length;
 }
 
 function countOwnedUtilities(G, ownerID) {
   return G.players[ownerID].properties.filter(pid => {
-    return _boardSpaces[pid].type === 'utility';
+    return G.board.spaces[pid].type === 'utility';
   }).length;
 }
 
