@@ -6,8 +6,8 @@ import { getCharacterById, getStartingMoney } from '../mods/dominion/characters-
 
 // Active map data — defaults to classic mod, can be overridden via setActiveMap().
 // Per-match board config is snapshotted into G.board at setup(); all engine readers
-// use G.board.* — only setup()'s ownership init reads _pendingMap directly (G.board
-// does not exist yet at that point).
+// use G.board.*. setup() is the only code that still reads _pendingMap directly, because
+// G.board does not yet exist while setup() runs (it is being built from _pendingMap).
 var _mapVictory = null;        // victory config from the active map (map.json)
 var _victoryOverride = null;   // per-session override from the game-start selector
 
