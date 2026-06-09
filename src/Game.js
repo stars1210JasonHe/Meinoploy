@@ -14,7 +14,26 @@ var _jailPosition = RULES.core.jailPosition;
 var _mapVictory = null;        // victory config from the active map (map.json)
 var _victoryOverride = null;   // per-session override from the game-start selector
 
+// Per-match board snapshot source. setup() copies this into G.board so each match
+// owns its board (instead of reading process-global mutable state).
+var _pendingMap = {
+  spaces: DEFAULT_BOARD_SPACES,
+  colorGroups: DEFAULT_COLOR_GROUPS,
+  chanceCards: DEFAULT_CHANCE_CARDS,
+  communityCards: DEFAULT_COMMUNITY_CARDS,
+  boardSize: RULES.core.boardSize,
+  jail: RULES.core.jailPosition,
+};
+
 export function setActiveMap(mapData) {
+  _pendingMap = {
+    spaces: mapData.spaces,
+    colorGroups: mapData.colorGroupsFlat,
+    chanceCards: mapData.chanceCards,
+    communityCards: mapData.communityCards,
+    boardSize: mapData.spaceCount,
+    jail: mapData.specialSpaces.jail,
+  };
   _boardSpaces = mapData.spaces;
   _colorGroups = mapData.colorGroupsFlat;
   _chanceCards = mapData.chanceCards;
@@ -664,6 +683,14 @@ export const Monopoly = {
     });
 
     return {
+      board: {
+        spaces: _pendingMap.spaces,
+        colorGroups: _pendingMap.colorGroups,
+        chanceCards: _pendingMap.chanceCards,
+        communityCards: _pendingMap.communityCards,
+        boardSize: _pendingMap.boardSize,
+        jail: _pendingMap.jail,
+      },
       players,
       ownership,
       buildings: {},

@@ -94,6 +94,27 @@ describe('Monopoly.setup', () => {
   });
 });
 
+describe('board-in-G', () => {
+  test('setup stores the board in G.board', () => {
+    const ctx = { numPlayers: 2, playOrder: ['0', '1'] };
+    const G = Monopoly.setup(ctx);
+    expect(G.board).toBeDefined();
+    expect(Array.isArray(G.board.spaces)).toBe(true);
+    expect(G.board.spaces.length).toBe(G.board.boardSize);
+    expect(typeof G.board.jail).toBe('number');
+    expect(G.board.colorGroups).toBeDefined();
+    expect(Array.isArray(G.board.chanceCards)).toBe(true);
+    expect(Array.isArray(G.board.communityCards)).toBe(true);
+  });
+
+  test('two matches get independent G.board objects', () => {
+    const ctx = { numPlayers: 2, playOrder: ['0', '1'] };
+    const a = Monopoly.setup(ctx);
+    const b = Monopoly.setup(ctx);
+    expect(a.board).not.toBe(b.board);
+  });
+});
+
 // ─── CHARACTER SELECTION ─────────────────────────────────
 describe('selectCharacter', () => {
   test('assigns character and updates starting money', () => {
