@@ -648,7 +648,7 @@ function advanceAuction(G) {
   if (auction.currentBidder !== null) {
     resolveAuction(G);
   } else {
-    G.messages.push(`No bids. ${_boardSpaces[auction.propertyId].name} remains unowned.`);
+    G.messages.push(`No bids. ${G.board.spaces[auction.propertyId].name} remains unowned.`);
     G.auction = null;
     G.turnPhase = 'done';
   }
@@ -657,7 +657,7 @@ function advanceAuction(G) {
 function resolveAuction(G) {
   const auction = G.auction;
   const winner = G.players[auction.currentBidder];
-  const space = _boardSpaces[auction.propertyId];
+  const space = G.board.spaces[auction.propertyId];
 
   winner.money -= auction.currentBid;
   winner.properties.push(auction.propertyId);
@@ -1245,7 +1245,7 @@ export const Monopoly = {
         resolveAuction(G);
       } else if (activeBidders.length === 0) {
         // Everyone passed with no bids
-        G.messages.push(`No bids. ${_boardSpaces[auction.propertyId].name} remains unowned.`);
+        G.messages.push(`No bids. ${G.board.spaces[auction.propertyId].name} remains unowned.`);
         G.auction = null;
         G.turnPhase = 'done';
       } else {
