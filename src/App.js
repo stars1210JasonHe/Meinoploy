@@ -1530,7 +1530,7 @@ class MonopolyBoard {
   }
 
   saveGame(G, ctx) {
-    const saveData = { G: G, currentPlayer: ctx.currentPlayer, numPlayers: G.players.length, timestamp: Date.now() };
+    const saveData = { G: G, currentPlayer: ctx.currentPlayer, numPlayers: G.players.length, mapId: this.mapData.id, timestamp: Date.now() };
     const saveName = `meinopoly_save_${new Date().toLocaleString().replace(/[/:]/g, '-')}`;
     const saves = JSON.parse(localStorage.getItem('meinopoly_saves') || '{}');
     saves[saveName] = saveData;
@@ -1547,6 +1547,8 @@ class MonopolyBoard {
   }
 
   loadGame(saveData) {
+    const savedMap = AVAILABLE_MAPS.find(m => m.id === saveData.mapId) || classicMapJson;
+    this.setMap(savedMap);
     this.client.stop();
     const savedG = saveData.G;
     const LoadedGame = { ...Monopoly, setup: () => savedG };

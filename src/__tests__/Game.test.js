@@ -113,6 +113,16 @@ describe('board-in-G', () => {
     const b = Monopoly.setup(ctx);
     expect(a.board).not.toBe(b.board);
   });
+
+  test('a restored G keeps its own board (loadGame setup-override pattern)', () => {
+    const ctx = { numPlayers: 2, playOrder: ['0', '1'] };
+    const saved = Monopoly.setup(ctx);
+    saved.board = { ...saved.board, boardSize: 28, jail: 7 }; // pretend a 28-space map was active
+    const Loaded = { ...Monopoly, setup: () => saved };
+    const restored = Loaded.setup(ctx);
+    expect(restored.board.boardSize).toBe(28);
+    expect(restored.board.jail).toBe(7);
+  });
 });
 
 // ─── CHARACTER SELECTION ─────────────────────────────────
