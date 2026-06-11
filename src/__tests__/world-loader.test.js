@@ -153,6 +153,15 @@ describe('validateWorld', () => {
     const w = clone(MINI_WORLD); w.winPaths = ['wealth', 'influence'];
     expect(validateWorld(w, ARCHETYPES).join()).toMatch(/influence/i);
   });
+  test('winPaths gate cannot be self-whitelisted via atlasConfig', () => {
+    const w = clone(MINI_WORLD);
+    // carry the fixture's valueShareCap so this fails for the winPaths reason only
+    w.atlasConfig = { valueShareCap: 0.5, winPaths: ['influence'] }; // attempted override of the gate
+    w.winPaths = ['influence'];
+    const errors = validateWorld(w, ARCHETYPES);
+    expect(errors.join()).toMatch(/influence/i);
+    expect(errors.length).toBe(1);
+  });
   test('value-share cap', () => {
     const w = clone(MINI_WORLD);
     w.atlasConfig = { valueShareCap: 0.10 }; // REPLACES fixture override; 4 places -- someone necessarily exceeds 10%

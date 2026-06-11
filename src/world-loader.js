@@ -15,11 +15,11 @@ export var ATLAS_DEFAULTS = {
   valueShareCap: 0.35,
   hubReachSteps: 14,
   size: { maxPlaces: 16, maxSpaces: 96 },
-  winPaths: ['wealth', 'dominion', 'survival'],
   positions: {
     // Per-slot x offset (percent) so co-located tokens don't fully overlap.
-    // NOTE: plan prose suggested 2, but loadWorld's position contract keeps the
-    // entry space within +/-0.5 of the place pos; rendering spreads slots properly later.
+    // NOTE: plan prose suggested 2, but 0.4 keeps the spread tight: max offset
+    // from the place pos is (n-1)/2 * slotOffsetStep (n = slot count, so 1.0
+    // at n=6); rendering spreads slots properly later.
     slotOffsetStep: 0.4,
   },
   theme: {
@@ -38,6 +38,11 @@ export var ATLAS_DEFAULTS = {
     centerObject: null,
   },
 };
+
+// Win paths the engine can actually score. SECURITY: this is the validation
+// gate for world.winPaths — deliberately NOT part of ATLAS_DEFAULTS, so a
+// world cannot self-whitelist a path via atlasConfig overrides.
+var ENGINE_SCORED_PATHS = ['wealth', 'dominion', 'survival'];
 
 // Merge ATLAS_DEFAULTS with a world's atlasConfig overrides.
 // Shallow per section: object-valued sections (normalization, size, ...) merge
@@ -285,10 +290,10 @@ export function validateWorld(world, archetypes) {
     errors.push('places must be a non-empty array');
     return errors;
   }
-  var placeIds = {};
+  var placeIds = new Set();
   places.forEach(function (p) {
-    if (placeIds[p.id]) errors.push('duplicate place id "' + p.id + '"');
-    placeIds[p.id] = true;
+    if (placeIds.has(p.id)) errors.push('duplicate place id "' + p.id + '"');
+    placeIds.add(p.id);
   });
 
   // 2. Refs: archetypes, connector targets, hubs
@@ -298,14 +303,14 @@ export function validateWorld(world, archetypes) {
     });
     var connectors = p.connectors || {};
     for (var dir in connectors) {
-      if (!placeIds[connectors[dir]]) {
+      if (!placeIds.has(connectors[dir])) {
         errors.push('place "' + p.id + '": connector "' + dir + '" targets unknown place "' + connectors[dir] + '"');
       }
     }
   });
   var hubs = world.hubs || [];
   hubs.forEach(function (placeId) {
-    if (!placeIds[placeId]) errors.push('hubs: unknown place "' + placeId + '"');
+    if (!placeIds.has(placeId)) errors.push('hubs: unknown place "' + placeId + '"');
   });
   if (errors.length > 0) return errors; // structural failure — skip derived checks
 
@@ -400,8 +405,8 @@ export function validateWorld(world, archetypes) {
     errors.push('winPaths must be a non-empty array');
   } else {
     winPaths.forEach(function (path) {
-      if (cfg.winPaths.indexOf(path) < 0) {
-        errors.push('winPaths: "' + path + '" is not an engine-scored path (allowed: ' + cfg.winPaths.join(', ') + ')');
+      if (ENGINE_SCORED_PATHS.indexOf(path) < 0) {
+        errors.push('winPaths: "' + path + '" is not an engine-scored path (allowed: ' + ENGINE_SCORED_PATHS.join(', ') + ')');
       }
     });
   }
@@ -461,6 +466,8 @@ export function loadWorld(world, archetypes) {
 
   var victory = world.victory || {};
   var cards = world.cards || {};
+  var mechanics = world.mapMechanics || {};
+  var risk = world.riskProfile || {};
 
   return {
     // ── mapData-compatible (subset App.js/Game.js already consume) ──
@@ -481,9 +488,12 @@ export function loadWorld(world, archetypes) {
       taxMultiplier: 1.0,
       priceMultiplier: 1.0,
       upgradeCostMultiplier: 1.0,
-      branchChoice: 'player',
+      branchChoice: mechanics.branchChoice || 'player',
     },
-    riskProfile: { volatility: 0.5, eventFrequency: 1.0 },
+    riskProfile: {
+      volatility: risk.volatility !== undefined ? risk.volatility : 0.5,
+      eventFrequency: risk.eventFrequency !== undefined ? risk.eventFrequency : 1.0,
+    },
     victory: {
       primary: world.winPaths[0],
       maxTurns: victory.maxTurns || 0,
