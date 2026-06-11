@@ -1,5 +1,6 @@
 import { ARCHETYPES } from '../../mods/dominion/atlas/archetypes';
-import { ATLAS_DEFAULTS, computePlaceValues } from '../world-loader';
+import { ATLAS_DEFAULTS, computePlaceValues, expandWorld } from '../world-loader';
+import { MINI_WORLD } from '../../mods/dominion/atlas/fixtures/mini-world';
 
 describe('archetype library', () => {
   const REQUIRED = ['downtown','port','industrial','financial-district','tech-hub','market',
@@ -46,5 +47,50 @@ describe('computePlaceValues', () => {
   test('missing data fields default to 0 (no NaN)', () => {
     const v = computePlaceValues([{ id: 'x', data: {} }, places[0]], ATLAS_DEFAULTS.normalization);
     expect(Number.isFinite(v.x)).toBe(true);
+  });
+});
+
+describe('expandWorld', () => {
+  const ex = expandWorld(MINI_WORLD, ARCHETYPES, ATLAS_DEFAULTS);
+  test('dense sequential space ids grouped by place', () => {
+    ex.spaces.forEach((s, i) => expect(s.id).toBe(i));
+    // capital-hub(3) + downtown(3) + port(3) + market(3) = 12
+    expect(ex.spaces.length).toBe(12);
+    expect(ex.placeOf[0]).toBe('rome');
+  });
+  test('internal chain edges + connector edges (exit -> entry)', () => {
+    // rome spaces 0..2: 0->1, 1->2; rome exit(2) -> paris entry(3)
+    expect(ex.edges[0]).toEqual([1]);
+    expect(ex.edges[1]).toEqual([2]);
+    expect(ex.edges[2]).toEqual([3]);
+    // paris exit(5) branches to berlin entry(6) AND geneva entry(9)
+    expect(ex.edges[5].sort()).toEqual([6, 9]);
+  });
+  test('roles map to engine types; prices/rents assigned to property spaces', () => {
+    ex.spaces.forEach(s => {
+      if (s.role === 'property') {
+        expect(s.type).toBe('property');
+        expect(s.price).toBeGreaterThan(0);
+        expect(s.rent).toBeGreaterThan(0);
+      }
+      if (s.role === 'transit') expect(s.type).toBe('railroad');
+    });
+  });
+  test('placeGroups contain only property spaces, >=2 each', () => {
+    Object.values(ex.placeGroups).forEach(ids => {
+      expect(ids.length).toBeGreaterThanOrEqual(2);
+      ids.forEach(id => expect(ex.spaces[id].role).toBe('property'));
+    });
+  });
+  test('hub entry space flagged', () => {
+    expect(ex.spaces[0].isHub).toBe(true);
+    expect(ex.hubs).toEqual([0]);
+  });
+  test('multi-archetype place merges slots in order', () => {
+    const w = JSON.parse(JSON.stringify(MINI_WORLD));
+    w.places[1].archetypes = ['downtown', 'tourism' in ARCHETYPES ? 'tourism' : 'landmark'];
+    const ex2 = expandWorld(w, ARCHETYPES, ATLAS_DEFAULTS);
+    const parisSpaces = ex2.spaces.filter(s => s.placeId === 'paris');
+    expect(parisSpaces.length).toBe(ARCHETYPES['downtown'].spaceSlots.length + ARCHETYPES['landmark'].spaceSlots.length);
   });
 });
