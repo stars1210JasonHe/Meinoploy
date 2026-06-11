@@ -203,3 +203,43 @@ export function expandWorld(world, archetypes, defaults) {
     boardSize: spaces.length,
   };
 }
+
+// Aggregate archetype statLean vectors into map traits (decision 4).
+// Sum every archetype INSTANCE's statLean across places (an archetype used by 3
+// places counts 3x), divide by place count, merge explicit overrides AFTER
+// (override replaces the aggregated value), clamp every stat to +/-clamp,
+// drop exact-zero stats.
+export function aggregateTraits(places, archetypes, clamp, overrides) {
+  var sums = {};
+  places.forEach(function (place) {
+    (place.archetypes || []).forEach(function (aId) {
+      var archetype = archetypes[aId];
+      if (!archetype || !archetype.statLean) return;
+      for (var stat in archetype.statLean) {
+        sums[stat] = (sums[stat] || 0) + archetype.statLean[stat];
+      }
+    });
+  });
+
+  var traits = {};
+  var stat;
+  if (places.length > 0) {
+    for (stat in sums) {
+      traits[stat] = sums[stat] / places.length;
+    }
+  }
+  if (overrides) {
+    for (stat in overrides) {
+      traits[stat] = overrides[stat];
+    }
+  }
+  for (stat in traits) {
+    var v = Math.max(-clamp, Math.min(clamp, traits[stat]));
+    if (v === 0) {
+      delete traits[stat];
+    } else {
+      traits[stat] = v;
+    }
+  }
+  return traits;
+}

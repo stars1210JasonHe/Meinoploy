@@ -1,5 +1,5 @@
 import { ARCHETYPES } from '../../mods/dominion/atlas/archetypes';
-import { ATLAS_DEFAULTS, computePlaceValues, expandWorld } from '../world-loader';
+import { ATLAS_DEFAULTS, computePlaceValues, expandWorld, aggregateTraits } from '../world-loader';
 import { MINI_WORLD } from '../../mods/dominion/atlas/fixtures/mini-world';
 
 describe('archetype library', () => {
@@ -92,5 +92,24 @@ describe('expandWorld', () => {
     const ex2 = expandWorld(w, ARCHETYPES, ATLAS_DEFAULTS);
     const parisSpaces = ex2.spaces.filter(s => s.placeId === 'paris');
     expect(parisSpaces.length).toBe(ARCHETYPES['downtown'].spaceSlots.length + ARCHETYPES['landmark'].spaceSlots.length);
+  });
+});
+
+describe('aggregateTraits', () => {
+  test('averages statLean over places and clamps', () => {
+    // 6 tech-hub places (+0.05 tech each) -> mean +0.05... then a stacked world:
+    const stacked = Array.from({ length: 6 }, (_, i) => ({ id: 'p' + i, archetypes: ['tech-hub'] }));
+    const t = aggregateTraits(stacked, ARCHETYPES, 0.12);
+    expect(t.tech).toBeCloseTo(0.05); // mean of identical leans = the lean
+  });
+  test('clamp engages on explicit overrides', () => {
+    const places = [{ id: 'a', archetypes: ['tech-hub'] }];
+    const t = aggregateTraits(places, ARCHETYPES, 0.12, { tech: 0.5, luck: -0.5 });
+    expect(t.tech).toBe(0.12);
+    expect(t.luck).toBe(-0.12);
+  });
+  test('neutral world -> empty traits (no zero-noise keys)', () => {
+    const t = aggregateTraits([], ARCHETYPES, 0.12);
+    expect(Object.keys(t).length).toBe(0);
   });
 });
