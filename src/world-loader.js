@@ -243,3 +243,159 @@ export function aggregateTraits(places, archetypes, clamp, overrides) {
   }
   return traits;
 }
+
+// Card action whitelist — same list as src/map-loader.js (duplicated: that module
+// does not export it, and this task must not modify it).
+var VALID_CARD_ACTIONS = ['moveTo', 'gain', 'pay', 'goToJail', 'payPercent', 'gainAll', 'gainPerProperty', 'freeUpgrade', 'downgrade', 'forceBuy'];
+
+// Validate an authored World against every hard invariant from the spec.
+// Returns a list of error strings (empty = valid) — same contract as validateMap.
+// Later checks are skipped if earlier structural ones failed.
+export function validateWorld(world, archetypes) {
+  var errors = [];
+  var cfg = mergeAtlasConfig(ATLAS_DEFAULTS, world.atlasConfig);
+
+  // 1. Meta
+  if (!world.id || typeof world.id !== 'string') errors.push('id is required (string)');
+  if (!world.name || typeof world.name !== 'string') errors.push('name is required (string)');
+  if (world.movementMode !== 'atlas') errors.push('movementMode must be "atlas"');
+  var places = world.places;
+  if (!Array.isArray(places) || places.length === 0) {
+    errors.push('places must be a non-empty array');
+    return errors;
+  }
+  var placeIds = {};
+  places.forEach(function (p) {
+    if (placeIds[p.id]) errors.push('duplicate place id "' + p.id + '"');
+    placeIds[p.id] = true;
+  });
+
+  // 2. Refs: archetypes, connector targets, hubs
+  places.forEach(function (p) {
+    (p.archetypes || []).forEach(function (aId) {
+      if (!archetypes[aId]) errors.push('place "' + p.id + '": unknown archetype "' + aId + '"');
+    });
+    var connectors = p.connectors || {};
+    for (var dir in connectors) {
+      if (!placeIds[connectors[dir]]) {
+        errors.push('place "' + p.id + '": connector "' + dir + '" targets unknown place "' + connectors[dir] + '"');
+      }
+    }
+  });
+  var hubs = world.hubs || [];
+  hubs.forEach(function (placeId) {
+    if (!placeIds[placeId]) errors.push('hubs: unknown place "' + placeId + '"');
+  });
+  if (errors.length > 0) return errors; // structural failure — skip derived checks
+
+  // 3. Caps (slot total computable from archetypes without full expansion)
+  var size = Object.assign({}, cfg.size, world.size || {});
+  if (places.length > size.maxPlaces) {
+    errors.push('maxPlaces exceeded: ' + places.length + ' places > ' + size.maxPlaces);
+  }
+  var slotTotal = 0;
+  places.forEach(function (p) {
+    (p.archetypes || []).forEach(function (aId) {
+      slotTotal += archetypes[aId].spaceSlots.length;
+    });
+  });
+  if (slotTotal > size.maxSpaces) {
+    errors.push('maxSpaces exceeded: ' + slotTotal + ' spaces > ' + size.maxSpaces);
+  }
+
+  // 4. Hubs
+  if (hubs.length < 1) errors.push('world must declare at least 1 hub');
+  if (errors.length > 0) return errors;
+
+  // 5. Graph (refs already validated, so expandWorld cannot throw)
+  var ex;
+  try {
+    ex = expandWorld(world, archetypes, ATLAS_DEFAULTS);
+  } catch (e) {
+    errors.push('expansion failed: ' + e.message);
+    return errors;
+  }
+  ex.spaces.forEach(function (s) {
+    if (ex.edges[s.id].length === 0) {
+      errors.push('space ' + s.id + ' (' + s.name + ') has no outgoing edge');
+    }
+  });
+  // BFS distance-to-hub over REVERSED edges from all hub spaces; every space
+  // must reach some hub within cfg.hubReachSteps directed steps.
+  var reverse = {};
+  ex.spaces.forEach(function (s) { reverse[s.id] = []; });
+  ex.spaces.forEach(function (s) {
+    ex.edges[s.id].forEach(function (to) { reverse[to].push(s.id); });
+  });
+  var dist = {};
+  var queue = [];
+  ex.hubs.forEach(function (h) { dist[h] = 0; queue.push(h); });
+  while (queue.length > 0) {
+    var cur = queue.shift();
+    reverse[cur].forEach(function (from) {
+      if (dist[from] === undefined) {
+        dist[from] = dist[cur] + 1;
+        queue.push(from);
+      }
+    });
+  }
+  ex.spaces.forEach(function (s) {
+    if (dist[s.id] === undefined || dist[s.id] > cfg.hubReachSteps) {
+      errors.push('space ' + s.id + ' (' + s.name + ') cannot reach a hub within ' + cfg.hubReachSteps + ' steps');
+    }
+  });
+
+  // 6. Economy: buildable places, value-share cap, groupsToWin
+  var groupCount = Object.keys(ex.placeGroups).length;
+  if (groupCount === 0) {
+    errors.push('world has zero buildable places (every place needs >= 2 property spaces to be buildable)');
+  }
+  var totalValue = 0;
+  places.forEach(function (p) { totalValue += ex.placeValues[p.id]; });
+  if (totalValue > 0) {
+    places.forEach(function (p) {
+      var share = ex.placeValues[p.id] / totalValue;
+      if (share > cfg.valueShareCap) {
+        errors.push('place "' + p.id + '" holds ' + Math.round(share * 100) + '% of board value, exceeding valueShareCap ' + cfg.valueShareCap);
+      }
+    });
+  }
+  var victoryParams = (world.victory && world.victory.params) || {};
+  if (victoryParams.groupsToWin !== undefined && victoryParams.groupsToWin > groupCount) {
+    errors.push('groupsToWin (' + victoryParams.groupsToWin + ') exceeds buildable set count (' + groupCount + ')');
+  }
+
+  // 7. Win paths: non-empty subset of engine-scored paths
+  var winPaths = world.winPaths;
+  if (!Array.isArray(winPaths) || winPaths.length === 0) {
+    errors.push('winPaths must be a non-empty array');
+  } else {
+    winPaths.forEach(function (path) {
+      if (cfg.winPaths.indexOf(path) < 0) {
+        errors.push('winPaths: "' + path + '" is not an engine-scored path (allowed: ' + cfg.winPaths.join(', ') + ')');
+      }
+    });
+  }
+
+  // 8. Cards (optional in this task): action whitelist + moveTo node-targeting
+  if (world.cards) {
+    ['chance', 'community'].forEach(function (deck) {
+      var list = world.cards[deck];
+      if (!Array.isArray(list)) {
+        errors.push('cards.' + deck + ' must be an array');
+        return;
+      }
+      list.forEach(function (card, i) {
+        if (!card.text) errors.push(deck + '[' + i + ']: missing text');
+        if (VALID_CARD_ACTIONS.indexOf(card.action) < 0) {
+          errors.push(deck + '[' + i + ']: invalid action "' + card.action + '"');
+        }
+        if (card.action === 'moveTo' && (card.value < 0 || card.value >= ex.boardSize || !ex.spaces[card.value])) {
+          errors.push(deck + '[' + i + ']: moveTo target ' + card.value + ' is not an existing space id (0-' + (ex.boardSize - 1) + ')');
+        }
+      });
+    });
+  }
+
+  return errors;
+}
