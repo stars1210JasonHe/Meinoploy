@@ -21,4 +21,6 @@ export var MINI_WORLD = {
   hubs: ['rome'],
   winPaths: ['wealth', 'dominion'],
   size: { maxPlaces: 16, maxSpaces: 96 },
+  // A 4-place world legitimately concentrates >35% of property value in its top place (Paris ~40.5%), so loosen the default cap.
+  atlasConfig: { valueShareCap: 0.5 },
 };

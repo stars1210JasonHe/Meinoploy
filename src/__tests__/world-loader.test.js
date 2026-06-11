@@ -138,8 +138,12 @@ describe('validateWorld', () => {
   test('hub unreachable within N steps', () => {
     // long one-way tail: rome->paris->berlin->rome plus a chain hanging off geneva that never returns
     const w = clone(MINI_WORLD);
-    w.atlasConfig = { hubReachSteps: 2 }; // tighten N so the valid loop now violates it
-    expect(validateWorld(w, ARCHETYPES).join()).toMatch(/reach/i);
+    // wholesale assignment REPLACES the fixture's atlasConfig — carry its
+    // valueShareCap so this test fails for the reach reason only
+    w.atlasConfig = { hubReachSteps: 2, valueShareCap: 0.5 }; // tighten N so the valid loop now violates it
+    const errors = validateWorld(w, ARCHETYPES);
+    expect(errors.join()).toMatch(/reach/i);
+    expect(errors.join()).not.toMatch(/valueShareCap/);
   });
   test('size caps', () => {
     const w = clone(MINI_WORLD); w.size = { maxPlaces: 2, maxSpaces: 96 };
@@ -151,8 +155,20 @@ describe('validateWorld', () => {
   });
   test('value-share cap', () => {
     const w = clone(MINI_WORLD);
-    w.atlasConfig = { valueShareCap: 0.10 }; // 4 places -- someone necessarily exceeds 10%
+    w.atlasConfig = { valueShareCap: 0.10 }; // REPLACES fixture override; 4 places -- someone necessarily exceeds 10%
     expect(validateWorld(w, ARCHETYPES).join()).toMatch(/value/i);
+  });
+  test('value-share cap counts summed property-slot prices, not placeValue', () => {
+    // Paris gets 2x downtown -> 6 of the board's 13 property slots. Its summed
+    // prices (2400/4160 ~ 58%) exceed the default 0.35 cap, while its
+    // placeValue share (400/1250 = 32%) does NOT -- the metric counts slots.
+    const w = clone(MINI_WORLD);
+    delete w.atlasConfig; // fall back to the 0.35 default cap
+    w.places[1].archetypes = ['downtown', 'downtown'];
+    const errors = validateWorld(w, ARCHETYPES);
+    expect(errors.join()).toMatch(/value/i);
+    expect(errors.join()).toMatch(/paris/i);
+    expect(errors.length).toBe(1); // fails for exactly the value-share reason
   });
   test('zero buildable places errors', () => {
     // all archetypes swapped for a 1-property mutant -- build inline mutant archetype lib

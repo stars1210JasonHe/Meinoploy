@@ -371,13 +371,21 @@ export function validateWorld(world, archetypes) {
   if (groupCount === 0) {
     errors.push('world has zero buildable places (every place needs >= 2 property spaces to be buildable)');
   }
+  // Value share = (sum of the place's property-slot PRICES) / (sum of ALL
+  // property-slot prices on the board) — a place with more/bigger property
+  // slots holds more board value, not just a higher placeValue.
+  var placePropertyValue = {};
   var totalValue = 0;
-  places.forEach(function (p) { totalValue += ex.placeValues[p.id]; });
+  ex.spaces.forEach(function (s) {
+    if (s.role !== 'property') return;
+    placePropertyValue[s.placeId] = (placePropertyValue[s.placeId] || 0) + s.price;
+    totalValue += s.price;
+  });
   if (totalValue > 0) {
     places.forEach(function (p) {
-      var share = ex.placeValues[p.id] / totalValue;
+      var share = (placePropertyValue[p.id] || 0) / totalValue;
       if (share > cfg.valueShareCap) {
-        errors.push('place "' + p.id + '" holds ' + Math.round(share * 100) + '% of board value, exceeding valueShareCap ' + cfg.valueShareCap);
+        errors.push('place "' + p.id + '" holds ' + Math.round(share * 100) + '% of board value (summed property prices), exceeding valueShareCap ' + cfg.valueShareCap);
       }
     });
   }
