@@ -1,5 +1,5 @@
 import { ARCHETYPES } from '../../mods/dominion/atlas/archetypes';
-import { ATLAS_DEFAULTS, computePlaceValues, expandWorld, aggregateTraits, validateWorld } from '../world-loader';
+import { ATLAS_DEFAULTS, computePlaceValues, expandWorld, aggregateTraits, validateWorld, loadWorld } from '../world-loader';
 import { MINI_WORLD } from '../../mods/dominion/atlas/fixtures/mini-world';
 
 describe('archetype library', () => {
@@ -173,5 +173,35 @@ describe('validateWorld', () => {
     const w = clone(MINI_WORLD);
     w.cards = { chance: [{ text: 'Go!', action: 'moveTo', value: 999 }], community: [{ text: 'ok', action: 'gain', value: 50 }] };
     expect(validateWorld(w, ARCHETYPES).join()).toMatch(/moveTo/i);
+  });
+});
+
+describe('loadWorld', () => {
+  test('throws on invalid world with the error list', () => {
+    const w = JSON.parse(JSON.stringify(MINI_WORLD)); w.hubs = [];
+    expect(() => loadWorld(w, ARCHETYPES)).toThrow(/hub/i);
+  });
+  test('returns a mapData-compatible object with atlas extensions', () => {
+    const m = loadWorld(MINI_WORLD, ARCHETYPES);
+    // existing mapData contract (subset App.js/Game.js already consume)
+    expect(m.id).toBe('mini');
+    expect(m.layoutType).toBe('custom');
+    expect(m.spaces.length).toBe(m.spaceCount);
+    expect(m.positions[0]).toBeDefined();
+    expect(m.mapMechanics.priceMultiplier).toBe(1);
+    expect(m.victory.primary).toBeDefined();
+    expect(m.theme.boardBackground).toBeDefined();
+    // atlas extensions
+    expect(m.movementMode).toBe('atlas');
+    expect(Object.keys(m.edges).length).toBe(m.spaceCount);
+    expect(m.placeGroups).toBeDefined();
+    expect(m.hubs).toEqual([0]);
+    expect(m.traits).toBeDefined();
+    expect(m.winPaths).toEqual(['wealth', 'dominion']);
+    expect(m.schemaVersion).toBe('3.0-draft');
+  });
+  test('per-space positions derive from place pos', () => {
+    const m = loadWorld(MINI_WORLD, ARCHETYPES);
+    expect(m.positions[0].x).toBeCloseTo(50, 0); // rome entry near rome's pos
   });
 });

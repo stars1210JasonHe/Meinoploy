@@ -16,6 +16,27 @@ export var ATLAS_DEFAULTS = {
   hubReachSteps: 14,
   size: { maxPlaces: 16, maxSpaces: 96 },
   winPaths: ['wealth', 'dominion', 'survival'],
+  positions: {
+    // Per-slot x offset (percent) so co-located tokens don't fully overlap.
+    // NOTE: plan prose suggested 2, but loadWorld's position contract keeps the
+    // entry space within +/-0.5 of the place pos; rendering spreads slots properly later.
+    slotOffsetStep: 0.4,
+  },
+  theme: {
+    // Sensible pixel (GBC-flavored) defaults; world.theme overrides per key.
+    boardBackground: '#0f380f',
+    boardBorder: '#0f380f',
+    cellBackground: '#9bbc0f',
+    cellBorder: '#306230',
+    cornerBackground: '#8bac0f',
+    textColor: '#0f380f',
+    centerBackground: '#306230',
+    logoText: 'MEINOPOLY',
+    logoSubtitle: '',
+    logoColor: '#f0c040',
+    logoSubColor: '#8bac0f',
+    centerObject: null,
+  },
 };
 
 // Merge ATLAS_DEFAULTS with a world's atlasConfig overrides.
@@ -398,4 +419,82 @@ export function validateWorld(world, archetypes) {
   }
 
   return errors;
+}
+
+// ── Load World ──────────────────────────────────────────
+// Validate -> expand -> aggregate traits -> assemble a mapData-compatible
+// object (superset of loadMap()'s contract) with atlas extensions.
+export function loadWorld(world, archetypes) {
+  var errors = validateWorld(world, archetypes);
+  if (errors.length > 0) {
+    throw new Error('World validation failed:\n  - ' + errors.join('\n  - '));
+  }
+
+  var cfg = mergeAtlasConfig(ATLAS_DEFAULTS, world.atlasConfig);
+  var ex = expandWorld(world, archetypes, ATLAS_DEFAULTS);
+  var traits = aggregateTraits(world.places, archetypes, cfg.traitClamp, world.traits);
+
+  // Per-space positions: the place's pos with a small deterministic slot offset
+  // (x + (slotIndex - (n-1)/2) * step, clamped 0-100) so tokens don't fully overlap.
+  var slotCounts = {};
+  ex.spaces.forEach(function (s) {
+    slotCounts[s.placeId] = (slotCounts[s.placeId] || 0) + 1;
+  });
+  var step = cfg.positions.slotOffsetStep;
+  var positions = {};
+  ex.spaces.forEach(function (s) {
+    var n = slotCounts[s.placeId];
+    var x = s.pos.x + (s.slotIndex - (n - 1) / 2) * step;
+    positions[s.id] = {
+      x: Math.max(0, Math.min(100, x)),
+      y: Math.max(0, Math.min(100, s.pos.y)),
+    };
+  });
+
+  var victory = world.victory || {};
+  var cards = world.cards || {};
+
+  return {
+    // ── mapData-compatible (subset App.js/Game.js already consume) ──
+    id: world.id,
+    name: world.name,
+    description: world.story || '',
+    schemaVersion: world.schemaVersion || '3.0-draft',
+    layoutType: 'custom',
+    spaceCount: ex.boardSize,
+    spaces: ex.spaces,
+    positions: positions,
+    colorGroupsFlat: ex.placeGroups, // alias — legacy readers see groups
+    chanceCards: cards.chance || [],
+    communityCards: cards.community || [],
+    mapMechanics: {
+      incomeMultiplier: 1.0,
+      rentMultiplier: 1.0,
+      taxMultiplier: 1.0,
+      priceMultiplier: 1.0,
+      upgradeCostMultiplier: 1.0,
+      branchChoice: 'player',
+    },
+    riskProfile: { volatility: 0.5, eventFrequency: 1.0 },
+    victory: {
+      primary: world.winPaths[0],
+      maxTurns: victory.maxTurns || 0,
+      params: victory.params || {},
+    },
+    theme: Object.assign({}, cfg.theme, world.theme || {}),
+    // jail is a temporary placeholder — the atlas engine task wires jail-node semantics.
+    specialSpaces: { go: ex.hubs[0], jail: null },
+
+    // ── atlas extensions ──
+    movementMode: 'atlas',
+    edges: ex.edges,
+    placeGroups: ex.placeGroups,
+    hubs: ex.hubs,
+    traits: traits,
+    winPaths: world.winPaths,
+    placeOf: ex.placeOf,
+    entries: ex.entries,
+    exits: ex.exits,
+    worldId: world.id,
+  };
 }
