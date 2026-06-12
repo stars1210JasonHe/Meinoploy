@@ -268,4 +268,23 @@ describe('useReroll snapshot restore', () => {
     expect(G.players[0].distanceTraveled).toBe(0);   // distance restored
     expect(G.hasRolled).toBe(false);
   });
+
+  test('bankruptcy fires when the salary refund drives money to zero or below', () => {
+    const G = atlasG();
+    G.players[0].rerollsLeft = 1;
+    G.players[0].position = 10;
+    // Opponent owns the landing target: landing charges rent (no buy offer,
+    // so useReroll stays legal) and the player is solvent only thanks to the
+    // mid-route hub salary — the reroll refund must trigger bankruptcy.
+    G.ownership[1] = '1';
+    G.players[1].properties.push(1);
+    const rent = G.board.spaces[1].rent;
+    expect(rent).toBeGreaterThan(0);
+    G.players[0].money = rent; // refund leaves exactly $0
+    Monopoly.moves.rollDice(G, makeCtx(dice(1, 2), '0'), [11, 0, 1]); // through the hub
+    expect(G.players[0].bankrupt).toBe(false);
+    expect(G.players[0].money).toBe(RULES.core.goSalary); // rent paid, salary collected
+    Monopoly.moves.useReroll(G, makeCtx([], '0'));
+    expect(G.players[0].bankrupt).toBe(true);
+  });
 });

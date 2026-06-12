@@ -980,6 +980,11 @@ export const Monopoly = {
         }
         if (G.lastDice.salaryCollected) {
           player.money -= G.lastDice.salaryCollected;
+          // The refund is a money subtraction like any other — a player who
+          // spent the salary (e.g. on rent) can be wiped out by taking it back.
+          if (player.money <= 0) {
+            handleBankruptcy(G, ctx, player, null);
+          }
         }
       }
       G.lastDice = null;
