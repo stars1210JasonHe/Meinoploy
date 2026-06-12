@@ -960,13 +960,17 @@ export const Monopoly = {
       G.canBuy = false;
       G.turnPhase = 'roll';
 
-      // Undo the position change — put player back
-      // We need to store the old position. For simplicity, we'll just allow re-rolling
-      // which means the player rolls again from their current position.
-      // Actually, we should revert to the position before the roll.
-      // Store pre-roll position in lastDice for this purpose.
-      if (G.lastDice && G.lastDice.preRollPosition !== undefined) {
-        player.position = G.lastDice.preRollPosition;
+      // Restore the preRoll snapshot: position, salary collected, distance.
+      if (G.lastDice) {
+        if (G.lastDice.preRollPosition !== undefined) {
+          player.position = G.lastDice.preRollPosition;
+        }
+        if (G.lastDice.preRollDistance !== undefined) {
+          player.distanceTraveled = G.lastDice.preRollDistance;
+        }
+        if (G.lastDice.salaryCollected) {
+          player.money -= G.lastDice.salaryCollected;
+        }
       }
       G.lastDice = null;
       G.messages.push(`${playerName(player)} uses a reroll! (${player.rerollsLeft} left)`);

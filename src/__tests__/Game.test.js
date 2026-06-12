@@ -316,6 +316,24 @@ describe('rollDice', () => {
     expect(G.lastDice.preRollPosition).toBe(5);
     expect(G.players[0].position).toBe(8);
   });
+
+  test('classic reroll refunds the GO salary collected by the undone roll', () => {
+    const G = Monopoly.setup({ numPlayers: 2, playOrder: ['0', '1'] });
+    G.phase = 'play';
+    G.players[0].rerollsLeft = 1;
+    G.players[0].position = G.board.boardSize - 1;
+    // Landing target (space 1) must not open a buy offer — useReroll is blocked
+    // while G.canBuy is set. Owned by the opponent, the landing charges rent instead.
+    G.ownership[1] = '1';
+    G.players[1].properties.push(1);
+    const ctx = { currentPlayer: '0', numPlayers: 2, random: { Number: () => 0.01 }, events: { endTurn: () => {} } };
+    Monopoly.moves.rollDice(G, ctx); // 1+1=2, wraps past GO, collects salary, pays rent
+    const moneyAfterRoll = G.players[0].money;
+    Monopoly.moves.useReroll(G, ctx);
+    // Reroll refunds ONLY the salary (rent stays paid): no more double-collect exploit.
+    expect(G.players[0].money).toBe(moneyAfterRoll - RULES.core.goSalary);
+    expect(G.players[0].position).toBe(G.board.boardSize - 1);
+  });
 });
 
 // ─── BUY PROPERTY ────────────────────────────────────────

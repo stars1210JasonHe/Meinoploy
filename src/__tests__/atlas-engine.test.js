@@ -211,3 +211,23 @@ describe('atlas whole-route movement (D11)', () => {
     expect(G.players[0].inJail).toBe(false);
   });
 });
+
+describe('useReroll snapshot restore', () => {
+  test('atlas reroll refunds hub salary and restores position + distance', () => {
+    const G = atlasG();
+    G.players[0].rerollsLeft = 1;
+    G.players[0].position = 10;
+    // Pre-own the landing target so the roll doesn't open a buy offer
+    // (useReroll is blocked while G.canBuy is set).
+    G.ownership[1] = '0';
+    G.players[0].properties.push(1);
+    const money = G.players[0].money;
+    Monopoly.moves.rollDice(G, makeCtx(dice(1, 2), '0'), [11, 0, 1]); // through the hub
+    expect(G.players[0].money - money).toBe(RULES.core.goSalary);
+    Monopoly.moves.useReroll(G, makeCtx([], '0'));
+    expect(G.players[0].position).toBe(10);
+    expect(G.players[0].money).toBe(money);          // salary refunded
+    expect(G.players[0].distanceTraveled).toBe(0);   // distance restored
+    expect(G.hasRolled).toBe(false);
+  });
+});
