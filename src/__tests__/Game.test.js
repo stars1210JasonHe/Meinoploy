@@ -894,6 +894,16 @@ describe('acceptCard / redrawCard', () => {
     const result = Monopoly.moves.redrawCard(G, makeCtx('0'));
     expect(result).toBe(INVALID_MOVE);
   });
+
+  test('classic goToJail card still teleports to the jail space', () => {
+    const G = Monopoly.setup({ numPlayers: 2, playOrder: ['0', '1'] });
+    G.phase = 'play';
+    G.players[0].position = 20;
+    G.pendingCard = { card: { text: 'Busted!', action: 'goToJail' }, deck: 'chance' };
+    Monopoly.moves.acceptCard(G, { currentPlayer: '0', random: { Number: () => 0 }, events: { endTurn: () => {} } });
+    expect(G.players[0].position).toBe(G.board.jail);
+    expect(G.players[0].inJail).toBe(true);
+  });
 });
 
 // ─── UPGRADE PROPERTY ──────────────────────────────────

@@ -275,6 +275,17 @@ function handleBankruptcy(G, ctx, player, creditorId) {
   });
 }
 
+// Send a player to jail. Atlas maps have no jail node (G.board.jail === null):
+// the player is detained in place — fine/doubles/turn-count release logic is
+// position-independent, so everything else works unchanged.
+function sendToJail(G, player) {
+  if (G.board.jail !== null && G.board.jail !== undefined) {
+    player.position = G.board.jail;
+  }
+  player.inJail = true;
+  player.jailTurns = 0;
+}
+
 // --- Landing ---
 
 function handleLanding(G, ctx) {
@@ -377,9 +388,7 @@ function handleLanding(G, ctx) {
     }
 
     case 'goToJail':
-      player.position = G.board.jail;
-      player.inJail = true;
-      player.jailTurns = 0;
+      sendToJail(G, player);
       messages.push('Go to Jail!');
       break;
 
@@ -475,9 +484,7 @@ function applyCard(G, ctx, player, card) {
       break;
     }
     case 'goToJail':
-      player.position = G.board.jail;
-      player.inJail = true;
-      player.jailTurns = 0;
+      sendToJail(G, player);
       break;
 
     // --- Enhanced card actions ---
@@ -832,9 +839,7 @@ export const Monopoly = {
       if (dice.isDoubles) {
         G.doublesCount++;
         if (G.doublesCount >= RULES.core.doublesJailThreshold) {
-          player.position = G.board.jail;
-          player.inJail = true;
-          player.jailTurns = 0;
+          sendToJail(G, player);
           G.messages.push('Triple doubles! Go to Jail!');
           G.turnPhase = 'done';
           return;

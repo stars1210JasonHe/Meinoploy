@@ -96,3 +96,25 @@ describe('atlas board plumbing', () => {
     expect(G.pendingCard).toBe(null);
   });
 });
+
+describe('atlas jail: in-place detention (no jail node)', () => {
+  test('goToJail card detains the player where they stand', () => {
+    const G = atlasG();
+    G.players[0].position = 7;
+    G.pendingCard = { card: { text: 'Busted!', action: 'goToJail' }, deck: 'chance' };
+    G.turnPhase = 'card';
+    Monopoly.moves.acceptCard(G, makeCtx([], '0'));
+    expect(G.players[0].inJail).toBe(true);
+    expect(G.players[0].jailTurns).toBe(0);
+    expect(G.players[0].position).toBe(7); // did NOT teleport
+  });
+
+  test('triple doubles detains in place on atlas', () => {
+    const G = atlasG();
+    G.players[0].position = 3;
+    G.doublesCount = 2; // two doubles already this turn
+    Monopoly.moves.rollDice(G, makeCtx(dice(2, 2), '0'));
+    expect(G.players[0].inJail).toBe(true);
+    expect(G.players[0].position).toBe(3); // detained pre-move
+  });
+});
