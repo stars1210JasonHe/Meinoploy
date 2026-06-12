@@ -510,6 +510,16 @@ function applyCard(G, ctx, player, card) {
       break;
     }
     case 'moveTo': {
+      if (G.board.movementMode === 'atlas') {
+        // Node-targeted teleport (spec §6): no route walk, no distance, salary
+        // only if the TARGET is a hub (reaching counts; loader validates ids).
+        player.position = card.value;
+        if (G.board.spaces[card.value].isHub) {
+          payHubSalary(G, player);
+        }
+        handleLanding(G, ctx);
+        break;
+      }
       const oldPos = player.position;
       player.position = card.value;
       if (card.value < oldPos && card.value !== G.board.jail) {

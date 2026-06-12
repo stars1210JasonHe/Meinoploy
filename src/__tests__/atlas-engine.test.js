@@ -212,6 +212,44 @@ describe('atlas whole-route movement (D11)', () => {
   });
 });
 
+describe('atlas moveTo: node-targeted teleport', () => {
+  function pendCard(G, value) {
+    G.pendingCard = { card: { text: 'Go somewhere', action: 'moveTo', value }, deck: 'chance' };
+    G.turnPhase = 'card';
+  }
+
+  test('teleports to the node id and lands there', () => {
+    const G = atlasG();
+    G.players[0].position = 7;
+    pendCard(G, 4); // paris II, unowned property
+    Monopoly.moves.acceptCard(G, makeCtx([], '0'));
+    expect(G.players[0].position).toBe(4);
+    expect(G.canBuy).toBe(true); // landing applied
+  });
+
+  test('teleporting ONTO the hub pays salary once', () => {
+    const G = atlasG();
+    G.players[0].position = 7;
+    const money = G.players[0].money;
+    pendCard(G, 0);
+    Monopoly.moves.acceptCard(G, makeCtx([], '0'));
+    expect(G.players[0].position).toBe(0);
+    expect(G.players[0].money - money).toBe(RULES.core.goSalary);
+  });
+
+  test('teleporting to a non-hub node pays nothing and adds no distance', () => {
+    const G = atlasG();
+    // Backward teleport (9 < 10): the classic "passed GO" back-pay heuristic
+    // must NOT fire on a graph — node ids carry no loop order.
+    G.players[0].position = 10;
+    const money = G.players[0].money;
+    pendCard(G, 9); // geneva I, unowned — buy OFFER only
+    Monopoly.moves.acceptCard(G, makeCtx([], '0'));
+    expect(G.players[0].money).toBe(money);
+    expect(G.players[0].distanceTraveled).toBe(0);
+  });
+});
+
 describe('useReroll snapshot restore', () => {
   test('atlas reroll refunds hub salary and restores position + distance', () => {
     const G = atlasG();
