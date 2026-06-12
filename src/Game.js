@@ -153,11 +153,13 @@ function applyEconMods(G, kind, value) {
   const season = getCurrentSeason(G);
   const seasonMod = kind === 'rent' ? season.rentMod
                   : kind === 'tax'  ? season.taxMod
+                  : kind === 'income' ? 1.0 // no season income mod exists
                   : season.priceMod; // 'price' and 'upgrade' use the season price mod (matches current behavior)
   const mech = G.board.mapMechanics || {};
   const mechMod = kind === 'rent' ? (mech.rentMultiplier === undefined ? 1 : mech.rentMultiplier)
                 : kind === 'tax'  ? (mech.taxMultiplier === undefined ? 1 : mech.taxMultiplier)
                 : kind === 'upgrade' ? (mech.upgradeCostMultiplier === undefined ? 1 : mech.upgradeCostMultiplier)
+                : kind === 'income' ? (mech.incomeMultiplier === undefined ? 1 : mech.incomeMultiplier)
                 : (mech.priceMultiplier === undefined ? 1 : mech.priceMultiplier); // 'price'
   return value * seasonMod * mechMod;
 }
@@ -471,7 +473,7 @@ function applyCard(G, ctx, player, card) {
       const oldPos = player.position;
       player.position = card.value;
       if (card.value < oldPos && card.value !== G.board.jail) {
-        let goBonus = RULES.core.goSalary;
+        let goBonus = Math.floor(applyEconMods(G, 'income', RULES.core.goSalary));
         // Mira Dawnlight passive: GO bonus
         if (getPassive(player) === 'idealist') {
           goBonus += RULES.passives.idealist.goBonus;
@@ -877,7 +879,7 @@ export const Monopoly = {
       player.position = (player.position + dice.total) % G.board.boardSize;
 
       if (player.position < oldPos && G.board.spaces[player.position].type !== 'goToJail') {
-        let goBonus = RULES.core.goSalary;
+        let goBonus = Math.floor(applyEconMods(G, 'income', RULES.core.goSalary));
         // Mira Dawnlight passive: GO bonus
         if (getPassive(player) === 'idealist') {
           goBonus += RULES.passives.idealist.goBonus;

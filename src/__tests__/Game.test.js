@@ -1479,6 +1479,18 @@ describe('applyEconMods (map mechanics)', () => {
     expect(G.players[0].money).toBe(1500 - 600);
   });
 
+  test('incomeMultiplier scales pass-GO salary on loop maps', () => {
+    const G = freshEconG({ incomeMultiplier: 2 });
+    G.players[0].character = null;
+    G.players[0].position = G.board.boardSize - 2; // 2 steps from wrapping past GO
+    const money = G.players[0].money;
+    const ctx = { currentPlayer: '0', numPlayers: 2, random: { Number: () => 0.01 }, events: { endTurn: () => {} } };
+    Monopoly.moves.rollDice(G, ctx); // rolls 1+1 = 2, wraps to 0 (GO)
+    expect(G.players[0].money - money).toBeGreaterThanOrEqual(2 * RULES.core.goSalary - 50);
+    // exact assertion: salary component is floor(goSalary * 2); landing effects on GO add nothing
+    expect(G.players[0].money - money).toBe(2 * RULES.core.goSalary);
+  });
+
   test('upgradeCostMultiplier scales the upgrade cost', () => {
     const G = freshEconG({ upgradeCostMultiplier: 2 });
     G.hasRolled = true;
