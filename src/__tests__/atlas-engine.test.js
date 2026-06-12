@@ -250,6 +250,66 @@ describe('atlas moveTo: node-targeted teleport', () => {
   });
 });
 
+describe('chained pendingCard: atlas moveTo onto a card space', () => {
+  // TRI_WORLD plus an authored chance deck — landing on space 8 (techton's
+  // chance space) draws a real card instead of hitting an empty deck.
+  const CARD_WORLD = {
+    ...TRI_WORLD,
+    id: 'tri-cards',
+    cards: { chance: [{ text: 'Pay up', action: 'pay', value: 50 }], community: [] },
+  };
+
+  function cardG() {
+    setActiveMap(loadWorld(CARD_WORLD, ARCHETYPES));
+    const G = Monopoly.setup({ numPlayers: 2, playOrder: ['0', '1'] });
+    G.phase = 'play';
+    return G;
+  }
+
+  test('acceptCard keeps the newly drawn card pending instead of vaporizing it', () => {
+    const G = cardG();
+    // luckRedraws makes the drawn 'pay' card redraw-eligible, so handleLanding
+    // PENDS it (turnPhase 'card') instead of auto-applying.
+    G.players[0].luckRedraws = 1;
+    G.pendingCard = { card: { text: 'Go', action: 'moveTo', value: 8 }, deck: 'chance' };
+    G.turnPhase = 'card';
+
+    Monopoly.moves.acceptCard(G, makeCtx([0.0], '0'));
+    expect(G.players[0].position).toBe(8);
+    expect(G.pendingCard).not.toBe(null);
+    expect(G.pendingCard.card.action).toBe('pay');
+    expect(G.turnPhase).toBe('card');
+
+    // The chained card resolves normally on the second accept.
+    const money = G.players[0].money;
+    Monopoly.moves.acceptCard(G, makeCtx([], '0'));
+    expect(G.players[0].money).toBe(money - 50);
+    expect(G.pendingCard).toBe(null);
+  });
+
+  test('redrawCard keeps a chained card pending too', () => {
+    const G = cardG();
+    G.players[0].luckRedraws = 2; // one spent on the redraw, one pends the chained draw
+    G.pendingCard = { card: { text: 'Busted!', action: 'goToJail' }, deck: 'chance' };
+    G.turnPhase = 'card';
+
+    // Redraw swaps goToJail for the deck's moveTo-free 'pay' card... but to
+    // exercise the chain we author the redraw deck draw as moveTo via a
+    // two-card deck: index 0 = moveTo onto the chance space.
+    G.board.chanceCards = [
+      { text: 'Go', action: 'moveTo', value: 8 },
+      { text: 'Pay up', action: 'pay', value: 50 },
+    ];
+    // First Number() picks the redraw (index 0 = moveTo), second picks the
+    // landing draw (0.9 → index 1 = pay).
+    Monopoly.moves.redrawCard(G, makeCtx([0.0, 0.9], '0'));
+    expect(G.players[0].position).toBe(8);
+    expect(G.pendingCard).not.toBe(null);
+    expect(G.pendingCard.card.action).toBe('pay');
+    expect(G.turnPhase).toBe('card');
+  });
+});
+
 describe('useReroll snapshot restore', () => {
   test('atlas reroll refunds hub salary and restores position + distance', () => {
     const G = atlasG();

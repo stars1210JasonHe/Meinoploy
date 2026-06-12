@@ -515,6 +515,8 @@ function applyCard(G, ctx, player, card) {
         // only if the TARGET is a hub (reaching counts; loader validates ids).
         player.position = card.value;
         if (G.board.spaces[card.value].isHub) {
+          // Deliberately NOT added to G.lastDice.salaryCollected: card effects
+          // survive a reroll, matching classic moveTo-GO semantics.
           payHubSalary(G, player);
         }
         handleLanding(G, ctx);
@@ -995,9 +997,14 @@ export const Monopoly = {
     acceptCard: (G, ctx) => {
       if (!G.pendingCard) return INVALID_MOVE;
       const player = G.players[ctx.currentPlayer];
-      applyCard(G, ctx, player, G.pendingCard.card);
+      const card = G.pendingCard.card;
       G.pendingCard = null;
-      G.turnPhase = G.canBuy ? 'act' : 'done';
+      applyCard(G, ctx, player, card);
+      // applyCard can chain a NEW pending card (atlas moveTo onto a card
+      // space) — don't clobber it or the card phase.
+      if (G.turnPhase !== 'card') {
+        G.turnPhase = G.canBuy ? 'act' : 'done';
+      }
     },
 
     redrawCard: (G, ctx) => {
@@ -1011,12 +1018,16 @@ export const Monopoly = {
       }
 
       const deck = G.pendingCard.deck === 'chance' ? G.board.chanceCards : G.board.communityCards;
-      const newCard = drawCard(ctx, deck);
       const deckName = G.pendingCard.deck === 'chance' ? 'CHANCE' : 'COMMUNITY CHEST';
+      G.pendingCard = null;
+      const newCard = drawCard(ctx, deck);
       G.messages.push(`Redraw! ${deckName}: ${newCard.text}`);
       applyCard(G, ctx, player, newCard);
-      G.pendingCard = null;
-      G.turnPhase = G.canBuy ? 'act' : 'done';
+      // applyCard can chain a NEW pending card (atlas moveTo onto a card
+      // space) — don't clobber it or the card phase.
+      if (G.turnPhase !== 'card') {
+        G.turnPhase = G.canBuy ? 'act' : 'done';
+      }
     },
 
     // --- Knox: Regulate property ---
