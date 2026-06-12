@@ -1,4 +1,5 @@
 import { INVALID_MOVE } from 'boardgame.io/core';
+import { validateRoute, autoRoute } from './atlas-movement';
 import { BOARD_SPACES as DEFAULT_BOARD_SPACES, COLOR_GROUPS as DEFAULT_COLOR_GROUPS } from '../mods/dominion/board';
 import { CHANCE_CARDS as DEFAULT_CHANCE_CARDS, COMMUNITY_CARDS as DEFAULT_COMMUNITY_CARDS } from '../mods/dominion/cards';
 import { RULES } from '../mods/dominion/rules';
@@ -275,6 +276,45 @@ function handleBankruptcy(G, ctx, player, creditorId) {
       G.messages.push(`${playerName(p)} gains $${RULES.passives.arbitrageur.bankruptcyBonus} from crisis arbitrage!`);
     }
   });
+}
+
+// Pay the hub-gated salary (atlas income, spec D4). Same RULES.core.goSalary
+// base as classic GO, scaled by the income multiplier stack; the idealist
+// passive's GO bonus migrates here as a flat add.
+function payHubSalary(G, player) {
+  let salary = Math.floor(applyEconMods(G, 'income', RULES.core.goSalary));
+  if (getPassive(player) === 'idealist') {
+    salary += RULES.passives.idealist.goBonus;
+    G.messages.push(`Growth vision: extra $${RULES.passives.idealist.goBonus} at the hub!`);
+  }
+  player.money += salary;
+  G.messages.push(`${playerName(player)} passes a capital hub! Collect $${salary}.`);
+  return salary;
+}
+
+// Atlas movement (spec D11): walk a whole route atomically. `route` is the
+// ordered node list AFTER the start position; omitted = deterministic
+// auto-walk (first edge each step, stops at dead ends — no-stall fallback).
+// Pays hub salary on every hub node entered. Returns false on an illegal
+// route (caller maps to INVALID_MOVE).
+function atlasWalk(G, player, dice, route) {
+  const edges = G.board.edges;
+  const steps = route === undefined ? autoRoute(edges, player.position, dice.total) : route;
+  if (!validateRoute(edges, player.position, steps, dice.total)) return false;
+
+  let salaryCollected = 0;
+  steps.forEach(id => {
+    player.position = id;
+    player.distanceTraveled++;
+    if (G.board.spaces[id].isHub) {
+      salaryCollected += payHubSalary(G, player);
+    }
+  });
+  if (steps.length < dice.total) {
+    G.messages.push('No path forward — the route ends here.');
+  }
+  G.lastDice.salaryCollected = salaryCollected;
+  return true;
 }
 
 // Send a player to jail. Atlas maps have no jail node (G.board.jail === null):
@@ -825,7 +865,7 @@ export const Monopoly = {
     },
 
     // --- Dice ---
-    rollDice: (G, ctx) => {
+    rollDice: (G, ctx, route) => {
       if (G.phase !== 'play') return INVALID_MOVE;
       if (G.hasRolled) return INVALID_MOVE;
       const player = G.players[ctx.currentPlayer];
@@ -833,6 +873,8 @@ export const Monopoly = {
 
       const dice = rollTwoDice(ctx);
       dice.preRollPosition = player.position;
+      dice.preRollDistance = player.distanceTraveled;
+      dice.salaryCollected = 0;
       G.lastDice = dice;
       G.hasRolled = true;
       G.messages = [`${playerName(player)} rolled ${dice.d1} + ${dice.d2} = ${dice.total}`];
@@ -875,18 +917,24 @@ export const Monopoly = {
         }
       }
 
-      const oldPos = player.position;
-      player.position = (player.position + dice.total) % G.board.boardSize;
+      if (G.board.movementMode === 'atlas') {
+        if (!atlasWalk(G, player, dice, route)) return INVALID_MOVE;
+      } else {
+        const oldPos = player.position;
+        player.position = (player.position + dice.total) % G.board.boardSize;
+        player.distanceTraveled += dice.total;
 
-      if (player.position < oldPos && G.board.spaces[player.position].type !== 'goToJail') {
-        let goBonus = Math.floor(applyEconMods(G, 'income', RULES.core.goSalary));
-        // Mira Dawnlight passive: GO bonus
-        if (getPassive(player) === 'idealist') {
-          goBonus += RULES.passives.idealist.goBonus;
-          G.messages.push(`Growth vision: extra $${RULES.passives.idealist.goBonus} from GO!`);
+        if (player.position < oldPos && G.board.spaces[player.position].type !== 'goToJail') {
+          let goBonus = Math.floor(applyEconMods(G, 'income', RULES.core.goSalary));
+          // Mira Dawnlight passive: GO bonus
+          if (getPassive(player) === 'idealist') {
+            goBonus += RULES.passives.idealist.goBonus;
+            G.messages.push(`Growth vision: extra $${RULES.passives.idealist.goBonus} from GO!`);
+          }
+          player.money += goBonus;
+          G.lastDice.salaryCollected = goBonus;
+          G.messages.push(`Passed GO! Collect $${goBonus}.`);
         }
-        player.money += goBonus;
-        G.messages.push(`Passed GO! Collect $${goBonus}.`);
       }
 
       G.messages.push(`Landed on ${G.board.spaces[player.position].name}.`);

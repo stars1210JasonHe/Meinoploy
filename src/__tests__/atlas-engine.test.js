@@ -77,8 +77,7 @@ describe('atlas board plumbing', () => {
     expect(G.ownership[8]).toBe(null); // berlin transit, buyable
   });
 
-  // Un-skipped in Task 5: these need the atlas rollDice branch to move.
-  test.skip('tax landing charges space.taxAmount (loader contract)', () => {
+  test('tax landing charges space.taxAmount (loader contract)', () => {
     const G = triG();
     G.players[0].position = 3;
     const money = G.players[0].money;
@@ -88,7 +87,7 @@ describe('atlas board plumbing', () => {
     expect(G.players[0].money).toBe(money - taxAmount);
   });
 
-  test.skip('landing on a chance space with an empty deck does not crash', () => {
+  test('landing on a chance space with an empty deck does not crash', () => {
     const G = triG();
     G.players[0].position = 6;
     Monopoly.moves.rollDice(G, makeCtx(dice(1, 1), '0'), [7, 8]);
@@ -116,5 +115,99 @@ describe('atlas jail: in-place detention (no jail node)', () => {
     Monopoly.moves.rollDice(G, makeCtx(dice(2, 2), '0'));
     expect(G.players[0].inJail).toBe(true);
     expect(G.players[0].position).toBe(3); // detained pre-move
+  });
+});
+
+describe('atlas whole-route movement (D11)', () => {
+  test('explicit route at the fork: both branches reachable', () => {
+    const G = atlasG();
+    G.players[0].position = 4;
+    Monopoly.moves.rollDice(G, makeCtx(dice(1, 1), '0'), [5, 6]);
+    expect(G.players[0].position).toBe(6);
+
+    const G2 = atlasG();
+    G2.players[0].position = 4;
+    Monopoly.moves.rollDice(G2, makeCtx(dice(1, 1), '0'), [5, 9]);
+    expect(G2.players[0].position).toBe(9);
+  });
+
+  test('invalid routes are INVALID_MOVE: non-edge hop, wrong length, too long', () => {
+    const INVALID_MOVE = 'INVALID_MOVE';
+    const G = atlasG();
+    G.players[0].position = 4;
+    expect(Monopoly.moves.rollDice(G, makeCtx(dice(1, 1), '0'), [5, 7])).toBe(INVALID_MOVE);
+    const G2 = atlasG();
+    G2.players[0].position = 4;
+    expect(Monopoly.moves.rollDice(G2, makeCtx(dice(1, 1), '0'), [5])).toBe(INVALID_MOVE);
+    const G3 = atlasG();
+    G3.players[0].position = 4;
+    expect(Monopoly.moves.rollDice(G3, makeCtx(dice(1, 1), '0'), [5, 6, 7])).toBe(INVALID_MOVE);
+  });
+
+  test('omitted route auto-walks the first edge at every fork', () => {
+    const G = atlasG();
+    G.players[0].position = 4;
+    Monopoly.moves.rollDice(G, makeCtx(dice(1, 1), '0')); // total 2, no route
+    expect(G.players[0].position).toBe(6); // edges[5][0] = 6 (berlin)
+  });
+
+  test('walking THROUGH the hub pays salary; distanceTraveled counts nodes', () => {
+    const G = atlasG();
+    G.players[0].position = 10; // geneva mid-chain
+    const money = G.players[0].money;
+    // 10→11→0(hub)→1 : 3 steps, passes hub mid-route
+    Monopoly.moves.rollDice(G, makeCtx(dice(1, 2), '0'), [11, 0, 1]);
+    expect(G.players[0].money - money).toBe(RULES.core.goSalary);
+    expect(G.players[0].position).toBe(1);
+    expect(G.players[0].distanceTraveled).toBe(3);
+    expect(G.lastDice.salaryCollected).toBe(RULES.core.goSalary);
+  });
+
+  test('LANDING on the hub also pays salary (reach counts as pass)', () => {
+    const G = atlasG();
+    G.players[0].position = 10;
+    const money = G.players[0].money;
+    Monopoly.moves.rollDice(G, makeCtx(dice(1, 1), '0'), [11, 0]);
+    expect(G.players[0].money - money).toBe(RULES.core.goSalary);
+  });
+
+  test('no hub on the route = no salary', () => {
+    const G = atlasG();
+    G.players[0].position = 3;
+    const money = G.players[0].money;
+    Monopoly.moves.rollDice(G, makeCtx(dice(1, 1), '0'), [4, 5]);
+    // landing on unowned property 5 only OFFERS a buy — money unchanged
+    expect(G.players[0].money - money).toBe(0);
+    expect(G.lastDice.salaryCollected).toBe(0);
+  });
+
+  test('idealist passive: hub-pass bonus migrates from GO', () => {
+    const G = atlasG();
+    G.players[0].character = {
+      id: 'test-idealist', name: 'Mira', passive: { id: 'idealist' },
+      stats: { capital: 5, luck: 5, negotiation: 5, charisma: 5, tech: 5, stamina: 5 },
+    };
+    G.players[0].position = 11;
+    const money = G.players[0].money;
+    Monopoly.moves.rollDice(G, makeCtx(dice(1, 1), '0'), [0, 1]);
+    expect(G.players[0].money - money)
+      .toBe(RULES.core.goSalary + RULES.passives.idealist.goBonus);
+  });
+
+  test('landing on an unowned property offers the buy (handleLanding wired)', () => {
+    const G = atlasG();
+    G.players[0].position = 3;
+    Monopoly.moves.rollDice(G, makeCtx(dice(1, 1), '0'), [4, 5]);
+    expect(G.canBuy).toBe(true);
+    expect(G.turnPhase).toBe('act');
+    expect(G.effectivePrice).toBe(G.board.spaces[5].price); // no character, neutral season
+  });
+
+  test('doubles counting still works on atlas (jail via triple doubles)', () => {
+    const G = atlasG();
+    G.players[0].position = 0;
+    Monopoly.moves.rollDice(G, makeCtx(dice(3, 3), '0'), [1, 2, 3, 4, 5, 6]);
+    expect(G.doublesCount).toBe(1);
+    expect(G.players[0].inJail).toBe(false);
   });
 });
