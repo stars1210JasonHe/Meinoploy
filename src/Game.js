@@ -24,6 +24,11 @@ var _pendingMap = {
   boardSize: RULES.core.boardSize,
   jail: RULES.core.jailPosition,
   mapMechanics: { incomeMultiplier: 1, rentMultiplier: 1, taxMultiplier: 1, priceMultiplier: 1, upgradeCostMultiplier: 1 },
+  movementMode: 'loop',
+  edges: null,
+  hubs: null,
+  traits: null,
+  winPaths: null,
 };
 
 export function setActiveMap(mapData) {
@@ -35,6 +40,11 @@ export function setActiveMap(mapData) {
     boardSize: mapData.spaceCount,
     jail: mapData.specialSpaces.jail,
     mapMechanics: mapData.mapMechanics || { incomeMultiplier: 1, rentMultiplier: 1, taxMultiplier: 1, priceMultiplier: 1, upgradeCostMultiplier: 1 },
+    movementMode: mapData.movementMode || 'loop',
+    edges: mapData.edges || null,
+    hubs: mapData.hubs || null,
+    traits: mapData.traits || null,
+    winPaths: mapData.winPaths || null,
   };
   _mapVictory = mapData.victory || null;
 }
@@ -71,6 +81,7 @@ function createPlayer(id) {
     rerollsLeft: 0,
     luckRedraws: 0,
     regulatedProperty: null,
+    distanceTraveled: 0,
   };
 }
 
@@ -160,6 +171,7 @@ function rollTwoDice(ctx) {
 }
 
 function drawCard(ctx, deck) {
+  if (!deck || deck.length === 0) return null;
   const index = Math.floor(ctx.random.Number() * deck.length);
   return deck[index];
 }
@@ -306,7 +318,7 @@ function handleLanding(G, ctx) {
     }
 
     case 'tax': {
-      let taxAmount = space.rent;
+      let taxAmount = space.taxAmount !== undefined ? space.taxAmount : space.rent;
       // Season tax modifier (Winter: double tax)
       taxAmount = Math.floor(applyEconMods(G, 'tax', taxAmount));
       // Albert Victor passive: financial negative event loss reduction
@@ -327,6 +339,10 @@ function handleLanding(G, ctx) {
 
     case 'chance': {
       const card = drawCard(ctx, G.board.chanceCards);
+      if (!card) {
+        messages.push('The deck is empty.');
+        break;
+      }
       messages.push(`CHANCE: ${card.text}`);
       // Check if player can redraw (Cassian passive OR luck redraws)
       const canRedraw = (getPassive(player) === 'merchant') ||
@@ -343,6 +359,10 @@ function handleLanding(G, ctx) {
 
     case 'community': {
       const card = drawCard(ctx, G.board.communityCards);
+      if (!card) {
+        messages.push('The deck is empty.');
+        break;
+      }
       messages.push(`COMMUNITY CHEST: ${card.text}`);
       const canRedraw = (getPassive(player) === 'merchant') ||
                         (player.luckRedraws > 0 && ['pay', 'payPercent', 'downgrade', 'goToJail'].includes(card.action));
@@ -690,6 +710,11 @@ export const Monopoly = {
         boardSize: _pendingMap.boardSize,
         jail: _pendingMap.jail,
         mapMechanics: _pendingMap.mapMechanics,
+        movementMode: _pendingMap.movementMode,
+        edges: _pendingMap.edges,
+        hubs: _pendingMap.hubs,
+        traits: _pendingMap.traits,
+        winPaths: _pendingMap.winPaths,
       },
       players,
       ownership,

@@ -128,6 +128,13 @@ describe('board-in-G', () => {
     const G = Monopoly.setup({ numPlayers: 2, playOrder: ['0', '1'] });
     expect(G.board.mapMechanics).toEqual({ incomeMultiplier: 1, rentMultiplier: 1, taxMultiplier: 1, priceMultiplier: 1, upgradeCostMultiplier: 1 });
   });
+
+  test('classic maps default to loop movement mode', () => {
+    const G = Monopoly.setup({ numPlayers: 2, playOrder: ['0', '1'] });
+    expect(G.board.movementMode).toBe('loop');
+    expect(G.board.edges).toBe(null);
+    expect(G.board.hubs).toBe(null);
+  });
 });
 
 // ─── CHARACTER SELECTION ─────────────────────────────────
