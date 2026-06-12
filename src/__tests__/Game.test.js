@@ -223,6 +223,17 @@ describe('rollDice', () => {
     expect(G.players[0].position).toBe(7); // Chance space
   });
 
+  test('tolerates pre-branch saves missing distanceTraveled (no NaN)', () => {
+    const G = freshG();
+    delete G.players[0].distanceTraveled; // old save: field did not exist
+    const ctx = makeCtx('0', 3, 4); // total = 7
+
+    Monopoly.moves.rollDice(G, ctx);
+
+    expect(Number.isFinite(G.players[0].distanceTraveled)).toBe(true);
+    expect(G.players[0].distanceTraveled).toBe(7);
+  });
+
   test('cannot roll twice in same turn', () => {
     const G = freshG();
     const ctx = makeCtx('0', 1, 1);

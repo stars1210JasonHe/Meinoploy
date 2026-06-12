@@ -305,7 +305,8 @@ function atlasWalk(G, player, dice, route) {
   let salaryCollected = 0;
   steps.forEach(id => {
     player.position = id;
-    player.distanceTraveled++;
+    // `|| 0` tolerates pre-branch saves where the field doesn't exist.
+    player.distanceTraveled = (player.distanceTraveled || 0) + 1;
     if (G.board.spaces[id].isHub) {
       salaryCollected += payHubSalary(G, player);
     }
@@ -885,7 +886,7 @@ export const Monopoly = {
 
       const dice = rollTwoDice(ctx);
       dice.preRollPosition = player.position;
-      dice.preRollDistance = player.distanceTraveled;
+      dice.preRollDistance = player.distanceTraveled || 0;
       dice.salaryCollected = 0;
       G.lastDice = dice;
       G.hasRolled = true;
@@ -934,7 +935,8 @@ export const Monopoly = {
       } else {
         const oldPos = player.position;
         player.position = (player.position + dice.total) % G.board.boardSize;
-        player.distanceTraveled += dice.total;
+        // `|| 0` tolerates pre-branch saves where the field doesn't exist.
+        player.distanceTraveled = (player.distanceTraveled || 0) + dice.total;
 
         if (player.position < oldPos && G.board.spaces[player.position].type !== 'goToJail') {
           let goBonus = Math.floor(applyEconMods(G, 'income', RULES.core.goSalary));
