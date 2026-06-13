@@ -111,7 +111,9 @@ function groupKeyOf(space) {
 function placeIdColor(placeId) {
   let h = 0;
   for (let i = 0; i < placeId.length; i++) h = (h * 31 + placeId.charCodeAt(i)) % 360;
-  return `hsl(${h}, 55%, 45%)`;
+  // Step-multiply spreads adjacent hashes apart so neighbouring cities differ more.
+  const hue = (h * 47) % 360;
+  return `hsl(${hue}, 60%, 45%)`;
 }
 
 // Event card kind from action
@@ -688,7 +690,7 @@ class MonopolyBoard {
     const pot = (space.type === 'parking' && RULES.core.freeParkingPot && G.freeParkingPot > 0)
       ? `<div class="tile__pot">$${G.freeParkingPot}</div>` : '';
 
-    const cls = `tile tile--${edge} ${isCorner ? 'tile--corner' : ''} ${mortgaged ? 'tile--mortgaged' : ''} ${opts.abs ? 'tile--abs' : ''} tile--click`;
+    const cls = `tile tile--${edge} ${isCorner ? 'tile--corner' : ''} ${mortgaged ? 'tile--mortgaged' : ''} ${opts.abs ? 'tile--abs' : ''} ${space.isHub ? 'tile--hub' : ''} tile--click`;
     const style = opts.style ? ` style="${opts.style}"` : '';
     return `<div class="${cls}" data-space="${spaceId}"${style}>${bar}<div class="tile__inner">${glyph}<span class="tile__name">${esc(space.name)}</span>${price}</div>${owned}${mort}${pot}</div>`;
   }
@@ -770,7 +772,25 @@ class MonopolyBoard {
            <span class="board__logo-sub">${esc(this.mapData.theme.logoSubtitle || '')}</span>
          </div>`
       : `<div class="board__center board__center--abs">${this._centerHtml(G, ctx)}</div>`;
+    // Atlas: one city label per place, centered on the place's tile cluster and
+    // positioned just above its topmost tile (classic-absolute has no placeId).
     let labels = '';
+    if (isAtlas) {
+      const byPlace = {};
+      for (let i = 0; i < this.mapData.spaceCount; i++) {
+        const s = this.boardSpaces[i], p = this.mapData.positions[i];
+        if (!s || !p || !s.placeId) continue;
+        (byPlace[s.placeId] = byPlace[s.placeId] || []).push(p);
+      }
+      const names = this.mapData.placeNames || {};
+      labels = Object.keys(byPlace).map(pid => {
+        const ps = byPlace[pid];
+        const cx = ps.reduce((a, p) => a + p.x, 0) / ps.length;
+        const minY = Math.min.apply(null, ps.map(p => p.y));
+        const nm = (names[pid] || pid).toUpperCase();
+        return `<div class="place-label" style="left:${cx}%;top:${minY - 5}%">${esc(nm)}</div>`;
+      }).join('');
+    }
     let edgesSvg = '';
     if (this.mapData.edges) {
       const pos = this.mapData.positions;
@@ -781,10 +801,13 @@ class MonopolyBoard {
         tos.forEach(to => {
           const b = pos[to];
           if (!b) return;
-          lines += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"></line>`;
+          lines += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" marker-end="url(#atlas-arrow)"></line>`;
         });
       });
-      edgesSvg = `<svg class="board__edges" viewBox="0 0 100 100" preserveAspectRatio="none">${lines}</svg>`;
+      edgesSvg = `<svg class="board__edges" viewBox="0 0 100 100" preserveAspectRatio="none">`
+        + `<defs><marker id="atlas-arrow" markerWidth="4" markerHeight="4" refX="3" refY="2" orient="auto">`
+        + `<path d="M0,0 L4,2 L0,4 Z" fill="var(--accent)"></path></marker></defs>`
+        + lines + `</svg>`;
     }
     this._gridWrap.innerHTML = `<div class="board__grid board__grid--absolute">${edgesSvg}${tiles}${labels || ''}${center}</div>`;
   }

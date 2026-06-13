@@ -324,6 +324,12 @@
       opacity: 0.45;
       stroke-linecap: round;
     }
+    /* atlas: city label above each place's tile cluster */
+    .place-label { position:absolute; transform:translateX(-50%); z-index:2; pointer-events:none;
+      font-family:var(--disp); font-size:7px; letter-spacing:1px; color:var(--ink);
+      text-shadow:1px 1px 0 #000; white-space:nowrap; }
+    /* atlas: ring around capital-hub tiles so they stand out from plain arrows */
+    .tile--hub { outline:2px solid var(--accent); outline-offset:1px; }
     /* persistent token overlay — survives grid rebuilds, repositioned each tick */
     #token-layer { position:absolute; inset:0; pointer-events:none; z-index:5; }
     #token-layer .token { position:absolute; transform:translate(-50%,-50%); }
