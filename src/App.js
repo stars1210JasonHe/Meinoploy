@@ -100,6 +100,20 @@ function tileGlyph(type) {
   }
 }
 
+// Group key for a space: classic spaces carry a hex color, atlas spaces carry
+// a placeId (no color). placeId-first, mirroring Game.js groupKeyOf.
+function groupKeyOf(space) {
+  return space.placeId || space.color;
+}
+
+// Deterministic display color for an atlas place (atlas spaces have no color).
+// Hash the placeId to a stable hue so each place reads as one color band.
+function placeIdColor(placeId) {
+  let h = 0;
+  for (let i = 0; i < placeId.length; i++) h = (h * 31 + placeId.charCodeAt(i)) % 360;
+  return `hsl(${h}, 55%, 45%)`;
+}
+
 // Event card kind from action
 function cardKind(action) {
   if (['gain', 'gainAll', 'gainPerProperty', 'freeUpgrade'].includes(action)) return 'good';
@@ -645,7 +659,7 @@ class MonopolyBoard {
 
   _tileHtml(spaceId, G, opts) {
     const space = this.boardSpaces[spaceId];
-    const isCorner = this.mapData.cornerIds.includes(spaceId);
+    const isCorner = (this.mapData.cornerIds || []).includes(spaceId);
     const edge = opts.edge || (isCorner ? 'corner' : 'top');
     const owner = G.ownership[spaceId];
     const hasOwner = owner !== null && owner !== undefined;
@@ -653,8 +667,9 @@ class MonopolyBoard {
     const level = G.buildings[spaceId] || 0;
     const mortgaged = G.mortgaged[spaceId] || false;
 
-    const bar = space.color ? `<div class="tile__bar tile__bar--${edge}" style="background:${space.color}"></div>` : '';
-    const g = tileGlyph(space.type);
+    const barColor = space.color || (space.placeId ? placeIdColor(space.placeId) : '');
+    const bar = barColor ? `<div class="tile__bar tile__bar--${edge}" style="background:${barColor}"></div>` : '';
+    const g = space.isHub ? 'arrow' : tileGlyph(space.type);
     const glyph = g ? `<span class="glyph glyph--${g}"></span>` : '';
     const price = space.price > 0 ? `<span class="tile__price">$${space.price}</span>` : '';
 
@@ -716,7 +731,7 @@ class MonopolyBoard {
       if (!gp) continue;
       const row = gp.row, col = gp.col;
       let edge = 'corner';
-      if (!this.mapData.cornerIds.includes(id)) {
+      if (!(this.mapData.cornerIds || []).includes(id)) {
         if (row === lastIdx) edge = 'bottom';
         else if (row === 0) edge = 'top';
         else if (col === 0) edge = 'left';
@@ -738,10 +753,10 @@ class MonopolyBoard {
       // Determine inward-facing edge from position relative to center
       const dx = pos.x - 50, dy = pos.y - 50;
       let edge;
-      if (this.mapData.cornerIds.includes(i)) edge = 'corner';
+      if ((this.mapData.cornerIds || []).includes(i)) edge = 'corner';
       else if (Math.abs(dy) >= Math.abs(dx)) edge = dy > 0 ? 'bottom' : 'top';
       else edge = dx > 0 ? 'right' : 'left';
-      const size = this.mapData.cornerIds.includes(i) ? 9 : 7.5;
+      const size = (this.mapData.cornerIds || []).includes(i) ? 9 : 7.5;
       const style = `left:${pos.x}%;top:${pos.y}%;width:${size}%;height:${size}%;`;
       tiles += this._tileHtml(i, G, { edge, abs: true, style });
     }
