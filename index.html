@@ -357,6 +357,13 @@
     .board__center { display:flex; flex-direction:column; align-items:center; justify-content:space-between;
       padding:14px; gap:8px; background:repeating-linear-gradient(135deg, #0c1f12 0 8px, #0e2415 8px 16px); }
     .board__center--abs { position:absolute; left:18%; top:18%; right:18%; bottom:18%; z-index:3; }
+    /* atlas: small logo badge top-center (center freed; HUD lives in side panel) */
+    .board__logo--badge { position:absolute; left:50%; top:6%; transform:translateX(-50%);
+      z-index:3; pointer-events:none; text-align:center; opacity:0.92; }
+    .board__logo--badge .board__logo-main { font-size:16px; }
+    /* atlas: dice + buy/pass prompt relocated into the turnbox side panel */
+    .turnbox__slot { margin:6px 0; padding:8px; border:1px solid var(--line);
+      background:rgba(0,0,0,.25); display:flex; flex-direction:column; align-items:center; gap:6px; }
     .board__logo { display:flex; flex-direction:column; align-items:center; gap:6px; transform:rotate(-3deg); }
     .board__logo-main { font-family:var(--disp); font-size:26px; color:var(--accent); text-shadow:3px 3px 0 #000; letter-spacing:2px; text-align:center; }
     .board__logo-sub { font-family:var(--disp); font-size:7px; color:var(--ink-dim); letter-spacing:2px; text-align:center; }

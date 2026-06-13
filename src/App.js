@@ -746,6 +746,7 @@ class MonopolyBoard {
   _renderAbsoluteBoard(G, ctx) {
     this.boardEl.className = 'board';
     this._ensureBoardChildren();
+    const isAtlas = this.mapData.movementMode === 'atlas';
     let tiles = '';
     for (let i = 0; i < this.mapData.spaceCount; i++) {
       const pos = this.mapData.positions[i];
@@ -760,7 +761,16 @@ class MonopolyBoard {
       const style = `left:${pos.x}%;top:${pos.y}%;width:${size}%;height:${size}%;`;
       tiles += this._tileHtml(i, G, { edge, abs: true, style });
     }
-    const center = `<div class="board__center board__center--abs">${this._centerHtml(G, ctx)}</div>`;
+    // Atlas frees the center (the dice/buy/pass HUD moves to the side panel —
+    // see renderTurnbox), so the board renders only a small logo badge top-center.
+    // Classic-absolute (circle/hex/custom) keeps the full inset center box.
+    const center = isAtlas
+      ? `<div class="board__logo board__logo--badge">
+           <span class="board__logo-main">${esc(this.mapData.theme.logoText || 'MEINOPOLY')}</span>
+           <span class="board__logo-sub">${esc(this.mapData.theme.logoSubtitle || '')}</span>
+         </div>`
+      : `<div class="board__center board__center--abs">${this._centerHtml(G, ctx)}</div>`;
+    let labels = '';
     let edgesSvg = '';
     if (this.mapData.edges) {
       const pos = this.mapData.positions;
@@ -776,7 +786,7 @@ class MonopolyBoard {
       });
       edgesSvg = `<svg class="board__edges" viewBox="0 0 100 100" preserveAspectRatio="none">${lines}</svg>`;
     }
-    this._gridWrap.innerHTML = `<div class="board__grid board__grid--absolute">${edgesSvg}${tiles}${center}</div>`;
+    this._gridWrap.innerHTML = `<div class="board__grid board__grid--absolute">${edgesSvg}${tiles}${labels || ''}${center}</div>`;
   }
 
   // Returns {x, y} as PERCENT of the board element, for positioning overlay tokens.
@@ -929,6 +939,15 @@ class MonopolyBoard {
       html += `<div class="turnbox__waiting">WAITING FOR<br/>${esc(name)}…</div></div>`;
       this.turnboxEl.innerHTML = html;
       return;
+    }
+
+    // Atlas frees the board center: surface the dice + buy/pass prompt (the
+    // _centerSlotHtml content) here in the side panel. #btn-buy/#btn-pass are
+    // wired by id in wireActions, so no rewiring is needed. Classic keeps the
+    // prompt in the board center (isAtlas false → turnbox unchanged).
+    const isAtlas = this.mapData.movementMode === 'atlas';
+    if (isAtlas) {
+      html += `<div class="turnbox__slot">${this._centerSlotHtml(G, ctx)}</div>`;
     }
 
     // Jail / roll
