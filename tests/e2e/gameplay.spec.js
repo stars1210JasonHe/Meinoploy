@@ -535,33 +535,34 @@ async function selectCharactersAtlas(page) {
   await page.waitForSelector('#btn-roll', { timeout: 10000 });
 }
 
-// One atlas turn. On the absolute renderer the center action buttons can sit
-// under an absolutely-positioned tile (a cosmetic z-order quirk of the atlas
-// layout — the button is visible+enabled, only Playwright's overlap check
-// trips), so clicks use { force: true }. The game still walks the graph via
-// auto-route (no route arg to rollDice).
+// One atlas turn. Clicks are NORMAL (no { force: true }): the center buy/pass
+// prompt sits ABOVE tiles (board__center--abs z-index) and the world's tiles
+// ring the perimeter clear of the center, so a covered/unclickable button would
+// fail the test — that is the point (it proves the map is genuinely playable,
+// not just non-crashing). The game walks the graph via auto-route (no route arg).
 async function completeTurnAtlas(page) {
   const rollBtn = page.locator('#btn-roll');
   if (await rollBtn.isVisible().catch(() => false)) {
-    await rollBtn.click({ force: true }).catch(() => {});
+    await rollBtn.click();
     await page.waitForTimeout(300);
   }
 
   const evAccept = page.locator('#ev-accept');
   if (await evAccept.isVisible().catch(() => false)) {
-    await evAccept.click({ force: true }).catch(() => {});
+    await evAccept.click();
     await page.waitForTimeout(300);
   }
 
-  // Pass on any buyable property, then pass any resulting auction out.
+  // Pass on any buyable property (hard click — proves the center prompt is
+  // reachable), then pass any resulting auction out.
   const buyBtn = page.locator('#btn-buy');
   if (await buyBtn.isVisible().catch(() => false)) {
-    await page.locator('#btn-pass').click({ force: true }).catch(() => {});
+    await page.locator('#btn-pass').click();
     await page.waitForTimeout(300);
     const passAuctionBtn = page.locator('#btn-pass-auction');
     for (let i = 0; i < 6; i++) {
       if (await passAuctionBtn.isVisible().catch(() => false)) {
-        await passAuctionBtn.click({ force: true }).catch(() => {});
+        await passAuctionBtn.click();
         await page.waitForTimeout(200);
       } else break;
     }
@@ -569,7 +570,7 @@ async function completeTurnAtlas(page) {
 
   const endBtn = page.locator('#btn-end');
   if (await endBtn.isVisible().catch(() => false) && await endBtn.isEnabled().catch(() => false)) {
-    await endBtn.click({ force: true }).catch(() => {});
+    await endBtn.click();
     await page.waitForTimeout(300);
   }
 }
@@ -589,11 +590,18 @@ test.describe('Atlas World', () => {
     await expect(page.locator('.board__edges line').first()).toBeAttached();
 
     // Play a few turns via auto-route (roll → resolve buy/pass + auction → end).
+    // Track the active player so we can assert turns actually advanced.
+    const whoSeen = new Set();
     for (let turn = 0; turn < 5; turn++) {
       if (await page.locator('.results__victory').isVisible().catch(() => false)) break;
+      const who = await page.locator('.turnbox__who').textContent().catch(() => '');
+      if (who) whoSeen.add(who.trim());
       await completeTurnAtlas(page);
     }
 
+    // Turns genuinely advanced — the active player changed at least once, which
+    // is only possible if the (hard-clicked) buy/pass + end buttons were reachable.
+    expect(whoSeen.size).toBeGreaterThan(1);
     // No render/move crash across setup + auto-route turns.
     expect(pageErrors).toEqual([]);
   });
