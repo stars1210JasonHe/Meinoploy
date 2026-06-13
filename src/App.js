@@ -761,7 +761,22 @@ class MonopolyBoard {
       tiles += this._tileHtml(i, G, { edge, abs: true, style });
     }
     const center = `<div class="board__center board__center--abs">${this._centerHtml(G, ctx)}</div>`;
-    this._gridWrap.innerHTML = `<div class="board__grid board__grid--absolute">${tiles}${center}</div>`;
+    let edgesSvg = '';
+    if (this.mapData.edges) {
+      const pos = this.mapData.positions;
+      let lines = '';
+      this.mapData.edges.forEach((tos, from) => {
+        const a = pos[from];
+        if (!a || !tos) return;
+        tos.forEach(to => {
+          const b = pos[to];
+          if (!b) return;
+          lines += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"></line>`;
+        });
+      });
+      edgesSvg = `<svg class="board__edges" viewBox="0 0 100 100" preserveAspectRatio="none">${lines}</svg>`;
+    }
+    this._gridWrap.innerHTML = `<div class="board__grid board__grid--absolute">${edgesSvg}${tiles}${center}</div>`;
   }
 
   // Returns {x, y} as PERCENT of the board element, for positioning overlay tokens.
