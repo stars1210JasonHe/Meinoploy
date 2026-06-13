@@ -18,6 +18,9 @@ describe('Terra Circuit world', () => {
     expect(md.victory.params.groupsToWin).toBe(3);
     // every space has a position for rendering
     for (let i = 0; i < md.spaceCount; i++) expect(md.positions[i]).toBeDefined();
+    // placeNames maps placeId -> real city name (atlas city labels read this)
+    expect(md.placeNames.tokyo).toBe('Tokyo');
+    expect(md.placeNames.newyork).toBe('New York');
     // the fork: singapore's exit has 2 outgoing edges
     const singaporeExit = md.exits['singapore'];
     expect(md.edges[singaporeExit].length).toBe(2);

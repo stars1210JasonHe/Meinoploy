@@ -464,6 +464,10 @@ export function loadWorld(world, archetypes) {
     };
   });
 
+  // placeId -> real display name, for atlas city labels (additive renderer input).
+  var placeNames = {};
+  world.places.forEach(function (p) { placeNames[p.id] = p.realName; });
+
   var victory = world.victory || {};
   var cards = world.cards || {};
   var mechanics = world.mapMechanics || {};
@@ -513,6 +517,7 @@ export function loadWorld(world, archetypes) {
     placeOf: ex.placeOf,
     entries: ex.entries,
     exits: ex.exits,
+    placeNames: placeNames,
     worldId: world.id,
   };
 }
