@@ -400,3 +400,64 @@ describe('atlas place-set monopoly rent', () => {
     expect(payerBefore - G.players[0].money).toBe(expected);
   });
 });
+
+describe('atlas place-set building', () => {
+  function ownGroup(G, playerId, ids) {
+    ids.forEach(id => { G.ownership[id] = playerId; G.players[Number(playerId)].properties.push(id); });
+  }
+  function buildReadyG() {
+    const G = atlasG();
+    G.hasRolled = true;            // upgrade/sell require hasRolled
+    G.players[0].character = null;
+    G.players[0].money = 100000;   // plenty to build
+    ownGroup(G, '0', [3, 4, 5]);   // paris place-group fully owned
+    return G;
+  }
+
+  test('can build on a fully-owned atlas place-group', () => {
+    const G = buildReadyG();
+    const res = Monopoly.moves.upgradeProperty(G, makeCtx([], '0'), 3);
+    expect(res).toBeUndefined();           // not INVALID_MOVE
+    expect(G.buildings[3]).toBe(1);
+  });
+
+  test('cannot build without owning the full place-group', () => {
+    const G = atlasG();
+    G.hasRolled = true; G.players[0].character = null; G.players[0].money = 100000;
+    G.ownership[3] = '0'; G.players[0].properties.push(3); // owns 3 only
+    expect(Monopoly.moves.upgradeProperty(G, makeCtx([], '0'), 3)).toBe('INVALID_MOVE');
+    expect(G.buildings[3]).toBeUndefined();
+  });
+
+  test('even-build: cannot exceed the group minimum level by more than 1', () => {
+    const G = buildReadyG();
+    Monopoly.moves.upgradeProperty(G, makeCtx([], '0'), 3); // 3 -> L1
+    // 3 is now L1, 4 and 5 are L0 -> upgrading 3 again must be blocked (uneven)
+    expect(Monopoly.moves.upgradeProperty(G, makeCtx([], '0'), 3)).toBe('INVALID_MOVE');
+    expect(G.buildings[3]).toBe(1);
+    // but 4 (at the min) may be built
+    expect(Monopoly.moves.upgradeProperty(G, makeCtx([], '0'), 4)).toBeUndefined();
+    expect(G.buildings[4]).toBe(1);
+  });
+
+  test('cannot build if any group member is mortgaged', () => {
+    const G = buildReadyG();
+    G.mortgaged[5] = true;
+    expect(Monopoly.moves.upgradeProperty(G, makeCtx([], '0'), 3)).toBe('INVALID_MOVE');
+  });
+
+  test('cannot mortgage a property whose group has buildings', () => {
+    const G = buildReadyG();
+    Monopoly.moves.upgradeProperty(G, makeCtx([], '0'), 3); // build on 3
+    // now mortgaging 4 (same group, which has a building on 3) must be blocked
+    expect(Monopoly.moves.mortgageProperty(G, makeCtx([], '0'), 4)).toBe('INVALID_MOVE');
+  });
+
+  test('sell: can only sell from the highest level in the group', () => {
+    const G = buildReadyG();
+    G.buildings[3] = 2; G.buildings[4] = 1; G.buildings[5] = 1; // 3 is highest
+    expect(Monopoly.moves.sellBuilding(G, makeCtx([], '0'), 4)).toBe('INVALID_MOVE'); // 4 below max
+    expect(Monopoly.moves.sellBuilding(G, makeCtx([], '0'), 3)).toBeUndefined();      // 3 at max
+    expect(G.buildings[3]).toBe(1);
+  });
+});

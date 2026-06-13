@@ -1066,10 +1066,11 @@ export const Monopoly = {
 
       if (!space || space.type !== 'property') return INVALID_MOVE;
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
-      if (!space.color || !ownsColorGroup(G, ctx.currentPlayer, space.color)) return INVALID_MOVE;
+      const gk = groupKeyOf(space);
+      if (!gk || !ownsColorGroup(G, ctx.currentPlayer, gk)) return INVALID_MOVE;
 
       // No mortgaged properties in group
-      const groupIds = G.board.colorGroups[space.color];
+      const groupIds = G.board.colorGroups[gk];
       if (groupIds.some(id => G.mortgaged[id])) return INVALID_MOVE;
 
       const currentLevel = G.buildings[propertyId] || 0;
@@ -1102,8 +1103,9 @@ export const Monopoly = {
       if ((G.buildings[propertyId] || 0) > 0) return INVALID_MOVE;
 
       // Can't mortgage if any property in color group has buildings
-      if (space.color && G.board.colorGroups[space.color]) {
-        if (G.board.colorGroups[space.color].some(id => (G.buildings[id] || 0) > 0)) {
+      const gk = groupKeyOf(space);
+      if (gk && G.board.colorGroups[gk]) {
+        if (G.board.colorGroups[gk].some(id => (G.buildings[id] || 0) > 0)) {
           return INVALID_MOVE;
         }
       }
@@ -1146,8 +1148,9 @@ export const Monopoly = {
       if (currentLevel <= 0) return INVALID_MOVE;
 
       // Even building in reverse: can only sell from highest level in group
-      if (space.color && G.board.colorGroups[space.color]) {
-        const groupIds = G.board.colorGroups[space.color];
+      const gk = groupKeyOf(space);
+      if (gk && G.board.colorGroups[gk]) {
+        const groupIds = G.board.colorGroups[gk];
         const maxLevel = Math.max(...groupIds.map(id => G.buildings[id] || 0));
         if (currentLevel < maxLevel) return INVALID_MOVE;
       }
