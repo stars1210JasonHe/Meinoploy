@@ -41,7 +41,9 @@ export var TERRA_CIRCUIT = {
   winPaths: ['dominion', 'wealth', 'survival'],
   victory: { params: { groupsToWin: 3 } },
   size: { maxPlaces: 16, maxSpaces: 96 },
-  // Slots within a place fan out wider than the 0.4% default so tiles don't stack.
-  atlasConfig: { positions: { slotOffsetStep: 3 } },
+  // Slots within a place fan out so the 7.5%-wide tiles don't bury each other
+  // (gap 6 vs tile 7.5 = light ~20% touch, readable; all slots stay on-board for
+  // the ring positions). Tighter per-slot layout is the camera/render-polish task.
+  atlasConfig: { positions: { slotOffsetStep: 6 } },
   theme: { logoText: 'TERRA', logoSubtitle: 'CIRCUIT' },
 };
