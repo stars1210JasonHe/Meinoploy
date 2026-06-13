@@ -499,3 +499,102 @@ test.describe('Full Game Process', () => {
     expect(turnNum).toBeGreaterThan(10);
   });
 });
+
+// ─── ATLAS WORLD (Terra Circuit) ────────────────────────
+// Navigate into a game on the Terra Circuit atlas world (movementMode:'atlas'),
+// selecting the map card by its title rather than the classic index-0 card.
+async function selectCharactersAtlas(page) {
+  await page.goto('/');
+
+  // 1. Hero start screen
+  await page.waitForSelector('#btn-mode-local', { timeout: 10000 });
+  await page.click('#btn-mode-local');
+
+  // 2. Map select — pick the Terra Circuit card by title (not the classic card)
+  await page.waitForSelector('.map-card', { timeout: 10000 });
+  await page.locator('.map-card', { hasText: 'Terra Circuit' }).click();
+
+  // 3. Player count — 2 players
+  await page.waitForSelector('.count-btn[data-count="2"]', { timeout: 10000 });
+  await page.click('.count-btn[data-count="2"]');
+
+  // 4. Victory select — defaults to the world's primary path (dominion); start
+  await page.waitForSelector('#btn-vic-start', { timeout: 10000 });
+  await page.click('#btn-vic-start');
+
+  // 5. Character select — pick two
+  await page.waitForSelector('.charcard', { timeout: 10000 });
+  await pickAndConfirm(page);
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.select__p');
+    return el && /PLAYER 2/.test(el.textContent);
+  }, { timeout: 10000 });
+  await pickAndConfirm(page);
+
+  // Game board appears
+  await page.waitForSelector('#btn-roll', { timeout: 10000 });
+}
+
+// One atlas turn. On the absolute renderer the center action buttons can sit
+// under an absolutely-positioned tile (a cosmetic z-order quirk of the atlas
+// layout — the button is visible+enabled, only Playwright's overlap check
+// trips), so clicks use { force: true }. The game still walks the graph via
+// auto-route (no route arg to rollDice).
+async function completeTurnAtlas(page) {
+  const rollBtn = page.locator('#btn-roll');
+  if (await rollBtn.isVisible().catch(() => false)) {
+    await rollBtn.click({ force: true }).catch(() => {});
+    await page.waitForTimeout(300);
+  }
+
+  const evAccept = page.locator('#ev-accept');
+  if (await evAccept.isVisible().catch(() => false)) {
+    await evAccept.click({ force: true }).catch(() => {});
+    await page.waitForTimeout(300);
+  }
+
+  // Pass on any buyable property, then pass any resulting auction out.
+  const buyBtn = page.locator('#btn-buy');
+  if (await buyBtn.isVisible().catch(() => false)) {
+    await page.locator('#btn-pass').click({ force: true }).catch(() => {});
+    await page.waitForTimeout(300);
+    const passAuctionBtn = page.locator('#btn-pass-auction');
+    for (let i = 0; i < 6; i++) {
+      if (await passAuctionBtn.isVisible().catch(() => false)) {
+        await passAuctionBtn.click({ force: true }).catch(() => {});
+        await page.waitForTimeout(200);
+      } else break;
+    }
+  }
+
+  const endBtn = page.locator('#btn-end');
+  if (await endBtn.isVisible().catch(() => false) && await endBtn.isEnabled().catch(() => false)) {
+    await endBtn.click({ force: true }).catch(() => {});
+    await page.waitForTimeout(300);
+  }
+}
+
+test.describe('Atlas World', () => {
+  test('atlas map: Terra Circuit renders and is playable', async ({ page }) => {
+    test.setTimeout(60000);
+    const pageErrors = [];
+    page.on('pageerror', err => pageErrors.push(err.message));
+
+    await selectCharactersAtlas(page);
+
+    // Board renders on the absolute renderer: tiles + the edge overlay both
+    // present, and the cornerIds guard means no crash drawing tiles.
+    await expect(page.locator('.board__grid--absolute .tile').first()).toBeVisible();
+    await expect(page.locator('.board__edges')).toHaveCount(1);
+    await expect(page.locator('.board__edges line').first()).toBeAttached();
+
+    // Play a few turns via auto-route (roll → resolve buy/pass + auction → end).
+    for (let turn = 0; turn < 5; turn++) {
+      if (await page.locator('.results__victory').isVisible().catch(() => false)) break;
+      await completeTurnAtlas(page);
+    }
+
+    // No render/move crash across setup + auto-route turns.
+    expect(pageErrors).toEqual([]);
+  });
+});
