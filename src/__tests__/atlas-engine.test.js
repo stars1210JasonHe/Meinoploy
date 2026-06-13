@@ -461,3 +461,34 @@ describe('atlas place-set building', () => {
     expect(G.buildings[3]).toBe(1);
   });
 });
+
+describe('atlas freeUpgrade card', () => {
+  function ownGroup(G, playerId, ids) {
+    ids.forEach(id => { G.ownership[id] = playerId; G.players[Number(playerId)].properties.push(id); });
+  }
+  function applyFreeUpgrade(G) {
+    G.pendingCard = { card: { text: 'Free upgrade!', action: 'freeUpgrade' }, deck: 'chance' };
+    G.turnPhase = 'card';
+    Monopoly.moves.acceptCard(G, makeCtx([], '0'));
+  }
+
+  test('freeUpgrade upgrades the cheapest property in a fully-owned atlas group', () => {
+    const G = atlasG();
+    G.players[0].character = null;
+    ownGroup(G, '0', [3, 4, 5]); // paris fully owned, all L0
+    applyFreeUpgrade(G);
+    // exactly one property in the group should now be at L1
+    const levels = [3, 4, 5].map(id => G.buildings[id] || 0);
+    expect(levels.filter(l => l === 1).length).toBe(1);
+    expect(G.messages.join(' ')).toMatch(/Free upgrade/i);
+  });
+
+  test('freeUpgrade is a no-op when no full group is owned', () => {
+    const G = atlasG();
+    G.players[0].character = null;
+    G.ownership[3] = '0'; G.players[0].properties.push(3); // partial
+    applyFreeUpgrade(G);
+    expect(G.buildings[3]).toBeUndefined();
+    expect(G.messages.join(' ')).toMatch(/No properties eligible/i);
+  });
+});

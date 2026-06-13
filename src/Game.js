@@ -599,11 +599,12 @@ function applyCard(G, ctx, player, card) {
       const upgradeable = player.properties
         .filter(pid => {
           const sp = G.board.spaces[pid];
-          if (sp.type !== 'property' || !sp.color) return false;
-          if (!ownsColorGroup(G, player.id, sp.color)) return false;
+          const gk = groupKeyOf(sp);
+          if (sp.type !== 'property' || !gk || !G.board.colorGroups[gk]) return false;
+          if (!ownsColorGroup(G, player.id, gk)) return false;
           const level = G.buildings[pid] || 0;
           if (level >= RULES.core.maxBuildingLevel) return false;
-          const groupIds = G.board.colorGroups[sp.color];
+          const groupIds = G.board.colorGroups[gk];
           if (groupIds.some(id => G.mortgaged[id])) return false;
           const minLevel = Math.min(...groupIds.map(id => G.buildings[id] || 0));
           return level <= minLevel;
