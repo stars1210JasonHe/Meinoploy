@@ -10,6 +10,9 @@ import classicMapJson from '../mods/dominion/maps/classic/map.json';
 import stuttgartMapJson from '../mods/dominion/maps/stuttgart-fracture-loop/map.json';
 import outerRimMapJson from '../mods/dominion/maps/outer-rim-station/map.json';
 import nightveilMapJson from '../mods/dominion/maps/nightveil-intrigue/map.json';
+import { loadWorld } from './world-loader';
+import { ARCHETYPES } from '../mods/dominion/atlas/archetypes';
+import { TERRA_CIRCUIT } from '../mods/dominion/atlas/worlds/terra-circuit';
 import keyArt from '../mods/dominion/keyart.png';
 
 // Available maps for selection
@@ -18,6 +21,7 @@ const AVAILABLE_MAPS = [
   stuttgartMapJson,
   outerRimMapJson,
   nightveilMapJson,
+  TERRA_CIRCUIT,
 ];
 
 const STAT_KEYS = [
@@ -143,7 +147,11 @@ class MonopolyBoard {
   }
 
   setMap(mapJson) {
-    this.mapData = loadMap(mapJson);
+    // Atlas worlds (movementMode:'atlas') expand through loadWorld; classic
+    // map.json goes through loadMap. Both yield a mapData-compatible object.
+    this.mapData = (mapJson && mapJson.movementMode === 'atlas')
+      ? loadWorld(mapJson, ARCHETYPES)
+      : loadMap(mapJson);
     this.boardSpaces = this.mapData.spaces;
     this.colorGroups = this.mapData.colorGroupsFlat;
     setActiveMap(this.mapData);
@@ -294,15 +302,21 @@ class MonopolyBoard {
     this.menuEl.className = 'screen screen--menu';
     let cards = '';
     AVAILABLE_MAPS.forEach((mapJson, idx) => {
-      const layoutLabel = mapJson.layout.type;
-      const spaceLabel = mapJson.spaceCount + ' SPACES';
-      const catLabel = (mapJson.world && mapJson.world.category) || '';
+      const isWorld = mapJson.movementMode === 'atlas';
+      const layoutLabel = isWorld ? 'ATLAS' : mapJson.layout.type;
+      const spaceLabel = isWorld ? (mapJson.places.length + ' PLACES') : (mapJson.spaceCount + ' SPACES');
+      const catLabel = isWorld
+        ? (mapJson.winPaths || []).join(' / ').toUpperCase()
+        : ((mapJson.world && mapJson.world.category) || '');
+      const accent = isWorld ? 'var(--accent)' : (mapJson.theme.logoColor || 'var(--accent)');
+      const title = mapJson.name;
+      const desc = isWorld ? (mapJson.story || '') : (mapJson.description || '');
       cards += `
         <div class="pix-panel map-card" data-map-idx="${idx}">
-          <div class="pix-panel__accent" style="background:${mapJson.theme.logoColor || 'var(--accent)'}"></div>
+          <div class="pix-panel__accent" style="background:${accent}"></div>
           <div class="pix-panel__body">
-            <div class="map-card__title">${esc(mapJson.name)}</div>
-            <div class="map-card__desc">${esc(mapJson.description || '')}</div>
+            <div class="map-card__title">${esc(title)}</div>
+            <div class="map-card__desc">${esc(desc)}</div>
             <div class="map-card__meta">
               <span class="map-tag">${esc(layoutLabel)}</span>
               <span class="map-tag">${esc(spaceLabel)}</span>
