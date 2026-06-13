@@ -492,3 +492,31 @@ describe('atlas freeUpgrade card', () => {
     expect(G.messages.join(' ')).toMatch(/No properties eligible/i);
   });
 });
+
+describe('atlas dominion victory (winPaths "dominion" -> monopoly win)', () => {
+  function ownGroup(G, playerId, ids) {
+    ids.forEach(id => { G.ownership[id] = playerId; G.players[Number(playerId)].properties.push(id); });
+  }
+
+  test('endIf returns a dominion win when a player owns groupsToWin full place-groups', () => {
+    const G = atlasG();
+    // atlas worlds set victory.primary from winPaths[0]; force the dominion path
+    G.victory = { primary: 'dominion', maxTurns: 0, groupsToWin: 2 };
+    ownGroup(G, '0', [0, 1]);   // rome place-group
+    ownGroup(G, '0', [6, 7]);   // berlin place-group -> 2 full groups
+    const result = Monopoly.endIf(G, { currentPlayer: '0', numPlayers: 2 });
+    expect(result).toBeDefined();
+    expect(result.winner).toBe('0');
+    expect(result.reason).toBe('dominion');
+  });
+
+  test('no dominion win below groupsToWin', () => {
+    const G = atlasG();
+    G.victory = { primary: 'dominion', maxTurns: 0, groupsToWin: 3 };
+    ownGroup(G, '0', [0, 1]);
+    ownGroup(G, '0', [6, 7]); // only 2 full groups, need 3
+    // both players still solvent so no survival win either
+    const result = Monopoly.endIf(G, { currentPlayer: '0', numPlayers: 2 });
+    expect(result).toBeUndefined();
+  });
+});

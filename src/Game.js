@@ -692,8 +692,10 @@ function checkGameOver(G) {
   }
   if (activePlayers.length === 0) return undefined;
 
-  // Dominion: first to own `groupsToWin` full color groups wins instantly.
-  if (v.primary === 'monopoly') {
+  // Dominion: first to own `groupsToWin` full groups wins instantly.
+  // Accept both the classic UI/rules name ('monopoly') and the atlas winPaths
+  // name ('dominion') — same concept, two vocabularies.
+  if (v.primary === 'monopoly' || v.primary === 'dominion') {
     const need = v.groupsToWin || RULES.victory.groupsToWin;
     const achievers = activePlayers.filter(p => countFullGroups(G, p.id) >= need);
     if (achievers.length > 0) {
