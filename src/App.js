@@ -974,6 +974,7 @@ class MonopolyBoard {
     let rows = '';
     player.properties.forEach(pid => {
       const space = this.boardSpaces[pid];
+      const gk = groupKeyOf(space);
       const level = G.buildings[pid] || 0;
       const mortgaged = G.mortgaged[pid] || false;
       let actions = '';
@@ -982,8 +983,8 @@ class MonopolyBoard {
         const cost = Math.floor(space.price * RULES.core.unmortgageRate);
         actions += `<button class="pix-btn pix-btn--default pix-btn--sm btn-unmortgage" data-pid="${pid}">UNMORT $${cost}</button>`;
       } else {
-        if (space.type === 'property' && space.color && this.colorGroups[space.color]) {
-          const groupIds = this.colorGroups[space.color];
+        if (space.type === 'property' && gk && this.colorGroups[gk]) {
+          const groupIds = this.colorGroups[gk];
           const ownsGroup = groupIds.every(id => G.ownership[id] === ctx.currentPlayer);
           const minLevel = Math.min(...groupIds.map(id => G.buildings[id] || 0));
           const noMortgaged = !groupIds.some(id => G.mortgaged[id]);
@@ -994,15 +995,15 @@ class MonopolyBoard {
         }
         if (level > 0) {
           let canSell = true;
-          if (space.color && this.colorGroups[space.color]) {
-            const maxLevel = Math.max(...this.colorGroups[space.color].map(id => G.buildings[id] || 0));
+          if (gk && this.colorGroups[gk]) {
+            const maxLevel = Math.max(...this.colorGroups[gk].map(id => G.buildings[id] || 0));
             if (level < maxLevel) canSell = false;
           }
           if (canSell) actions += `<button class="pix-btn pix-btn--default pix-btn--sm btn-sell" data-pid="${pid}">SELL</button>`;
         }
         let canMortgage = true;
-        if (space.color && this.colorGroups[space.color]) {
-          canMortgage = !this.colorGroups[space.color].some(id => (G.buildings[id] || 0) > 0);
+        if (gk && this.colorGroups[gk]) {
+          canMortgage = !this.colorGroups[gk].some(id => (G.buildings[id] || 0) > 0);
         }
         if (canMortgage && level === 0) {
           const val = Math.floor(space.price * RULES.core.mortgageRate);
