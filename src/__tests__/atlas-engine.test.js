@@ -348,3 +348,55 @@ describe('useReroll snapshot restore', () => {
     expect(G.players[0].bankrupt).toBe(true);
   });
 });
+
+describe('atlas place-set monopoly rent', () => {
+  function ownGroup(G, playerId, ids) {
+    ids.forEach(id => { G.ownership[id] = playerId; G.players[Number(playerId)].properties.push(id); });
+  }
+
+  test('owning a full atlas place-group doubles base rent (no buildings)', () => {
+    const G = atlasG();
+    ownGroup(G, '1', [6, 7]);
+    G.players[0].character = null;
+    G.players[1].character = null;
+    const rent = G.board.spaces[6].rent;
+    const ownerBefore = G.players[1].money;
+    const payerBefore = G.players[0].money;
+    G.players[0].position = 4;
+    Monopoly.moves.rollDice(G, makeCtx(dice(1, 1), '0'), [5, 6]);
+    // monopoly => rent doubled (season neutral, no character discounts)
+    const paid = payerBefore - G.players[0].money;
+    expect(paid).toBe(rent * RULES.core.monopolyRentMultiplier);
+    expect(G.players[1].money - ownerBefore).toBe(paid);
+  });
+
+  test('partial group ownership does NOT double rent', () => {
+    const G = atlasG();
+    G.ownership[6] = '1'; G.players[1].properties.push(6); // owns 6 but not 7
+    G.players[0].character = null; G.players[1].character = null;
+    const rent = G.board.spaces[6].rent;
+    const payerBefore = G.players[0].money;
+    G.players[0].position = 4;
+    Monopoly.moves.rollDice(G, makeCtx(dice(1, 1), '0'), [5, 6]);
+    expect(payerBefore - G.players[0].money).toBe(rent);
+  });
+
+  test('breaker passive reduces monopoly rent on an atlas full group', () => {
+    const G = atlasG();
+    function ownGroup(G, playerId, ids) { ids.forEach(id => { G.ownership[id] = playerId; G.players[Number(playerId)].properties.push(id); }); }
+    ownGroup(G, '1', [6, 7]);
+    G.players[1].character = null;
+    // visitor (player 0) has the breaker passive
+    G.players[0].character = {
+      id: 'renn', name: 'Renn', passive: { id: 'breaker' },
+      stats: { capital: 0, luck: 0, negotiation: 0, charisma: 0, tech: 0, stamina: 0 },
+    };
+    const rent = G.board.spaces[6].rent;
+    const full = rent * RULES.core.monopolyRentMultiplier;
+    const expected = Math.floor(full * (1 - RULES.passives.breaker.monopolyRentReduction));
+    const payerBefore = G.players[0].money;
+    G.players[0].position = 4;
+    Monopoly.moves.rollDice(G, makeCtx(dice(1, 1), '0'), [5, 6]);
+    expect(payerBefore - G.players[0].money).toBe(expected);
+  });
+});

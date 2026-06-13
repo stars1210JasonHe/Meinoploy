@@ -102,6 +102,15 @@ function ownsColorGroup(G, playerId, color) {
   return G.board.colorGroups[color].every(id => G.ownership[id] === playerId);
 }
 
+// Resolve a space's group key. Atlas property spaces carry placeId (no color);
+// classic spaces carry a hex color (no placeId). placeId-first so a future
+// render pass can stamp a display color onto atlas spaces without changing the
+// grouping. The two namespaces are disjoint, so this is identical for both
+// current map types.
+function groupKeyOf(space) {
+  return space.placeId || space.color;
+}
+
 function getEffectiveBuyPrice(G, player, space) {
   let price = space.price;
 
@@ -215,7 +224,8 @@ function calculateRent(G, space, diceTotal, visitor) {
     } else {
       rent = space.rent;
       // Monopoly bonus: double rent if owner has full color group (no buildings)
-      if (space.color && ownsColorGroup(G, owner, space.color)) {
+      const gk = groupKeyOf(space);
+      if (gk && ownsColorGroup(G, owner, gk)) {
         rent *= RULES.core.monopolyRentMultiplier;
       }
     }
@@ -237,7 +247,8 @@ function calculateRent(G, space, diceTotal, visitor) {
     }
 
     // Renn anti-monopoly: reduced rent on full color set properties
-    if (getPassive(visitor) === 'breaker' && space.color && ownsColorGroup(G, owner, space.color)) {
+    const gk = groupKeyOf(space);
+    if (getPassive(visitor) === 'breaker' && gk && ownsColorGroup(G, owner, gk)) {
       rent *= (1 - RULES.passives.breaker.monopolyRentReduction);
     }
   }
