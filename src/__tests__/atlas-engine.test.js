@@ -566,6 +566,14 @@ describe('atlas route-picker: rollOnly + commitRoute', () => {
     expect(Monopoly.moves.commitRoute(G, makeCtx([], '0'), [1])).toBe(INVALID);
   });
 
+  test('commitRoute rejects a bankrupt player (aligns with rollDice/rollOnly)', () => {
+    const G = atlasG();
+    G.players[0].position = 4;
+    Monopoly.moves.rollOnly(G, makeCtx(dice(1, 1), '0'));
+    G.players[0].bankrupt = true;
+    expect(Monopoly.moves.commitRoute(G, makeCtx([], '0'), [5, 6])).toBe(INVALID);
+  });
+
   test('rollOnly: triple doubles jails in place, no route awaited', () => {
     const G = atlasG();
     G.players[0].position = 3; G.doublesCount = 2;

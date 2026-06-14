@@ -1,4 +1,4 @@
-import { validateRoute, autoRoute, enumerateRoutes } from '../atlas-movement';
+import { validateRoute, autoRoute, enumerateRoutes, routeChoices } from '../atlas-movement';
 import { loadWorld } from '../world-loader';
 import { ARCHETYPES } from '../../mods/dominion/atlas/archetypes';
 import { MINI_WORLD } from '../../mods/dominion/atlas/fixtures/mini-world';
@@ -80,5 +80,32 @@ describe('enumerateRoutes', () => {
   test('dead-end stall routes are included (shorter than steps)', () => {
     const dead = [[1], []];
     expect(enumerateRoutes(dead, 0, 4)).toEqual([[1]]);
+  });
+});
+
+describe('routeChoices', () => {
+  test('a single straight path is one choice (caller auto-commits)', () => {
+    const c = routeChoices(EDGES, 0, 3); // 0->1->2->3, no fork
+    expect(c.length).toBe(1);
+    expect(c[0].route).toEqual([1, 2, 3]);
+  });
+  test('a fork with distinct ends gives two choices keyed by the branch node', () => {
+    const c = routeChoices(EDGES, 4, 2); // 4->5 then fork to 6 | 9
+    expect(c.length).toBe(2);
+    expect(c.map(x => x.node).sort((a, b) => a - b)).toEqual([6, 9]);
+  });
+  test('RECONVERGING branches are STILL two choices (keyed by divergence, not end)', () => {
+    // from node 0, total 9: berlin [.,6,7,8,0] and geneva [.,9,10,11,0] both END at
+    // the hub (node 0). Keying by destination would hide one branch; keying by the
+    // divergence node (6 vs 9) keeps both choosable. This is the bug-fix regression.
+    const c = routeChoices(EDGES, 0, 9);
+    expect(c.length).toBe(2);
+    expect(c.map(x => x.node).sort((a, b) => a - b)).toEqual([6, 9]);
+    c.forEach(ch => expect(ch.route).toContain(ch.node)); // each route goes via its branch
+  });
+  test('dead-end yields a single empty-route choice (caller commits the [] stall)', () => {
+    const c = routeChoices([[]], 0, 3); // node 0 has no outgoing edges
+    expect(c.length).toBe(1);
+    expect(c[0].route).toEqual([]);
   });
 });

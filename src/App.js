@@ -11,7 +11,7 @@ import stuttgartMapJson from '../mods/dominion/maps/stuttgart-fracture-loop/map.
 import outerRimMapJson from '../mods/dominion/maps/outer-rim-station/map.json';
 import nightveilMapJson from '../mods/dominion/maps/nightveil-intrigue/map.json';
 import { loadWorld } from './world-loader';
-import { enumerateRoutes } from './atlas-movement';
+import { routeChoices } from './atlas-movement';
 import { ARCHETYPES } from '../mods/dominion/atlas/archetypes';
 import { TERRA_CIRCUIT } from '../mods/dominion/atlas/worlds/terra-circuit';
 import keyArt from '../mods/dominion/keyart.png';
@@ -533,16 +533,18 @@ class MonopolyBoard {
     const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
     if (!G.awaitingRoute || !isMyTurn) { this._routeTargets = null; return; }
     const player = G.players[ctx.currentPlayer];
-    const routes = enumerateRoutes(G.board.edges, player.position, G.lastDice.total);
-    if (routes.length <= 1) {
-      // No genuine choice — commit immediately (keeps non-fork turns one-click).
+    const choices = routeChoices(G.board.edges, player.position, G.lastDice.total);
+    if (choices.length <= 1) {
+      // No genuine fork — commit immediately (keeps non-fork turns one-click).
       this._routeTargets = null;
-      this.client.moves.commitRoute(routes[0] || []);
+      this.client.moves.commitRoute(choices.length ? choices[0].route : []);
       return;
     }
-    // Highlight each distinct destination tile; the delegated listener commits on click.
+    // Highlight each branch tile, keyed by the divergence node so routes that
+    // reconverge on the same destination stay separately choosable; the delegated
+    // listener commits the chosen branch's route on click.
     const targets = {};
-    routes.forEach(r => { const end = r[r.length - 1]; if (end !== undefined && targets[end] === undefined) targets[end] = r; });
+    choices.forEach(c => { targets[c.node] = c.route; });
     this._routeTargets = targets;
     Object.keys(targets).forEach(id => {
       const tile = this.boardEl.querySelector(`.tile[data-space="${id}"]`);

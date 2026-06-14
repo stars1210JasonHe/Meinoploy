@@ -1013,10 +1013,12 @@ export const Monopoly = {
     // Commit the player's chosen whole route (atlas). Validated by performMove.
     commitRoute: (G, ctx, route) => {
       if (G.phase !== 'play') return INVALID_MOVE;
+      if (G.players[ctx.currentPlayer].bankrupt) return INVALID_MOVE;
       if (!G.awaitingRoute) return INVALID_MOVE;
       if (!performMove(G, ctx, route)) return INVALID_MOVE; // bad route → draft discarded
       G.awaitingRoute = false;
     },
+
 
     // --- Reroll (Stamina ability) ---
     useReroll: (G, ctx) => {
