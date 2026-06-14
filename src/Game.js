@@ -759,6 +759,95 @@ function resolveAuction(G) {
   G.turnPhase = 'done';
 }
 
+// --- Roll / movement helpers (shared by rollDice / rollOnly / commitRoute) ---
+
+// Roll + resolve triple-doubles + jail. Shared by rollDice / rollOnly.
+// Returns 'done' (turn ends here, no movement) or 'move' (proceed to movement).
+function rollAndResolveJail(G, ctx) {
+  const player = G.players[ctx.currentPlayer];
+  const dice = rollTwoDice(ctx);
+  dice.preRollPosition = player.position;
+  dice.preRollDistance = player.distanceTraveled || 0;
+  dice.salaryCollected = 0;
+  G.lastDice = dice;
+  G.hasRolled = true;
+  G.messages = [`${playerName(player)} rolled ${dice.d1} + ${dice.d2} = ${dice.total}`];
+
+  if (dice.isDoubles) {
+    G.doublesCount++;
+    if (G.doublesCount >= RULES.core.doublesJailThreshold) {
+      sendToJail(G, player);
+      G.messages.push('Triple doubles! Go to Jail!');
+      G.turnPhase = 'done';
+      return 'done';
+    }
+  } else {
+    G.doublesCount = 0;
+  }
+
+  if (player.inJail) {
+    if (dice.isDoubles) {
+      player.inJail = false;
+      player.jailTurns = 0;
+      G.messages.push('Doubles! You\'re free from jail!');
+    } else {
+      player.jailTurns++;
+      if (player.jailTurns >= RULES.core.jailMaxTurns) {
+        player.money -= RULES.core.jailFine;
+        player.inJail = false;
+        player.jailTurns = 0;
+        G.messages.push(`${RULES.core.jailMaxTurns} turns in jail. Paid $${RULES.core.jailFine} fine.`);
+        if (player.money <= 0) {
+          handleBankruptcy(G, ctx, player, null);
+          G.turnPhase = 'done';
+          return 'done';
+        }
+      } else {
+        G.messages.push(`Still in jail. Turn ${player.jailTurns}/${RULES.core.jailMaxTurns}.`);
+        G.turnPhase = 'done';
+        return 'done';
+      }
+    }
+  }
+  return 'move';
+}
+
+// Movement + landing. atlas: walk `route` (undefined = auto first-edge); loop:
+// modulo + pass-GO salary. Returns false only on an invalid atlas route.
+function performMove(G, ctx, route) {
+  const player = G.players[ctx.currentPlayer];
+  const dice = G.lastDice;
+  if (G.board.movementMode === 'atlas') {
+    if (!atlasWalk(G, player, dice, route)) return false;
+  } else {
+    const oldPos = player.position;
+    player.position = (player.position + dice.total) % G.board.boardSize;
+    // `|| 0` tolerates pre-branch saves where the field doesn't exist.
+    player.distanceTraveled = (player.distanceTraveled || 0) + dice.total;
+
+    if (player.position < oldPos && G.board.spaces[player.position].type !== 'goToJail') {
+      let goBonus = Math.floor(applyEconMods(G, 'income', RULES.core.goSalary));
+      // Mira Dawnlight passive: GO bonus
+      if (getPassive(player) === 'idealist') {
+        goBonus += RULES.passives.idealist.goBonus;
+        G.messages.push(`Growth vision: extra $${RULES.passives.idealist.goBonus} from GO!`);
+      }
+      player.money += goBonus;
+      G.lastDice.salaryCollected = goBonus;
+      G.messages.push(`Passed GO! Collect $${goBonus}.`);
+    }
+  }
+
+  G.messages.push(`Landed on ${G.board.spaces[player.position].name}.`);
+  handleLanding(G, ctx);
+
+  // Set turnPhase based on what happened
+  if (G.turnPhase !== 'card') {
+    G.turnPhase = G.canBuy ? 'act' : 'done';
+  }
+  return true;
+}
+
 // --- Game definition ---
 
 export const Monopoly = {
@@ -798,6 +887,7 @@ export const Monopoly = {
       mortgaged: {},
       lastDice: null,
       hasRolled: false,
+      awaitingRoute: false,
       canBuy: false,
       effectivePrice: 0,
       messages: ['Select your characters!'],
@@ -819,6 +909,7 @@ export const Monopoly = {
     onBegin: (G, ctx) => {
       if (G.phase === 'characterSelect') return;
       G.hasRolled = false;
+      G.awaitingRoute = false;
       G.canBuy = false;
       G.effectivePrice = 0;
       G.turnPhase = 'roll';
@@ -892,85 +983,15 @@ export const Monopoly = {
     },
 
     // --- Dice ---
+    // Atomic roll → move. Loop maps use this; atlas auto-routes (no `route` arg
+    // → first-edge walk). Body is rollAndResolveJail + performMove — identical
+    // behavior to the pre-split version (the 381-test baseline is the proof).
     rollDice: (G, ctx, route) => {
       if (G.phase !== 'play') return INVALID_MOVE;
       if (G.hasRolled) return INVALID_MOVE;
-      const player = G.players[ctx.currentPlayer];
-      if (player.bankrupt) return INVALID_MOVE;
-
-      const dice = rollTwoDice(ctx);
-      dice.preRollPosition = player.position;
-      dice.preRollDistance = player.distanceTraveled || 0;
-      dice.salaryCollected = 0;
-      G.lastDice = dice;
-      G.hasRolled = true;
-      G.messages = [`${playerName(player)} rolled ${dice.d1} + ${dice.d2} = ${dice.total}`];
-
-      // Triple doubles rule
-      if (dice.isDoubles) {
-        G.doublesCount++;
-        if (G.doublesCount >= RULES.core.doublesJailThreshold) {
-          sendToJail(G, player);
-          G.messages.push('Triple doubles! Go to Jail!');
-          G.turnPhase = 'done';
-          return;
-        }
-      } else {
-        G.doublesCount = 0;
-      }
-
-      if (player.inJail) {
-        if (dice.isDoubles) {
-          player.inJail = false;
-          player.jailTurns = 0;
-          G.messages.push('Doubles! You\'re free from jail!');
-        } else {
-          player.jailTurns++;
-          if (player.jailTurns >= RULES.core.jailMaxTurns) {
-            player.money -= RULES.core.jailFine;
-            player.inJail = false;
-            player.jailTurns = 0;
-            G.messages.push(`${RULES.core.jailMaxTurns} turns in jail. Paid $${RULES.core.jailFine} fine.`);
-            if (player.money <= 0) {
-              handleBankruptcy(G, ctx, player, null);
-              G.turnPhase = 'done';
-              return;
-            }
-          } else {
-            G.messages.push(`Still in jail. Turn ${player.jailTurns}/${RULES.core.jailMaxTurns}.`);
-            G.turnPhase = 'done';
-            return;
-          }
-        }
-      }
-
-      if (G.board.movementMode === 'atlas') {
-        if (!atlasWalk(G, player, dice, route)) return INVALID_MOVE;
-      } else {
-        const oldPos = player.position;
-        player.position = (player.position + dice.total) % G.board.boardSize;
-        // `|| 0` tolerates pre-branch saves where the field doesn't exist.
-        player.distanceTraveled = (player.distanceTraveled || 0) + dice.total;
-
-        if (player.position < oldPos && G.board.spaces[player.position].type !== 'goToJail') {
-          let goBonus = Math.floor(applyEconMods(G, 'income', RULES.core.goSalary));
-          // Mira Dawnlight passive: GO bonus
-          if (getPassive(player) === 'idealist') {
-            goBonus += RULES.passives.idealist.goBonus;
-            G.messages.push(`Growth vision: extra $${RULES.passives.idealist.goBonus} from GO!`);
-          }
-          player.money += goBonus;
-          G.lastDice.salaryCollected = goBonus;
-          G.messages.push(`Passed GO! Collect $${goBonus}.`);
-        }
-      }
-
-      G.messages.push(`Landed on ${G.board.spaces[player.position].name}.`);
-      handleLanding(G, ctx);
-
-      // Set turnPhase based on what happened
-      if (G.turnPhase !== 'card') {
-        G.turnPhase = G.canBuy ? 'act' : 'done';
+      if (G.players[ctx.currentPlayer].bankrupt) return INVALID_MOVE;
+      if (rollAndResolveJail(G, ctx) === 'move') {
+        if (!performMove(G, ctx, route)) return INVALID_MOVE;
       }
     },
 

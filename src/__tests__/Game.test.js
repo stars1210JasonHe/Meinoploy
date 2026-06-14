@@ -223,6 +223,16 @@ describe('rollDice', () => {
     expect(G.players[0].position).toBe(7); // Chance space
   });
 
+  test('classic rollDice still moves and lands (refactor guard)', () => {
+    const G = freshG();
+    G.players[0].character = null;
+    const ctx = makeCtx('0', 3, 4); // total = 7
+    const before = G.players[0].position;
+    Monopoly.moves.rollDice(G, ctx);
+    expect(G.players[0].position).not.toBe(before);
+    expect(G.hasRolled).toBe(true);
+  });
+
   test('tolerates pre-branch saves missing distanceTraveled (no NaN)', () => {
     const G = freshG();
     delete G.players[0].distanceTraveled; // old save: field did not exist
