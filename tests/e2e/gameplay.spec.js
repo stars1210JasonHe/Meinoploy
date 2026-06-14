@@ -544,7 +544,13 @@ async function completeTurnAtlas(page) {
   const rollBtn = page.locator('#btn-roll');
   if (await rollBtn.isVisible().catch(() => false)) {
     await rollBtn.click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(350);
+    // If a fork offered choices, pick the first highlighted city; else it auto-committed.
+    const target = page.locator('.tile--route-target').first();
+    if (await target.isVisible().catch(() => false)) {
+      await target.click();
+      await page.waitForTimeout(350);
+    }
   }
 
   const evAccept = page.locator('#ev-accept');
@@ -602,6 +608,8 @@ test.describe('Atlas World', () => {
     // Turns genuinely advanced — the active player changed at least once, which
     // is only possible if the (hard-clicked) buy/pass + end buttons were reachable.
     expect(whoSeen.size).toBeGreaterThan(1);
+    // Every roll resolved (auto-commit or a picked fork) — nothing left dangling.
+    await expect(page.locator('.tile--route-target')).toHaveCount(0);
     // No render/move crash across setup + auto-route turns.
     expect(pageErrors).toEqual([]);
   });
