@@ -995,6 +995,29 @@ export const Monopoly = {
       }
     },
 
+    // Atlas: roll, resolve jail/doubles, then PAUSE for route choice (D11).
+    rollOnly: (G, ctx) => {
+      if (G.phase !== 'play') return INVALID_MOVE;
+      if (G.hasRolled) return INVALID_MOVE;
+      if (G.players[ctx.currentPlayer].bankrupt) return INVALID_MOVE;
+      if (rollAndResolveJail(G, ctx) === 'move') {
+        if (G.board.movementMode === 'atlas') {
+          G.awaitingRoute = true;
+          G.turnPhase = 'route';
+        } else {
+          performMove(G, ctx, undefined); // loop: no route choice
+        }
+      }
+    },
+
+    // Commit the player's chosen whole route (atlas). Validated by performMove.
+    commitRoute: (G, ctx, route) => {
+      if (G.phase !== 'play') return INVALID_MOVE;
+      if (!G.awaitingRoute) return INVALID_MOVE;
+      if (!performMove(G, ctx, route)) return INVALID_MOVE; // bad route → draft discarded
+      G.awaitingRoute = false;
+    },
+
     // --- Reroll (Stamina ability) ---
     useReroll: (G, ctx) => {
       if (G.phase !== 'play') return INVALID_MOVE;
@@ -1006,6 +1029,7 @@ export const Monopoly = {
       // Reset state for re-roll
       player.rerollsLeft--;
       G.hasRolled = false;
+      G.awaitingRoute = false;
       G.canBuy = false;
       G.turnPhase = 'roll';
 

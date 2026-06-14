@@ -520,3 +520,68 @@ describe('atlas dominion victory (winPaths "dominion" -> monopoly win)', () => {
     expect(result).toBeUndefined();
   });
 });
+
+describe('atlas route-picker: rollOnly + commitRoute', () => {
+  const INVALID = 'INVALID_MOVE';
+
+  test('rollOnly rolls but does not move; sets awaitingRoute + turnPhase route', () => {
+    const G = atlasG();
+    G.players[0].position = 4; // paris, one step before the fork node 5
+    Monopoly.moves.rollOnly(G, makeCtx(dice(1, 1), '0')); // total 2
+    expect(G.hasRolled).toBe(true);
+    expect(G.awaitingRoute).toBe(true);
+    expect(G.turnPhase).toBe('route');
+    expect(G.players[0].position).toBe(4); // did NOT move
+    expect(G.lastDice.total).toBe(2);
+  });
+
+  test('commitRoute walks the chosen branch and lands', () => {
+    const G = atlasG();
+    G.players[0].position = 4;
+    Monopoly.moves.rollOnly(G, makeCtx(dice(1, 1), '0')); // total 2
+    const res = Monopoly.moves.commitRoute(G, makeCtx([], '0'), [5, 9]); // toward geneva
+    expect(res).toBeUndefined();
+    expect(G.players[0].position).toBe(9);
+    expect(G.awaitingRoute).toBe(false);
+    expect(['act', 'done']).toContain(G.turnPhase);
+  });
+
+  test('the OTHER branch is reachable via commitRoute', () => {
+    const G = atlasG();
+    G.players[0].position = 4;
+    Monopoly.moves.rollOnly(G, makeCtx(dice(1, 1), '0'));
+    Monopoly.moves.commitRoute(G, makeCtx([], '0'), [5, 6]); // toward berlin
+    expect(G.players[0].position).toBe(6);
+  });
+
+  test('commitRoute rejects an illegal route and stays awaiting', () => {
+    const G = atlasG();
+    G.players[0].position = 4;
+    Monopoly.moves.rollOnly(G, makeCtx(dice(1, 1), '0'));
+    expect(Monopoly.moves.commitRoute(G, makeCtx([], '0'), [5, 7])).toBe(INVALID); // 5->7 not an edge
+  });
+
+  test('commitRoute is INVALID when not awaiting a route', () => {
+    const G = atlasG();
+    expect(Monopoly.moves.commitRoute(G, makeCtx([], '0'), [1])).toBe(INVALID);
+  });
+
+  test('rollOnly: triple doubles jails in place, no route awaited', () => {
+    const G = atlasG();
+    G.players[0].position = 3; G.doublesCount = 2;
+    Monopoly.moves.rollOnly(G, makeCtx(dice(2, 2), '0'));
+    expect(G.players[0].inJail).toBe(true);
+    expect(G.awaitingRoute).toBe(false);
+    expect(G.turnPhase).toBe('done');
+  });
+
+  test('rollOnly: hub salary is paid only on commit, not on roll', () => {
+    const G = atlasG();
+    G.players[0].position = 11; // geneva, one step before rome hub (0)
+    const money = G.players[0].money;
+    Monopoly.moves.rollOnly(G, makeCtx(dice(1, 1), '0')); // total 2
+    expect(G.players[0].money).toBe(money); // no salary yet (no move yet)
+    Monopoly.moves.commitRoute(G, makeCtx([], '0'), [0, 1]); // through hub 0
+    expect(G.players[0].money).toBe(money + RULES.core.goSalary);
+  });
+});
