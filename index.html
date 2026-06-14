@@ -330,6 +330,10 @@
       text-shadow:1px 1px 0 #000; white-space:nowrap; }
     /* atlas: ring around capital-hub tiles so they stand out from plain arrows */
     .tile--hub { outline:2px solid var(--accent); outline-offset:1px; }
+    /* atlas route-picker: pulse the reachable destination cities at a fork */
+    .tile--route-target { outline:2px dashed var(--good); outline-offset:2px; cursor:pointer;
+      animation: routePulse 0.9s ease-in-out infinite; }
+    @keyframes routePulse { 0%,100% { outline-color:var(--good); } 50% { outline-color:var(--accent); } }
     /* persistent token overlay — survives grid rebuilds, repositioned each tick */
     #token-layer { position:absolute; inset:0; pointer-events:none; z-index:5; }
     #token-layer .token { position:absolute; transform:translate(-50%,-50%); }

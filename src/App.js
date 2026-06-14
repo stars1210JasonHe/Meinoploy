@@ -11,6 +11,7 @@ import stuttgartMapJson from '../mods/dominion/maps/stuttgart-fracture-loop/map.
 import outerRimMapJson from '../mods/dominion/maps/outer-rim-station/map.json';
 import nightveilMapJson from '../mods/dominion/maps/nightveil-intrigue/map.json';
 import { loadWorld } from './world-loader';
+import { enumerateRoutes } from './atlas-movement';
 import { ARCHETYPES } from '../mods/dominion/atlas/archetypes';
 import { TERRA_CIRCUIT } from '../mods/dominion/atlas/worlds/terra-circuit';
 import keyArt from '../mods/dominion/keyart.png';
@@ -234,6 +235,16 @@ class MonopolyBoard {
     this.gameAreaEl = document.getElementById('game-area');
     this.playerInfoEl = document.getElementById('player-info');
     this.boardEl = document.getElementById('board');
+    // Atlas route-picker: one delegated listener on the persistent boardEl
+    // (survives grid rebuilds). Reads this._routeTargets {nodeId:route} at click
+    // time — set by _resolveAtlasRoute when a fork is awaiting a choice.
+    this.boardEl.addEventListener('click', (e) => {
+      if (!this._routeTargets) return;
+      const tile = e.target.closest('.tile[data-space]');
+      if (!tile) return;
+      const route = this._routeTargets[tile.dataset.space];
+      if (route) { this._routeTargets = null; this.client.moves.commitRoute(route); }
+    });
     this.turnboxEl = document.getElementById('turnbox');
     this.manageEl = document.getElementById('manage');
     this.messagesEl = document.getElementById('log');
@@ -510,6 +521,33 @@ class MonopolyBoard {
     this.renderChatPanel(G, ctx);
     this.renderStateModal(G, ctx);
     this.wireActions(G, ctx);
+    this._resolveAtlasRoute(G, ctx);
+  }
+
+  // Atlas route-picker: after rollOnly pauses the turn (G.awaitingRoute), either
+  // auto-commit when there is no genuine fork (≤1 reachable route), or highlight
+  // each distinct destination city so the delegated board listener can commit on
+  // click. Resets the highlight bookkeeping on every non-awaiting render so a
+  // resolved turn never leaves a dangling target.
+  _resolveAtlasRoute(G, ctx) {
+    const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
+    if (!G.awaitingRoute || !isMyTurn) { this._routeTargets = null; return; }
+    const player = G.players[ctx.currentPlayer];
+    const routes = enumerateRoutes(G.board.edges, player.position, G.lastDice.total);
+    if (routes.length <= 1) {
+      // No genuine choice — commit immediately (keeps non-fork turns one-click).
+      this._routeTargets = null;
+      this.client.moves.commitRoute(routes[0] || []);
+      return;
+    }
+    // Highlight each distinct destination tile; the delegated listener commits on click.
+    const targets = {};
+    routes.forEach(r => { const end = r[r.length - 1]; if (end !== undefined && targets[end] === undefined) targets[end] = r; });
+    this._routeTargets = targets;
+    Object.keys(targets).forEach(id => {
+      const tile = this.boardEl.querySelector(`.tile[data-space="${id}"]`);
+      if (tile) tile.classList.add('tile--route-target');
+    });
   }
 
   // ─────────────────────────────────────────────────────────
@@ -647,6 +685,7 @@ class MonopolyBoard {
     } else {
       let hint = '';
       if (!isMyTurn) hint = 'WAITING…';
+      else if (G.awaitingRoute) hint = 'CHOOSE YOUR ROUTE — CLICK A HIGHLIGHTED CITY';
       else if (player.inJail && !G.hasRolled) hint = 'PAY FINE OR ROLL FOR DOUBLES';
       else if (!G.hasRolled) hint = 'ROLL TO MOVE';
       else if (G.pendingCard) hint = 'RESOLVE YOUR CARD';
@@ -1075,7 +1114,10 @@ class MonopolyBoard {
   // ─────────────────────────────────────────────────────────
   wireActions(G, ctx) {
     const click = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
-    click('btn-roll', () => this.client.moves.rollDice());
+    click('btn-roll', () => {
+      if (this.mapData.movementMode === 'atlas') this.client.moves.rollOnly();
+      else this.client.moves.rollDice();
+    });
     click('btn-buy', () => this.client.moves.buyProperty());
     click('btn-pass', () => this.client.moves.passProperty());
     click('btn-end', () => this.client.moves.endTurn());
