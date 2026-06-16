@@ -449,9 +449,15 @@ class MonopolyBoard {
     document.getElementById('btn-vic-back').onclick = () => this.showPlayerCountSelect();
     document.getElementById('btn-vic-start').onclick = () => {
       const sel = this._victorySel;
+      // A map's own victory.maxTurns is a FALLBACK terminator even for non-wealth
+      // modes — otherwise a survival/dominion game on a no-natural-end map (e.g.
+      // Terra) could run forever (highest net worth wins at the cap). Wealth mode
+      // uses the player-chosen turn limit; classic maps define no maxTurns (0) so
+      // their survival/dominion games are unchanged.
+      const mapMaxTurns = (this.mapData.victory && this.mapData.victory.maxTurns) || 0;
       setVictoryConfig({
         primary: sel.primary,
-        maxTurns: sel.primary === 'wealth' ? sel.maxTurns : 0,
+        maxTurns: sel.primary === 'wealth' ? sel.maxTurns : mapMaxTurns,
         groupsToWin: sel.groupsToWin,
       });
       this.startGameWithPlayers(this._pendingPlayerCount);
