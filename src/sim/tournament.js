@@ -6,8 +6,14 @@
 // gate) are exported separately so they can be unit-tested without running games.
 //
 // A contestant is { label, charId, policy }. For the best-fit/worst-fit question
-// the two contestants differ in charId (policy held constant). For the camper/
-// tourer question they differ in policy.routeStrategy (charId held constant).
+// the two contestants differ in charId (policy held constant).
+//
+// The camper/tourer (policy) question CANNOT hold charId constant — the engine
+// forbids two seats picking the same character. A single fixed assignment
+// (charA=camper, charB=tourer) therefore confounds strategy with character
+// strength (observed: the verdict flipped PASS↔FAIL across seeds because renn≠
+// cassian, not because of strategy). runStrategyTournament (below) removes that
+// confound by averaging BOTH character→strategy assignments.
 //
 // METHODOLOGY (D5, non-negotiable fairness):
 //   - Seat rotation: contestant A sits in seat 0 for the first half of games, seat
@@ -138,5 +144,74 @@ export function runTournament(spec) {
     draws,
     seed: baseSeed,
     world: world ? world.id : 'classic',
+  };
+}
+
+// Wins for a given label out of a tournament result's table (0 if absent).
+function winsOf(result, label) {
+  const row = result.table.find(r => r.label === label);
+  return row ? row.wins : 0;
+}
+
+// Isolate a binary POLICY dimension (camper vs tourer) from CHARACTER identity.
+// Because the engine forbids the same character in both seats, we cannot hold the
+// character constant. Instead we run TWO sub-tournaments with the character→strategy
+// assignment SWAPPED, then sum wins by the STRATEGY label:
+//   sub-A: charA=strategyA, charB=strategyB
+//   sub-B: charB=strategyA, charA=strategyB   (characters swapped)
+// Each sub-tournament already does seat rotation (turn-order de-bias). Summing the
+// two cancels the character confound: whatever edge charA's stats/passive give is
+// applied to strategyA in sub-A and to strategyB in sub-B, so it nets out. What
+// remains in the aggregate is the STRATEGY effect.
+//   spec = { world, charA, charB, strategyA='camper', strategyB='tourer',
+//            policyBase={}, games, baseSeed, maxTurns, gate }
+export function runStrategyTournament(spec) {
+  const {
+    world = null,
+    charA, charB,
+    strategyA = 'camper', strategyB = 'tourer',
+    policyBase = {},
+    games = 200,
+    baseSeed = '1',
+    maxTurns = 300,
+    gate,
+  } = spec;
+  const polFor = strat => Object.assign({}, policyBase, { routeStrategy: strat });
+  const half = Math.floor(games / 2);
+
+  const subA = runTournament({
+    world, games: half, baseSeed: `${baseSeed}:cAB`, maxTurns,
+    contestants: [
+      { label: strategyA, charId: charA, policy: polFor(strategyA) },
+      { label: strategyB, charId: charB, policy: polFor(strategyB) },
+    ],
+  });
+  const subB = runTournament({
+    world, games: games - half, baseSeed: `${baseSeed}:cBA`, maxTurns,
+    contestants: [
+      { label: strategyA, charId: charB, policy: polFor(strategyA) },
+      { label: strategyB, charId: charA, policy: polFor(strategyB) },
+    ],
+  });
+
+  const wins = {
+    [strategyA]: winsOf(subA, strategyA) + winsOf(subB, strategyA),
+    [strategyB]: winsOf(subA, strategyB) + winsOf(subB, strategyB),
+  };
+  const decisive = subA.decisive + subB.decisive;
+  const table = aggregate(wins, decisive, [strategyA, strategyB]);
+  const gateResult = evaluateGate(table, gate);
+
+  return {
+    table,
+    gate: gateResult,
+    games,
+    decisive,
+    draws: subA.draws + subB.draws,
+    seed: baseSeed,
+    world: world ? world.id : 'classic',
+    // Per-character-assignment breakdown, so a reviewer can see the confound is gone:
+    // if strategyA wins regardless of which character carries it, the effect is real.
+    subTournaments: { charAisStrategyA: subA.table, charBisStrategyA: subB.table },
   };
 }

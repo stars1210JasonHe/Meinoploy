@@ -15,7 +15,7 @@
 //   2. camper vs tourer STRATEGY win% (atlas maps only — meaningless on a loop)
 // each with a 95% CI and a PASS/FAIL on the 60/40 gate.
 
-import { runTournament } from './tournament';
+import { runTournament, runStrategyTournament } from './tournament';
 import { CHARACTERS_DATA } from '../../mods/dominion/characters-data';
 import { loadWorld } from '../world-loader';
 import { ARCHETYPES } from '../../mods/dominion/atlas/archetypes';
@@ -136,25 +136,31 @@ function main() {
 
   // --- Question 2: camper vs tourer STRATEGY (routeStrategy varies) ---
   // Only meaningful on atlas maps (loop maps have <=1 route choice). The two seats
-  // need DISTINCT characters (the engine forbids picking the same one twice), so we
-  // use two stat-balanced, equal-stat-sum (34) characters to minimize the residual
-  // character confound — strategy is the intended variable. Seat rotation already
-  // de-biases turn order. (A perfectly char-isolated test is impossible in a single
-  // game; this is the closest available proxy.)
+  // need DISTINCT characters (the engine forbids picking the same one twice), so a
+  // SINGLE fixed assignment would confound strategy with character strength.
+  // runStrategyTournament removes that: it runs both character→strategy assignments
+  // and tallies by STRATEGY, so the character edge nets out (see tournament.js).
   if (isAtlas) {
-    const camperChar = 'cassian-echo';     // sum 34, balanced 6/5/6/6/6/5
-    const tourerChar = 'renn-chainbreaker'; // sum 34, balanced 5/5/4/6/7/7
-    const stratResult = runTournament({
+    const charX = 'cassian-echo';      // two distinct, stat-balanced (sum 34) carriers;
+    const charY = 'renn-chainbreaker'; // identity is averaged out by the swap, not relied on.
+    const stratResult = runStrategyTournament({
       world,
-      contestants: [
-        { label: `camper:${camperChar}`, charId: camperChar, policy: { routeStrategy: 'camper' } },
-        { label: `tourer:${tourerChar}`, charId: tourerChar, policy: { routeStrategy: 'tourer' } },
-      ],
+      charA: charX,
+      charB: charY,
+      strategyA: 'camper',
+      strategyB: 'tourer',
       games: args.games,
       baseSeed: args.seed,
       maxTurns: args.maxTurns,
     });
-    printTournament('STRATEGY: camper vs tourer', stratResult);
+    printTournament('STRATEGY: camper vs tourer (character-confound removed via swap)', stratResult);
+    // Show the per-assignment split so the confound-removal is visible.
+    const sub = stratResult.subTournaments;
+    if (sub) {
+      const fmt = rows => rows.map(r => `${r.label} ${pct(r.winPct)}`).join('  |  ');
+      console.log(`    sub [${charX}=camper, ${charY}=tourer]: ${fmt(sub.charAisStrategyA)}`);
+      console.log(`    sub [${charY}=camper, ${charX}=tourer]: ${fmt(sub.charBisStrategyA)}`);
+    }
   } else {
     console.log('\n(STRATEGY camper-vs-tourer skipped: loop map has no route forks — strategy is a no-op.)');
   }

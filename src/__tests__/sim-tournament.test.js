@@ -1,5 +1,6 @@
-import { seatOfA, ci95, aggregate, evaluateGate, DEFAULT_GATE } from '../sim/tournament';
+import { seatOfA, ci95, aggregate, evaluateGate, DEFAULT_GATE, runStrategyTournament } from '../sim/tournament';
 import { rankStandings, getTotalAssets } from '../sim/standings';
+import { TERRA_CIRCUIT } from '../../mods/dominion/atlas/worlds/terra-circuit';
 
 describe('seatOfA — seat rotation', () => {
   test('contestant A is in seat 0 for the first half, seat 1 for the second', () => {
@@ -156,5 +157,46 @@ describe('rankStandings tiebreak — higher net worth wins on cap', () => {
     const G = capG(300, [], 300, []); // equal score 300
     const ranked = rankStandings(G, G.players);
     expect(ranked[0].id).toBe('0'); // equal cash → id asc
+  });
+});
+
+// --- runStrategyTournament: camper/tourer with the character confound removed -----
+// Integration test (drives real games), kept fast via tiny games/maxTurns. The point
+// is the METHODOLOGY: it must tally by STRATEGY across BOTH character→strategy
+// assignments, expose the per-assignment split, and be deterministic.
+describe('runStrategyTournament — character-confound removal', () => {
+  const base = {
+    world: TERRA_CIRCUIT,
+    charA: 'cassian-echo',
+    charB: 'renn-chainbreaker',
+    strategyA: 'camper',
+    strategyB: 'tourer',
+    games: 6,
+    maxTurns: 30,
+    baseSeed: 'confound-test',
+  };
+
+  test('aggregates by strategy label, wins sum to decisive', () => {
+    const r = runStrategyTournament(base);
+    const labels = r.table.map(row => row.label).sort();
+    expect(labels).toEqual(['camper', 'tourer']);
+    const totalWins = r.table.reduce((s, row) => s + row.wins, 0);
+    expect(totalWins).toBe(r.decisive);
+    expect(r.decisive + r.draws).toBe(base.games);
+  });
+
+  test('exposes BOTH character→strategy assignments (proof the confound is averaged out)', () => {
+    const r = runStrategyTournament(base);
+    expect(r.subTournaments).toBeDefined();
+    // Each sub-table is keyed by strategy in BOTH runs, but the character carrying
+    // each strategy is swapped between them.
+    expect(r.subTournaments.charAisStrategyA.map(x => x.label).sort()).toEqual(['camper', 'tourer']);
+    expect(r.subTournaments.charBisStrategyA.map(x => x.label).sort()).toEqual(['camper', 'tourer']);
+  });
+
+  test('deterministic: same seed → identical strategy table', () => {
+    const a = runStrategyTournament(base);
+    const b = runStrategyTournament(base);
+    expect(b.table).toEqual(a.table);
   });
 });
