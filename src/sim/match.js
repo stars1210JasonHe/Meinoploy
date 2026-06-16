@@ -39,10 +39,19 @@ function ingestMap(world) {
 
 // Drive character selection: each seat (in turn order) selects its assigned char.
 // selectCharacter ends that seat's turn internally; after the last, phase→'play'.
+// Characters must be DISTINCT — the engine rejects a duplicate selection, which
+// would silently strand the game in characterSelect. Fail loud instead.
 function selectCharacters(client, charIds) {
+  const distinct = new Set(charIds);
+  if (distinct.size !== charIds.length) {
+    throw new Error('runMatch: charIds must be distinct (engine rejects duplicate character selection): ' + charIds.join(', '));
+  }
   for (let i = 0; i < charIds.length; i++) {
     const cur = client.getState().ctx.currentPlayer;
     client.moves.selectCharacter(charIds[parseInt(cur)]);
+  }
+  if (client.getState().G.phase !== 'play') {
+    throw new Error('runMatch: character selection did not reach the play phase');
   }
 }
 

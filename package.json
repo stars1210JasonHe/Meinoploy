@@ -9,7 +9,8 @@
     "test": "jest && npx playwright test",
     "test:unit": "jest",
     "test:e2e": "npx playwright test",
-    "server": "node -r esm server.js"
+    "server": "node -r esm server.js",
+    "sim": "node -r esm src/sim/cli.js"
   },
   "browserslist": "defaults and supports async-functions",
   "dependencies": {
