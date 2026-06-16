@@ -1,7 +1,7 @@
 import { INVALID_MOVE } from 'boardgame.io/core';
-import { Monopoly } from '../Game';
+import { Monopoly, computeAffinityBonus } from '../Game';
 import { UPGRADE_COST_MULTIPLIERS, RENT_MULTIPLIERS, SEASONS, SEASON_CHANGE_INTERVAL } from '../constants';
-import { BOARD_SPACES, COLOR_GROUPS, CHARACTERS, getCharacterById, RULES } from '../../mods/dominion';
+import { BOARD_SPACES, COLOR_GROUPS, CHARACTERS, getCharacterById, getStartingMoney, RULES } from '../../mods/dominion';
 
 // Helper: create a fresh game state in 'play' phase (skipping char select)
 function freshG() {
@@ -205,6 +205,63 @@ describe('selectCharacter', () => {
     // Sophia Ember has Stamina 8 → gets 1 reroll
     Monopoly.moves.selectCharacter(G, makeCtx('0'), 'sophia-ember');
     expect(G.players[0].rerollsLeft).toBe(1);
+  });
+});
+
+// ─── MAP AFFINITY GRANT (atlas traits, spec §5 — mechanism B) ───────────────
+describe('computeAffinityBonus', () => {
+  const char = getCharacterById('knox-ironlaw'); // tech 6, capital 7
+
+  test('null/absent traits → 0 (classic maps have no traits)', () => {
+    expect(computeAffinityBonus(char, null)).toBe(0);
+    expect(computeAffinityBonus(char, undefined)).toBe(0);
+  });
+
+  test('fit = dot(stats, traits) * cashPerFit, rounded', () => {
+    const traits = { tech: 0.1, capital: 0.05 }; // fit = 6*0.1 + 7*0.05 = 0.95
+    const expected = Math.round(0.95 * RULES.affinity.cashPerFit);
+    expect(computeAffinityBonus(char, traits)).toBe(expected);
+  });
+
+  test('only FAVORS — negative fit is floored to 0 (no starting penalty)', () => {
+    const traits = { tech: -0.2, capital: -0.2 }; // fit < 0
+    expect(computeAffinityBonus(char, traits)).toBe(0);
+  });
+
+  test('ignores stats the traits map does not lean on', () => {
+    // luck/charisma absent from traits → contribute nothing.
+    const traits = { tech: 0.1 }; // fit = 6*0.1 = 0.6
+    expect(computeAffinityBonus(char, traits)).toBe(Math.round(0.6 * RULES.affinity.cashPerFit));
+  });
+});
+
+describe('selectCharacter — affinity grant integration', () => {
+  function selectCtx(player = '0') {
+    return { currentPlayer: player, numPlayers: 2, events: { endTurn: jest.fn() } };
+  }
+
+  test('grants the stat-scaled bonus on a traits map', () => {
+    const G = Monopoly.setup({ numPlayers: 2, playOrder: ['0', '1'] }); // phase characterSelect
+    G.board.traits = { tech: 0.1, capital: 0.05 };
+    const char = getCharacterById('knox-ironlaw');
+    const bonus = computeAffinityBonus(char, G.board.traits);
+    expect(bonus).toBeGreaterThan(0);
+
+    Monopoly.moves.selectCharacter(G, selectCtx('0'), 'knox-ironlaw');
+
+    expect(G.players[0].money).toBe(getStartingMoney(char) + bonus);
+    expect(G.players[0].affinityBonus).toBe(bonus);
+  });
+
+  test('no bonus on a map without traits (classic) — money unchanged, field 0', () => {
+    const G = Monopoly.setup({ numPlayers: 2, playOrder: ['0', '1'] }); // classic default: traits null
+    expect(G.board.traits).toBeNull();
+    const char = getCharacterById('knox-ironlaw');
+
+    Monopoly.moves.selectCharacter(G, selectCtx('0'), 'knox-ironlaw');
+
+    expect(G.players[0].money).toBe(getStartingMoney(char));
+    expect(G.players[0].affinityBonus).toBe(0);
   });
 });
 

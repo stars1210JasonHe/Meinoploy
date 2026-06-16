@@ -83,7 +83,20 @@ function createPlayer(id) {
     luckRedraws: 0,
     regulatedProperty: null,
     distanceTraveled: 0,
+    affinityBonus: 0,
   };
+}
+
+// Map affinity (Atlas traits): a one-time, stat-scaled cash head-start at character
+// select (spec §5, mechanism B). fit = Σ stat·trait over the map's trait leans;
+// bonus = max(0, round(fit * RULES.affinity.cashPerFit)). Floored at 0 so a map only
+// FAVORS (never punishes). Classic maps have no traits (null) → fit 0 → no bonus.
+// Exported for unit testing. Pure (no G/ctx coupling).
+export function computeAffinityBonus(char, traits) {
+  if (!traits || !char || !char.stats) return 0;
+  let fit = 0;
+  for (const stat in traits) fit += (char.stats[stat] || 0) * traits[stat];
+  return Math.max(0, Math.round(fit * RULES.affinity.cashPerFit));
 }
 
 // --- Character helpers ---
@@ -957,6 +970,13 @@ export const Monopoly = {
       player.character = char;
       player.money = getStartingMoney(char);
 
+      // Map affinity: one-time, stat-scaled head start on a traits (atlas) map.
+      const affinityBonus = computeAffinityBonus(char, G.board.traits);
+      if (affinityBonus > 0) {
+        player.money += affinityBonus;
+        player.affinityBonus = affinityBonus;
+      }
+
       // Luck stat threshold: free card redraws
       if (char.stats.luck >= RULES.stats.luck.redrawThreshold) {
         player.luckRedraws = RULES.stats.luck.redrawCount;
@@ -970,7 +990,10 @@ export const Monopoly = {
         player.rerollsLeft = RULES.stats.stamina.rerollCount;
       }
 
-      G.messages.push(`${playerName(player)} joins the game! ($${player.money})`);
+      const joinMsg = affinityBonus > 0
+        ? `${playerName(player)} joins the game! ($${player.money}, +$${affinityBonus} world affinity)`
+        : `${playerName(player)} joins the game! ($${player.money})`;
+      G.messages.push(joinMsg);
 
       // Check if all players have selected
       const allSelected = G.players.every(p => p.character !== null);

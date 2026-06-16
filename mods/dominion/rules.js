@@ -22,6 +22,17 @@ export const RULES = {
     freeParkingPot: false,    // true = taxes/fines accumulate; landing on parking collects pot
   },
 
+  // ── Map Affinity (Atlas traits) ─────────────────────────
+  // A map's trait leans give a character a ONE-TIME, stat-scaled cash head-start at
+  // character select (spec §5: "soft / one-time-leaning, validated by sim"). The
+  // bonus = max(0, round(fit * cashPerFit)) where fit = Σ stat·trait. Floored at 0 so
+  // a map can only FAVOR, never punish. cashPerFit is the single tuning knob — set so
+  // a map's best-fit character is favored but stays under the 60/40 sim gate. Maps
+  // without traits (classic) get fit 0 → no bonus. 0 disables affinity entirely.
+  affinity: {
+    cashPerFit: 5000,
+  },
+
   // ── Building System ─────────────────────────────────────
   buildings: {
     names: ['Vacant', 'House', 'Hotel', 'Skyscraper', 'Landmark'],
