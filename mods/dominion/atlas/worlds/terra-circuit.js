@@ -39,7 +39,14 @@ export var TERRA_CIRCUIT = {
   ],
   hubs: ['tokyo', 'newyork'],
   winPaths: ['dominion', 'wealth', 'survival'],
-  victory: { params: { groupsToWin: 3 } },
+  // maxTurns terminator: without it Terra (a wealth/dominion world) had no natural end —
+  // the balance sim showed ~80% of games never resolving in 300 turns, washing every
+  // character/strategy/affinity difference into a net-worth coin-flip. A 120-turn cap
+  // (timed-richest fallback; dominion at 3/7 groups still wins instantly) ends matches
+  // while differences still matter — sim-validated: best-fit ~55% (fair, <60/40) with
+  // affinity ON. Also closes the "wealth world with no maxTurns never terminates" footgun
+  // for this map. (A future per-match win-path selector may override this.)
+  victory: { maxTurns: 120, params: { groupsToWin: 3 } },
   size: { maxPlaces: 16, maxSpaces: 96 },
   // Slots within a place fan out so the 7.5%-wide tiles don't bury each other
   // (gap 6 vs tile 7.5 = light ~20% touch, readable; all slots stay on-board for
