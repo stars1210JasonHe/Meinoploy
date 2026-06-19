@@ -12,6 +12,11 @@ import outerRimMapJson from '../mods/dominion/maps/outer-rim-station/map.json';
 import nightveilMapJson from '../mods/dominion/maps/nightveil-intrigue/map.json';
 import { loadWorld } from './world-loader';
 import { routeChoices } from './atlas-movement';
+import { TERRA_ASSETS } from '../mods/dominion/atlas/terra-assets';
+
+// Client-only real-city background assets, keyed by atlas world id. Lives here (not in
+// loadWorld output) because the images are ES-module imports the engine/sim can't load.
+const ATLAS_ASSETS = { 'terra-circuit': TERRA_ASSETS };
 import { ARCHETYPES } from '../mods/dominion/atlas/archetypes';
 import { TERRA_CIRCUIT } from '../mods/dominion/atlas/worlds/terra-circuit';
 import keyArt from '../mods/dominion/keyart.png';
@@ -171,6 +176,9 @@ class MonopolyBoard {
       : loadMap(mapJson);
     this.boardSpaces = this.mapData.spaces;
     this.colorGroups = this.mapData.colorGroupsFlat;
+    // Attach client-only real-city imagery (world bg + per-place photos) if this atlas
+    // world has a bundled asset set. Null for classic / asset-less maps → color fallback.
+    this.mapData.atlasAssets = (mapJson && ATLAS_ASSETS[mapJson.id]) || null;
     setActiveMap(this.mapData);
   }
 
@@ -737,9 +745,19 @@ class MonopolyBoard {
     const pot = (space.type === 'parking' && RULES.core.freeParkingPot && G.freeParkingPot > 0)
       ? `<div class="tile__pot">$${G.freeParkingPot}</div>` : '';
 
-    const cls = `tile tile--${edge} ${isCorner ? 'tile--corner' : ''} ${mortgaged ? 'tile--mortgaged' : ''} ${opts.abs ? 'tile--abs' : ''} ${space.isHub ? 'tile--hub' : ''} tile--click`;
+    // Real-city photo behind the tile (atlas place tiles with a bundled image). The
+    // place-group color bar + name/price/glyph render ON TOP via a dark scrim for
+    // legibility; tiles without an image keep the plain color tile (fallback).
+    const assets = this.mapData.atlasAssets;
+    const cityImg = (assets && this.mapData.movementMode === 'atlas' && space.placeId)
+      ? assets.cityImages[space.placeId] : null;
+    const photo = cityImg
+      ? `<div class="tile__photo" style="background-image:url('${cityImg}')"></div><div class="tile__scrim"></div>`
+      : '';
+
+    const cls = `tile tile--${edge} ${isCorner ? 'tile--corner' : ''} ${mortgaged ? 'tile--mortgaged' : ''} ${opts.abs ? 'tile--abs' : ''} ${space.isHub ? 'tile--hub' : ''} ${cityImg ? 'tile--photo' : ''} tile--click`;
     const style = opts.style ? ` style="${opts.style}"` : '';
-    return `<div class="${cls}" data-space="${spaceId}"${style}>${bar}<div class="tile__inner">${glyph}<span class="tile__name">${esc(space.name)}</span>${price}</div>${owned}${mort}${pot}</div>`;
+    return `<div class="${cls}" data-space="${spaceId}"${style}>${photo}${bar}<div class="tile__inner">${glyph}<span class="tile__name">${esc(space.name)}</span>${price}</div>${owned}${mort}${pot}</div>`;
   }
 
   _playerColor(G, id) {
@@ -856,7 +874,13 @@ class MonopolyBoard {
         + `<path d="M0,0 L4,2 L0,4 Z" fill="var(--accent)"></path></marker></defs>`
         + lines + `</svg>`;
     }
-    this._gridWrap.innerHTML = `<div class="board__grid board__grid--absolute">${edgesSvg}${tiles}${labels || ''}${center}</div>`;
+    // Real-city world map behind the board (atlas worlds with a bundled asset set).
+    const worldBg = (isAtlas && this.mapData.atlasAssets) ? this.mapData.atlasAssets.worldBg : null;
+    const gridCls = `board__grid board__grid--absolute${worldBg ? ' board__grid--world' : ''}`;
+    const gridStyle = worldBg
+      ? ` style="background-image:linear-gradient(rgba(8,12,28,.45),rgba(8,12,28,.45)),url('${worldBg}')"`
+      : '';
+    this._gridWrap.innerHTML = `<div class="${gridCls}"${gridStyle}>${edgesSvg}${tiles}${labels || ''}${center}</div>`;
   }
 
   // Returns {x, y} as PERCENT of the board element, for positioning overlay tokens.

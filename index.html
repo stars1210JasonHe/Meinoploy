@@ -363,6 +363,16 @@
     .tile__house { width:6px; height:6px; background:var(--ocol); border:1px solid #000; }
     .tile__mort { position:absolute; top:2px; left:2px; font-family:var(--disp); font-size:6px; color:#fff; background:var(--bad); padding:0 2px; }
     .tile__pot { position:absolute; bottom:2px; left:2px; font-family:var(--disp); font-size:6px; color:var(--good); }
+    /* atlas real-city backgrounds: world map behind the board + a photo behind each city tile */
+    .board__grid--world { background-size:cover; background-position:center; background-repeat:no-repeat; }
+    .tile__photo, .tile__scrim { position:absolute; inset:0; z-index:0; pointer-events:none; }
+    .tile__photo { background-size:cover; background-position:center; }
+    .tile__scrim { background:linear-gradient(to top, rgba(5,8,18,.86) 0%, rgba(5,8,18,.42) 70%, rgba(5,8,18,.30) 100%); }
+    .tile--photo .tile__inner { position:relative; z-index:2; }
+    .tile--photo .tile__bar, .tile--photo .tile__owner, .tile--photo .tile__mort { z-index:2; }
+    .tile--photo .tile__name { color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.95); }
+    .tile--photo .tile__price { color:#eef2ff; text-shadow:0 1px 2px rgba(0,0,0,.95); }
+    .tile--photo .tile__inner .glyph { color:#fff; }
 
     .board__center { display:flex; flex-direction:column; align-items:center; justify-content:space-between;
       padding:14px; gap:8px; background:repeating-linear-gradient(135deg, #0c1f12 0 8px, #0e2415 8px 16px); }
