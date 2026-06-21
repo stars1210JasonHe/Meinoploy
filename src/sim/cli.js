@@ -20,11 +20,13 @@ import { CHARACTERS_DATA } from '../../mods/dominion/characters-data';
 import { loadWorld } from '../world-loader';
 import { ARCHETYPES } from '../../mods/dominion/atlas/archetypes';
 import { TERRA_CIRCUIT } from '../../mods/dominion/atlas/worlds/terra-circuit';
+import { TERRA_GLOBE } from '../../mods/dominion/atlas/worlds/terra-globe';
 
 // Map registry — name → atlas world object (null = classic).
 const WORLDS = {
   classic: null,
   'terra-circuit': TERRA_CIRCUIT,
+  'terra-globe': TERRA_GLOBE,
 };
 
 // --- arg parsing (no deps) -----------------------------------------------------
