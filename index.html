@@ -373,6 +373,11 @@
     .tile--photo .tile__name { color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.95); }
     .tile--photo .tile__price { color:#eef2ff; text-shadow:0 1px 2px rgba(0,0,0,.95); }
     .tile--photo .tile__inner .glyph { color:#fff; }
+    /* atlas pixel-globe board (renderMode:'globe') */
+    .board--globe { background:var(--bg); display:block; overflow:hidden; }
+    .globe-host { width:100%; height:100%; }
+    .board--globe #token-layer { display:none; } /* token projection is Stage 3 */
+    .globe-fallback { color:var(--bad); padding:20px; font-family:var(--body); font-size:14px; }
 
     .board__center { display:flex; flex-direction:column; align-items:center; justify-content:space-between;
       padding:14px; gap:8px; background:repeating-linear-gradient(135deg, #0c1f12 0 8px, #0e2415 8px 16px); }

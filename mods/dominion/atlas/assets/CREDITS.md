@@ -11,3 +11,8 @@ Fetched by fetch-assets.mjs from Wikipedia/Wikimedia Commons (CC-BY-SA / public 
 - **london** (london.jpg): "London_Skyline_(125508655).jpeg" via London (Wikimedia Commons)
 
 - **World map** (world.jpg): "Equirectangular_projection_SW.jpg" (Wikimedia Commons, public domain)
+
+## Vendored libraries
+- **vendor/globe.gl.lib** — globe.gl v2.46.1 prebuilt UMD (three.js bundled inside), MIT.
+  https://github.com/vasturiano/globe.gl · vendored from the npm package's dist/globe.gl.min.js
+  (renamed `.lib` so Parcel v1 copies it as a static asset instead of trying to ES-bundle it).

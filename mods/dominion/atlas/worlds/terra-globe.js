@@ -83,6 +83,9 @@ export var TERRA_GLOBE = {
   // Refine the connector graph / branch values to rebalance (data-only, no engine change).
   victory: { maxTurns: 200, params: { groupsToWin: 4 } },
   size: { maxPlaces: 16, maxSpaces: 96 },
-  atlasConfig: { positions: { slotOffsetStep: 4 } },
+  // globe.pixelRatio: WebGL drawing-buffer scale — lower = chunkier pixels (the
+  // nearest-neighbor upscale gives the pixel-art look). ~0.3 reads clearly as pixels
+  // on a ~500-780px board; 0.5+ is subtle. User-tunable per world.
+  atlasConfig: { positions: { slotOffsetStep: 4 }, globe: { pixelRatio: 0.3 } },
   theme: { logoText: 'TERRA', logoSubtitle: 'GLOBE' },
 };

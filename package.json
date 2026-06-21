@@ -16,7 +16,9 @@
   "dependencies": {
     "boardgame.io": "0.45.0",
     "esm": "^3.2.25",
-    "koa-static": "^5.0.0"
+    "globe.gl": "^2.46.1",
+    "koa-static": "^5.0.0",
+    "three": "^0.184.0"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",

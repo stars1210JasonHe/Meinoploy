@@ -16,9 +16,11 @@ import { TERRA_ASSETS } from '../mods/dominion/atlas/terra-assets';
 
 // Client-only real-city background assets, keyed by atlas world id. Lives here (not in
 // loadWorld output) because the images are ES-module imports the engine/sim can't load.
-const ATLAS_ASSETS = { 'terra-circuit': TERRA_ASSETS };
+const ATLAS_ASSETS = { 'terra-circuit': TERRA_ASSETS, 'terra-globe': TERRA_ASSETS };
 import { ARCHETYPES } from '../mods/dominion/atlas/archetypes';
 import { TERRA_CIRCUIT } from '../mods/dominion/atlas/worlds/terra-circuit';
+import { TERRA_GLOBE } from '../mods/dominion/atlas/worlds/terra-globe';
+import { getGlobe } from '../mods/dominion/atlas/globe-lib';
 import keyArt from '../mods/dominion/keyart.png';
 
 // Available maps for selection
@@ -28,6 +30,7 @@ const AVAILABLE_MAPS = [
   outerRimMapJson,
   nightveilMapJson,
   TERRA_CIRCUIT,
+  TERRA_GLOBE,
 ];
 
 const STAT_KEYS = [
@@ -179,6 +182,12 @@ class MonopolyBoard {
     // Attach client-only real-city imagery (world bg + per-place photos) if this atlas
     // world has a bundled asset set. Null for classic / asset-less maps → color fallback.
     this.mapData.atlasAssets = (mapJson && ATLAS_ASSETS[mapJson.id]) || null;
+    // Globe renderer: carry the render mode + the raw places (geo lat/lng + connectors)
+    // so the globe can plot city points and great-circle route arcs. Display-only.
+    this.mapData.renderMode = (mapJson && mapJson.renderMode) || null;
+    this.mapData.atlasPlaces = (mapJson && mapJson.places) || null;
+    this.mapData.globePixelRatio = (mapJson && mapJson.atlasConfig && mapJson.atlasConfig.globe
+      && mapJson.atlasConfig.globe.pixelRatio) || 0.35;
     setActiveMap(this.mapData);
   }
 
@@ -766,8 +775,72 @@ class MonopolyBoard {
   }
 
   renderBoard(G, ctx) {
-    if (this.mapData.layoutType === 'square') this._renderSquareBoard(G, ctx);
+    const mode = this.mapData.renderMode;
+    // Tear down the globe when we leave globe mode (frees the WebGL context).
+    if (mode !== 'globe' && this._globe) {
+      try { this._globe._destructor && this._globe._destructor(); } catch (e) { /* ignore */ }
+      this._globe = null; this._globeLoading = false;
+    }
+    if (mode === 'globe') this._renderGlobeBoard(G, ctx);
+    else if (this.mapData.layoutType === 'square') this._renderSquareBoard(G, ctx);
     else this._renderAbsoluteBoard(G, ctx);
+  }
+
+  // Stage 2 — pixel-globe substrate: the world map on a low-res (pixelated) globe with
+  // city points + great-circle route arcs. Created ONCE (renderBoard runs every state
+  // change) then updated. Interactive tiles/tokens/camera/mini-map are Stage 3.
+  _renderGlobeBoard(G, ctx) {
+    this.boardEl.className = 'board board--globe';
+    this._ensureBoardChildren();
+
+    const places = (this.mapData.atlasPlaces || []).filter(p => p.geo);
+    const byId = {};
+    places.forEach(p => { byId[p.id] = p; });
+    const points = places.map(p => ({ lat: p.geo.lat, lng: p.geo.lng, name: (p.realName || p.id).toUpperCase() }));
+    const arcs = [];
+    places.forEach(p => {
+      if (!p.connectors) return;
+      Object.keys(p.connectors).forEach(dir => {
+        const t = byId[p.connectors[dir]];
+        if (t) arcs.push({ sLat: p.geo.lat, sLng: p.geo.lng, eLat: t.geo.lat, eLng: t.geo.lng });
+      });
+    });
+    this._globeData = { points, arcs };
+
+    if (this._globe) { this._globe.pointsData(points).labelsData(points).arcsData(arcs); return; }
+    if (this._globeLoading) return; // load already in flight
+    this._globeLoading = true;
+    const tex = this.mapData.atlasAssets ? this.mapData.atlasAssets.worldBg : null;
+
+    getGlobe().then(Globe => {
+      this._globeLoading = false;
+      if (this.mapData.renderMode !== 'globe') return; // switched maps mid-load
+      const host = document.createElement('div');
+      host.className = 'globe-host';
+      this._gridWrap.innerHTML = '';
+      this._gridWrap.appendChild(host);
+      const W = this.boardEl.clientWidth || 600, H = this.boardEl.clientHeight || 600;
+      const d = this._globeData;
+      const g = Globe()(host)
+        .width(W).height(H)
+        .backgroundColor('rgba(0,0,0,0)')
+        .globeImageUrl(tex)
+        .showAtmosphere(true).atmosphereColor('#6f7cd6').atmosphereAltitude(0.12)
+        .pointsData(d.points).pointLat('lat').pointLng('lng')
+        .pointColor(() => '#ff5c5c').pointAltitude(0.02).pointRadius(0.9)
+        .labelsData(d.points).labelLat('lat').labelLng('lng').labelText('name')
+        .labelSize(1.3).labelDotRadius(0.3).labelColor(() => '#ffffff').labelResolution(1)
+        .arcsData(d.arcs).arcColor(() => '#e9b23c').arcAltitude(0.22).arcStroke(1.1)
+        .arcStartLat('sLat').arcStartLng('sLng').arcEndLat('eLat').arcEndLng('eLng');
+      g.controls().autoRotate = false;
+      g.controls().enableZoom = false;
+      g.pointOfView({ lat: 25, lng: 74, altitude: 2.2 }, 0);
+      g.renderer().setPixelRatio(this.mapData.globePixelRatio); // ← the pixelation (lower = blockier)
+      this._globe = g;
+    }).catch(e => {
+      this._globeLoading = false;
+      this._gridWrap.innerHTML = `<div class="globe-fallback">Globe failed to load: ${esc(e.message)}</div>`;
+    });
   }
 
   // Ensure boardEl has two persistent children: a grid wrapper (rebuilt each
