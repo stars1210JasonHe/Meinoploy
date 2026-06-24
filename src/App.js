@@ -896,6 +896,9 @@ class MonopolyBoard {
       this._globeCameraFollow(G, ctx, true); // instant first POV onto the active player
     }).catch(e => {
       this._globeLoading = false;
+      // Don't clobber the current board with a fallback message if the player already
+      // navigated away (exited / loaded / switched maps) while the load was failing.
+      if (epoch !== (this._globeEpoch || 0) || this.mapData.renderMode !== 'globe') return;
       this._gridWrap.innerHTML = `<div class="globe-fallback">Globe failed to load: ${esc(e.message)}</div>`;
     });
   }

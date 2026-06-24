@@ -26,6 +26,11 @@ export function getGlobe() {
     s.onload = () => (window.Globe ? resolve(window.Globe) : reject(new Error('globe.gl loaded but window.Globe missing')));
     s.onerror = () => reject(new Error('failed to load vendored globe.gl'));
     document.head.appendChild(s);
+  }).catch(err => {
+    // Reset so a transient load failure (bad asset response, CSP/MIME, etc.) doesn't
+    // poison every future getGlobe() with the same rejection — the next call retries.
+    _loading = null;
+    throw err;
   });
   return _loading;
 }
