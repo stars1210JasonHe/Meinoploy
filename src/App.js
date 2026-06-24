@@ -908,8 +908,11 @@ class MonopolyBoard {
       // the flat atlas renderer (playable) rather than an unplayable error screen.
       console.warn('globe.gl failed to load, falling back to flat atlas board:', e.message);
       this.mapData.renderMode = null;
+      // Full re-render via update() (not just _renderAbsoluteBoard) so route resolution
+      // runs too — _resolveAtlasRoute was skipped while renderMode was 'globe', and if
+      // the failure landed mid-fork there's no further update to surface the choices.
       const cur = this.client && this.client.getState();
-      if (cur) this._renderAbsoluteBoard(cur.G, cur.ctx);
+      if (cur) this.update(cur);
     });
   }
 

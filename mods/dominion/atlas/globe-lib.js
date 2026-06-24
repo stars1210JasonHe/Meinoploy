@@ -19,18 +19,26 @@ let _loading = null;
 export function getGlobe() {
   if (typeof window !== 'undefined' && window.Globe) return Promise.resolve(window.Globe);
   if (_loading) return _loading;
-  _loading = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = globeLibUrl;
-    s.async = true;
-    s.onload = () => (window.Globe ? resolve(window.Globe) : reject(new Error('globe.gl loaded but window.Globe missing')));
-    s.onerror = () => reject(new Error('failed to load vendored globe.gl'));
-    document.head.appendChild(s);
-  }).catch(err => {
-    // Reset so a transient load failure (bad asset response, CSP/MIME, etc.) doesn't
-    // poison every future getGlobe() with the same rejection — the next call retries.
-    _loading = null;
-    throw err;
-  });
+  // FETCH the vendored UMD as text, then inject it as an INLINE <script>. We can't use
+  // <script src=globe.gl.lib> because the .lib extension serves with a non-JS MIME type
+  // (parcel / koa-static), which strict browsers (X-Content-Type-Options: nosniff) refuse
+  // to execute. An inline script runs regardless of the source asset's MIME. (The .lib
+  // extension is still needed so Parcel v1 copies it as a static asset instead of trying
+  // to ES-bundle it — which fails on globe.gl's three/webgpu import.)
+  _loading = fetch(globeLibUrl)
+    .then(r => { if (!r.ok) throw new Error('globe.gl asset HTTP ' + r.status); return r.text(); })
+    .then(code => {
+      const s = document.createElement('script');
+      s.textContent = code;
+      document.head.appendChild(s);
+      if (!window.Globe) throw new Error('globe.gl ran but window.Globe missing');
+      return window.Globe;
+    })
+    .catch(err => {
+      // Reset so a transient failure doesn't poison every future getGlobe() with the
+      // same rejection — the next call retries.
+      _loading = null;
+      throw err;
+    });
   return _loading;
 }
