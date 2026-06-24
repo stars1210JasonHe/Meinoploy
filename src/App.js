@@ -197,6 +197,10 @@ class MonopolyBoard {
     this.mapData.atlasPlaces = (mapJson && mapJson.places) || null;
     this.mapData.globePixelRatio = (mapJson && mapJson.atlasConfig && mapJson.atlasConfig.globe
       && mapJson.atlasConfig.globe.pixelRatio) || 0.35;
+    // Pre-warm the (async) globe library the moment a globe map is picked — by the time
+    // the player rolls, window.Globe is ready, so the first fork can't freeze waiting on
+    // the fetch. Errors are handled later in _renderGlobeBoard's load path.
+    if (this.mapData.renderMode === 'globe') getGlobe().catch(() => {});
     setActiveMap(this.mapData);
   }
 
@@ -2109,6 +2113,17 @@ class MonopolyBoard {
   }
 
   saveGame(G, ctx) {
+    // A dice roll is animating: the real move is deferred behind the ~0.9s timer, so G
+    // is still the PRE-roll state. Saving now would serialize a turn the UI has already
+    // shown as rolled; reloading would rewind it. Refuse until the roll has dispatched.
+    if (this._rolling) {
+      if (this.saveBtnEl) {
+        const prev = this.saveBtnEl.textContent;
+        this.saveBtnEl.textContent = 'ROLLING…';
+        setTimeout(() => { if (this.saveBtnEl) this.saveBtnEl.textContent = prev; }, 1000);
+      }
+      return;
+    }
     const saveData = { G: G, currentPlayer: ctx.currentPlayer, numPlayers: G.players.length, mapId: this.mapData.id, timestamp: Date.now() };
     const saveName = `meinopoly_save_${new Date().toLocaleString().replace(/[/:]/g, '-')}`;
     const saves = JSON.parse(localStorage.getItem('meinopoly_saves') || '{}');
