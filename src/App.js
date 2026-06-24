@@ -526,6 +526,10 @@ class MonopolyBoard {
   // ─────────────────────────────────────────────────────────
   update(state) {
     if (state === null) return;
+    // Release the dice-roll lock once the post-roll state has actually arrived (held
+    // across the animation AND the move round-trip, so a high-latency roll can't be
+    // double-submitted while #btn-roll lingers).
+    this._rolling = false;
     const G = state.G;
     const ctx = state.ctx;
 
@@ -804,6 +808,8 @@ class MonopolyBoard {
   // exitToMenu, which return from update() before renderBoard runs (else the RAF loop
   // and WebGL canvas leak for the rest of the session).
   _teardownGlobe() {
+    // Bump the epoch so any in-flight getGlobe() load resolves into a no-op.
+    this._globeEpoch = (this._globeEpoch || 0) + 1;
     if (!this._globe && !this._globeRaf && !this._globeResizeObs) return;
     if (this._globeRaf) { cancelAnimationFrame(this._globeRaf); this._globeRaf = null; }
     if (this._globeResizeObs) { this._globeResizeObs.disconnect(); this._globeResizeObs = null; }
@@ -854,11 +860,15 @@ class MonopolyBoard {
     }
     if (this._globeLoading) return; // load already in flight
     this._globeLoading = true;
+    // Epoch guard: getGlobe() is async (first call injects the vendored UMD). If the
+    // player exits / loads / switches maps before it resolves, _teardownGlobe() bumps
+    // the epoch and this stale callback bails instead of resurrecting the RAF/WebGL.
+    const epoch = (this._globeEpoch || 0);
     const tex = this.mapData.atlasAssets ? this.mapData.atlasAssets.worldBg : null;
 
     getGlobe().then(Globe => {
       this._globeLoading = false;
-      if (this.mapData.renderMode !== 'globe') return; // switched maps mid-load
+      if (epoch !== (this._globeEpoch || 0) || this.mapData.renderMode !== 'globe' || !this.client) return;
       const host = document.createElement('div');
       host.className = 'globe-host';
       this._gridWrap.innerHTML = '';
@@ -1407,12 +1417,15 @@ class MonopolyBoard {
     if (this._rolling) return; // ignore re-clicks mid-roll
     const wrap = this.rootElement.querySelector('.centerslot__dice');
     const fire = () => {
-      this._rolling = false;
       this._rollTimer = null;
+      // NOTE: _rolling is intentionally NOT cleared here — it's released in update()
+      // once the post-roll state actually arrives. In online/laggy play the dispatch
+      // round-trips, and clearing the lock now would let a second click double-roll
+      // while #btn-roll is still on screen.
       // The move was deferred ~0.9s; if the player exited to menu or loaded a save
       // during the animation the client is gone/replaced — abort rather than dispatch
-      // against a null or wrong client.
-      if (!this.client) return;
+      // against a null or wrong client (and release the lock so it isn't stuck).
+      if (!this.client) { this._rolling = false; return; }
       if (this.mapData.movementMode === 'atlas') this.client.moves.rollOnly();
       else this.client.moves.rollDice();
     };
