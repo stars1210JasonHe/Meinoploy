@@ -17,6 +17,15 @@ import { TERRA_ASSETS } from '../mods/dominion/atlas/terra-assets';
 // Client-only real-city background assets, keyed by atlas world id. Lives here (not in
 // loadWorld output) because the images are ES-module imports the engine/sim can't load.
 const ATLAS_ASSETS = { 'terra-circuit': TERRA_ASSETS, 'terra-globe': TERRA_ASSETS };
+
+// True if a (lat,lng) on the globe faces the camera (cos-distance vs the POV center).
+// Overlays on the far hemisphere are hidden. > a small positive epsilon hides points
+// right on the limb where they'd clip through the sphere edge.
+const _D2R = Math.PI / 180;
+function onGlobeNearSide(lat, lng, pov) {
+  return Math.sin(pov.lat * _D2R) * Math.sin(lat * _D2R)
+    + Math.cos(pov.lat * _D2R) * Math.cos(lat * _D2R) * Math.cos((lng - pov.lng) * _D2R) > 0.04;
+}
 import { ARCHETYPES } from '../mods/dominion/atlas/archetypes';
 import { TERRA_CIRCUIT } from '../mods/dominion/atlas/worlds/terra-circuit';
 import { TERRA_GLOBE } from '../mods/dominion/atlas/worlds/terra-globe';
@@ -778,6 +787,8 @@ class MonopolyBoard {
     const mode = this.mapData.renderMode;
     // Tear down the globe when we leave globe mode (frees the WebGL context).
     if (mode !== 'globe' && this._globe) {
+      if (this._globeRaf) { cancelAnimationFrame(this._globeRaf); this._globeRaf = null; }
+      this._globeOverlay = null; this._globePovKey = null; this._globeRouteTargets = null;
       try { this._globe._destructor && this._globe._destructor(); } catch (e) { /* ignore */ }
       this._globe = null; this._globeLoading = false;
     }
@@ -807,7 +818,12 @@ class MonopolyBoard {
     });
     this._globeData = { points, arcs };
 
-    if (this._globe) { this._globe.pointsData(points).labelsData(points).arcsData(arcs); return; }
+    if (this._globe) {
+      this._globe.pointsData(points).arcsData(arcs);
+      this._updateGlobeOverlay(G, ctx);
+      this._globeCameraFollow(G, ctx, false);
+      return;
+    }
     if (this._globeLoading) return; // load already in flight
     this._globeLoading = true;
     const tex = this.mapData.atlasAssets ? this.mapData.atlasAssets.worldBg : null;
@@ -821,6 +837,9 @@ class MonopolyBoard {
       this._gridWrap.appendChild(host);
       const W = this.boardEl.clientWidth || 600, H = this.boardEl.clientHeight || 600;
       const d = this._globeData;
+      // Red city dots + gold route arcs are 3D (on the sphere). City NAME labels +
+      // tokens + the route picker are crisp pixel-HTML overlays (see _globeTick), not
+      // globe.gl's built-in 3D labels — keeps the Press Start 2P type sharp.
       const g = Globe()(host)
         .width(W).height(H)
         .backgroundColor('rgba(0,0,0,0)')
@@ -828,19 +847,151 @@ class MonopolyBoard {
         .showAtmosphere(true).atmosphereColor('#6f7cd6').atmosphereAltitude(0.12)
         .pointsData(d.points).pointLat('lat').pointLng('lng')
         .pointColor(() => '#ff5c5c').pointAltitude(0.02).pointRadius(0.9)
-        .labelsData(d.points).labelLat('lat').labelLng('lng').labelText('name')
-        .labelSize(1.3).labelDotRadius(0.3).labelColor(() => '#ffffff').labelResolution(1)
         .arcsData(d.arcs).arcColor(() => '#e9b23c').arcAltitude(0.22).arcStroke(1.1)
         .arcStartLat('sLat').arcStartLng('sLng').arcEndLat('eLat').arcEndLng('eLng');
       g.controls().autoRotate = false;
       g.controls().enableZoom = false;
-      g.pointOfView({ lat: 25, lng: 74, altitude: 2.2 }, 0);
       g.renderer().setPixelRatio(this.mapData.globePixelRatio); // ← the pixelation (lower = blockier)
       this._globe = g;
+      this._setupGlobeOverlay();
+      this._updateGlobeOverlay(G, ctx);
+      this._globeCameraFollow(G, ctx, true); // instant first POV onto the active player
     }).catch(e => {
       this._globeLoading = false;
       this._gridWrap.innerHTML = `<div class="globe-fallback">Globe failed to load: ${esc(e.message)}</div>`;
     });
+  }
+
+  // Lat/lng → screen px for ALL globe overlays, every frame (the camera tweens during
+  // follow, so positions must track continuously). Far-side overlays are hidden. Cheap:
+  // ~12 cities + a few tokens. Cancelled on globe teardown (renderBoard).
+  _setupGlobeOverlay() {
+    let ov = this._gridWrap.querySelector('.globe-overlay');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.className = 'globe-overlay';
+      this._gridWrap.appendChild(ov);
+      // Delegated click: committing a chosen branch at a fork (route picker on the globe).
+      ov.addEventListener('click', (e) => {
+        const m = e.target.closest('.gcity[data-route]');
+        if (!m || !this._globeRouteTargets) return;
+        const route = this._globeRouteTargets[m.dataset.place];
+        if (route) { this._globeRouteTargets = null; this.client.moves.commitRoute(route); }
+      });
+    }
+    this._globeOverlay = ov;
+    if (!this._globeRaf) this._globeTick();
+  }
+
+  _globeTick() {
+    this._globeRaf = requestAnimationFrame(() => this._globeTick());
+    const g = this._globe, ov = this._globeOverlay;
+    if (!g || !ov) return;
+    const pov = g.pointOfView();
+    const els = ov.querySelectorAll('[data-lat]');
+    for (let i = 0; i < els.length; i++) {
+      const el = els[i];
+      const lat = parseFloat(el.dataset.lat), lng = parseFloat(el.dataset.lng);
+      const near = onGlobeNearSide(lat, lng, pov);
+      el.style.display = near ? '' : 'none';
+      if (!near) continue;
+      const sc = g.getScreenCoords(lat, lng, parseFloat(el.dataset.alt || '0.01'));
+      if (!sc) continue;
+      const ox = parseFloat(el.dataset.offx || '0');
+      el.style.transform = `translate(-50%,-50%) translate(${sc.x + ox}px, ${sc.y}px)`;
+    }
+  }
+
+  // Rebuild/refresh overlay CONTENT (labels, route highlights, tokens) on each state
+  // change. Positions are handled by _globeTick. Idempotent — reuses existing nodes.
+  _updateGlobeOverlay(G, ctx) {
+    const ov = this._globeOverlay;
+    if (!ov) return;
+    const places = (this.mapData.atlasPlaces || []).filter(p => p.geo);
+    const geoOf = {};
+    places.forEach(p => { geoOf[p.id] = p.geo; });
+
+    // Route picker (globe): highlight the destination city of each branch, clickable.
+    const routeTargets = this._globeComputeRouteTargets(G, ctx);
+    this._globeRouteTargets = routeTargets;
+
+    places.forEach(p => {
+      let el = ov.querySelector(`.gcity[data-place="${p.id}"]`);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'gcity';
+        el.dataset.place = p.id;
+        el.dataset.lat = p.geo.lat; el.dataset.lng = p.geo.lng; el.dataset.alt = '0.06';
+        ov.appendChild(el);
+      }
+      el.textContent = (p.realName || p.id).toUpperCase();
+      if (routeTargets && routeTargets[p.id]) { el.classList.add('gcity--route'); el.dataset.route = '1'; }
+      else { el.classList.remove('gcity--route'); delete el.dataset.route; }
+    });
+
+    // Player tokens at their current city (space → placeId → geo), stacked with an x-offset.
+    const active = G.players.filter(pl => !pl.bankrupt);
+    const live = new Set(active.map(pl => String(pl.id)));
+    ov.querySelectorAll('.gtoken[data-player]').forEach(el => { if (!live.has(el.dataset.player)) el.remove(); });
+    const byPlace = {};
+    active.forEach(pl => {
+      const sp = this.boardSpaces[pl.position];
+      const pid = sp && sp.placeId;
+      (byPlace[pid] = byPlace[pid] || []).push(pl);
+    });
+    active.forEach(pl => {
+      const sp = this.boardSpaces[pl.position];
+      const pid = sp && sp.placeId;
+      const geo = geoOf[pid];
+      if (!geo) return;
+      let el = ov.querySelector(`.gtoken[data-player="${pl.id}"]`);
+      if (!el) {
+        el = document.createElement('span');
+        el.className = 'gtoken';
+        el.dataset.player = String(pl.id);
+        ov.appendChild(el);
+      }
+      el.style.setProperty('--tcol', this._playerColor(G, pl.id));
+      el.textContent = pl.character ? pl.character.name[0] : (parseInt(pl.id) + 1);
+      el.dataset.lat = geo.lat; el.dataset.lng = geo.lng; el.dataset.alt = '0.08';
+      const peers = byPlace[pid];
+      const idx = peers.indexOf(pl);
+      el.dataset.offx = String((idx - (peers.length - 1) / 2) * 16);
+    });
+  }
+
+  // Globe route picker: same divergence-keyed choices as the flat board, but keyed to
+  // the branch's destination CITY (placeId) so the city overlay can be clicked. Returns
+  // {placeId: route} or null (and auto-commits when there's no genuine fork).
+  _globeComputeRouteTargets(G, ctx) {
+    const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
+    if (!G.awaitingRoute || !isMyTurn) return null;
+    const player = G.players[ctx.currentPlayer];
+    const choices = routeChoices(G.board.edges, player.position, G.lastDice.total);
+    if (choices.length <= 1) {
+      this.client.moves.commitRoute(choices.length ? choices[0].route : []);
+      return null;
+    }
+    const t = {};
+    choices.forEach(c => {
+      const sp = this.boardSpaces[c.node];
+      if (sp && sp.placeId) t[sp.placeId] = c.route;
+    });
+    return t;
+  }
+
+  // Tween the camera to the active player's city when it changes, so the hidden far
+  // side never blocks play. instant=true snaps (first render).
+  _globeCameraFollow(G, ctx, instant) {
+    if (!this._globe) return;
+    const player = G.players[ctx.currentPlayer];
+    const sp = player && this.boardSpaces[player.position];
+    const pid = sp && sp.placeId;
+    const p = (this.mapData.atlasPlaces || []).find(x => x.id === pid);
+    if (!p || !p.geo) return;
+    if (this._globePovKey === pid && !instant) return;
+    this._globePovKey = pid;
+    this._globe.pointOfView({ lat: p.geo.lat, lng: p.geo.lng, altitude: 2.2 }, instant ? 0 : 900);
   }
 
   // Ensure boardEl has two persistent children: a grid wrapper (rebuilt each
