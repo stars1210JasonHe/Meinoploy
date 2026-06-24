@@ -562,6 +562,11 @@ class MonopolyBoard {
   // click. Resets the highlight bookkeeping on every non-awaiting render so a
   // resolved turn never leaves a dangling target.
   _resolveAtlasRoute(G, ctx) {
+    // On the globe board, route resolution (incl. auto-commit on non-fork turns) is
+    // handled by _globeComputeRouteTargets inside _updateGlobeOverlay. Running this
+    // flat-board resolver too would auto-commit the SAME route a second time → duplicate
+    // commitRoute / INVALID_MOVE noise. Skip it on globe maps.
+    if (this.mapData.renderMode === 'globe') { this._routeTargets = null; return; }
     const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
     if (!G.awaitingRoute || !isMyTurn) { this._routeTargets = null; return; }
     const player = G.players[ctx.currentPlayer];
@@ -1376,6 +1381,11 @@ class MonopolyBoard {
     const wrap = this.rootElement.querySelector('.centerslot__dice');
     const fire = () => {
       this._rolling = false;
+      this._rollTimer = null;
+      // The move was deferred ~0.9s; if the player exited to menu or loaded a save
+      // during the animation the client is gone/replaced — abort rather than dispatch
+      // against a null or wrong client.
+      if (!this.client) return;
       if (this.mapData.movementMode === 'atlas') this.client.moves.rollOnly();
       else this.client.moves.rollDice();
     };
@@ -1390,6 +1400,13 @@ class MonopolyBoard {
       else { fire(); } // update() re-renders with the real G.lastDice → the dice "land"
     };
     tick();
+  }
+
+  // Abort a dice animation in flight (player exited / loaded a game mid-roll) so the
+  // deferred move never fires against a dead or replaced client.
+  _cancelRoll() {
+    if (this._rollTimer) { clearTimeout(this._rollTimer); this._rollTimer = null; }
+    this._rolling = false;
   }
 
   wireActions(G, ctx) {
@@ -2013,6 +2030,7 @@ class MonopolyBoard {
   // Lifecycle / save-load
   // ─────────────────────────────────────────────────────────
   exitToMenu() {
+    this._cancelRoll(); // kill any in-flight dice animation before the client goes away
     if (this.client) { this.client.stop(); this.client = null; }
     if (this._tokenResizeObs) { this._tokenResizeObs.disconnect(); this._tokenResizeObs = null; }
     this._lastG = null;
@@ -2055,6 +2073,7 @@ class MonopolyBoard {
   }
 
   loadGame(saveData) {
+    this._cancelRoll(); // kill any in-flight dice animation before the client is replaced
     const savedMap = AVAILABLE_MAPS.find(m => m.id === saveData.mapId) || classicMapJson;
     this.setMap(savedMap);
     if (this.client) this.client.stop(); // null when loading from the menu (no active game)
