@@ -1368,12 +1368,33 @@ class MonopolyBoard {
   // ─────────────────────────────────────────────────────────
   // Wire all action handlers (buttons live across center/turnbox/manage)
   // ─────────────────────────────────────────────────────────
-  wireActions(G, ctx) {
-    const click = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
-    click('btn-roll', () => {
+  // Cosmetic dice roll: tumble random faces (shake+rotate via .die--rolling), easing
+  // out, THEN dispatch the real move so the dice visibly "land" on the result. The
+  // engine roll is unchanged; works on every map (all render via .centerslot__dice).
+  _animateRollThenMove() {
+    if (this._rolling) return; // ignore re-clicks mid-roll
+    const wrap = this.rootElement.querySelector('.centerslot__dice');
+    const fire = () => {
+      this._rolling = false;
       if (this.mapData.movementMode === 'atlas') this.client.moves.rollOnly();
       else this.client.moves.rollDice();
-    });
+    };
+    if (!wrap) { fire(); return; } // no dice DOM → just roll
+    this._rolling = true;
+    const rnd = () => 1 + Math.floor(Math.random() * 6);
+    const steps = [55, 60, 70, 85, 105, 130, 160, 200]; // ease-out: fast tumble, slows before landing (~0.9s)
+    let i = 0;
+    const tick = () => {
+      wrap.innerHTML = dieHtml(rnd(), true) + dieHtml(rnd(), true);
+      if (i < steps.length) { this._rollTimer = setTimeout(tick, steps[i++]); }
+      else { fire(); } // update() re-renders with the real G.lastDice → the dice "land"
+    };
+    tick();
+  }
+
+  wireActions(G, ctx) {
+    const click = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
+    click('btn-roll', () => this._animateRollThenMove());
     click('btn-buy', () => this.client.moves.buyProperty());
     click('btn-pass', () => this.client.moves.passProperty());
     click('btn-end', () => this.client.moves.endTurn());

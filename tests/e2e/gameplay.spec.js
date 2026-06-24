@@ -62,7 +62,9 @@ async function completeTurn(page, { buy = false } = {}) {
   const rollBtn = page.locator('#btn-roll');
   if (await rollBtn.isVisible().catch(() => false)) {
     await rollBtn.click();
-    await page.waitForTimeout(300);
+    // Roll plays a ~0.9s dice animation before the move dispatches — wait it out fully
+    // (a fixed wait is reliable; btn-roll detaches on any re-render, so it can't be the signal).
+    await page.waitForTimeout(1100);
   }
 
   // Resolve a drawn event card (modal — accept it)
@@ -216,7 +218,7 @@ test.describe('Basic Gameplay', () => {
 
   test('event log updates after rolling', async ({ page }) => {
     await page.click('#btn-roll');
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(1100); // roll plays a ~0.9s dice animation before dispatching
     const lineCount = await page.locator('.logline').count();
     expect(lineCount).toBeGreaterThanOrEqual(2);
   });
@@ -347,7 +349,7 @@ test.describe('Full Game Process', () => {
       const rollBtn = page.locator('#btn-roll');
       if (await rollBtn.isVisible().catch(() => false)) {
         await rollBtn.click();
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(1100); // wait out the ~0.9s dice animation + dispatch
         const total = page.locator('.centerslot__total');
         if (await total.isVisible().catch(() => false)) {
           await expect(total).toContainText('TOTAL');
@@ -483,7 +485,7 @@ test.describe('Full Game Process', () => {
   });
 
   test('season changes after enough turns', async ({ page }) => {
-    test.setTimeout(120000); // 22 turns × completeTurn waits — needs headroom
+    test.setTimeout(180000); // 22 turns × completeTurn waits (incl. the ~0.9s dice animation) — needs headroom
     await selectCharacters(page);
 
     // Play 22 turns (season cycles every 10)
@@ -544,7 +546,7 @@ async function completeTurnAtlas(page) {
   const rollBtn = page.locator('#btn-roll');
   if (await rollBtn.isVisible().catch(() => false)) {
     await rollBtn.click();
-    await page.waitForTimeout(350);
+    await page.waitForTimeout(1100); // wait out the ~0.9s dice animation + dispatch
     // If a fork offered choices, pick the first highlighted city; else it auto-committed.
     const target = page.locator('.tile--route-target').first();
     if (await target.isVisible().catch(() => false)) {
