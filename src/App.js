@@ -536,6 +536,7 @@ class MonopolyBoard {
     }
 
     if (ctx.gameover) {
+      this._teardownGlobe(); // results screen doesn't call renderBoard — stop the globe RAF/WebGL
       this._showScreen('results');
       this.renderResults(G, ctx);
       return;
@@ -790,16 +791,38 @@ class MonopolyBoard {
 
   renderBoard(G, ctx) {
     const mode = this.mapData.renderMode;
-    // Tear down the globe when we leave globe mode (frees the WebGL context).
-    if (mode !== 'globe' && this._globe) {
-      if (this._globeRaf) { cancelAnimationFrame(this._globeRaf); this._globeRaf = null; }
-      this._globeOverlay = null; this._globePovKey = null; this._globeRouteTargets = null;
-      try { this._globe._destructor && this._globe._destructor(); } catch (e) { /* ignore */ }
-      this._globe = null; this._globeLoading = false;
-    }
+    // Tear down the globe when we leave globe mode (frees the WebGL context + RAF loop).
+    if (mode !== 'globe') this._teardownGlobe();
     if (mode === 'globe') this._renderGlobeBoard(G, ctx);
     else if (this.mapData.layoutType === 'square') this._renderSquareBoard(G, ctx);
     else this._renderAbsoluteBoard(G, ctx);
+  }
+
+  // Stop the globe RAF loop, resize observer, and WebGL context, and drop overlay
+  // refs. Safe to call when no globe is up (no-op). Must run on EVERY path that leaves
+  // the globe board — not just renderBoard's non-globe branch, but also game-over and
+  // exitToMenu, which return from update() before renderBoard runs (else the RAF loop
+  // and WebGL canvas leak for the rest of the session).
+  _teardownGlobe() {
+    if (!this._globe && !this._globeRaf && !this._globeResizeObs) return;
+    if (this._globeRaf) { cancelAnimationFrame(this._globeRaf); this._globeRaf = null; }
+    if (this._globeResizeObs) { this._globeResizeObs.disconnect(); this._globeResizeObs = null; }
+    this._globeOverlay = null; this._globePovKey = null; this._globeRouteTargets = null;
+    if (this._globe) {
+      try { this._globe._destructor && this._globe._destructor(); } catch (e) { /* ignore */ }
+      this._globe = null;
+    }
+    this._globeLoading = false;
+  }
+
+  // Resize the WebGL canvas when the board element changes size, so getScreenCoords
+  // and the HTML overlays stay aligned (mirrors the token layer's resize handling).
+  _ensureGlobeResizeObserver() {
+    if (this._globeResizeObs || typeof ResizeObserver === 'undefined' || !this.boardEl) return;
+    this._globeResizeObs = new ResizeObserver(() => {
+      if (this._globe) this._globe.width(this.boardEl.clientWidth || 600).height(this.boardEl.clientHeight || 600);
+    });
+    this._globeResizeObs.observe(this.boardEl);
   }
 
   // Stage 2 — pixel-globe substrate: the world map on a low-res (pixelated) globe with
@@ -885,6 +908,7 @@ class MonopolyBoard {
       });
     }
     this._globeOverlay = ov;
+    this._ensureGlobeResizeObserver();
     if (!this._globeRaf) this._globeTick();
   }
 
@@ -897,9 +921,12 @@ class MonopolyBoard {
     for (let i = 0; i < els.length; i++) {
       const el = els[i];
       const lat = parseFloat(el.dataset.lat), lng = parseFloat(el.dataset.lng);
-      const near = onGlobeNearSide(lat, lng, pov);
-      el.style.display = near ? '' : 'none';
-      if (!near) continue;
+      // Route-target cities MUST stay visible + clickable even on the far hemisphere,
+      // or a legal branch becomes unselectable (the camera holds on the current city
+      // during a fork). Everything else culls on the far side.
+      const show = onGlobeNearSide(lat, lng, pov) || !!el.dataset.route;
+      el.style.display = show ? '' : 'none';
+      if (!show) continue;
       const sc = g.getScreenCoords(lat, lng, parseFloat(el.dataset.alt || '0.01'));
       if (!sc) continue;
       const ox = parseFloat(el.dataset.offx || '0');
@@ -2031,6 +2058,7 @@ class MonopolyBoard {
   // ─────────────────────────────────────────────────────────
   exitToMenu() {
     this._cancelRoll(); // kill any in-flight dice animation before the client goes away
+    this._teardownGlobe(); // stop the globe RAF loop + WebGL context (update() won't run again)
     if (this.client) { this.client.stop(); this.client = null; }
     if (this._tokenResizeObs) { this._tokenResizeObs.disconnect(); this._tokenResizeObs = null; }
     this._lastG = null;
