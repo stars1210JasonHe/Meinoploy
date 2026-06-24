@@ -892,14 +892,24 @@ class MonopolyBoard {
       g.renderer().setPixelRatio(this.mapData.globePixelRatio); // ← the pixelation (lower = blockier)
       this._globe = g;
       this._setupGlobeOverlay();
-      this._updateGlobeOverlay(G, ctx);
-      this._globeCameraFollow(G, ctx, true); // instant first POV onto the active player
+      // Use the LATEST state, not the G/ctx captured at first render — state can advance
+      // during the async lib load (e.g. a roll enters awaitingRoute). Initializing from
+      // the stale closure would leave route targets/camera on the old state until some
+      // unrelated update arrives (turn stall).
+      const cur = this.client.getState();
+      const curG = cur ? cur.G : G, curCtx = cur ? cur.ctx : ctx;
+      this._updateGlobeOverlay(curG, curCtx);
+      this._globeCameraFollow(curG, curCtx, true); // instant first POV onto the active player
     }).catch(e => {
       this._globeLoading = false;
-      // Don't clobber the current board with a fallback message if the player already
-      // navigated away (exited / loaded / switched maps) while the load was failing.
+      // Don't touch a board the player already navigated to while the load was failing.
       if (epoch !== (this._globeEpoch || 0) || this.mapData.renderMode !== 'globe') return;
-      this._gridWrap.innerHTML = `<div class="globe-fallback">Globe failed to load: ${esc(e.message)}</div>`;
+      // Degrade gracefully: terra-globe carries derived flat pos data, so fall back to
+      // the flat atlas renderer (playable) rather than an unplayable error screen.
+      console.warn('globe.gl failed to load, falling back to flat atlas board:', e.message);
+      this.mapData.renderMode = null;
+      const cur = this.client && this.client.getState();
+      if (cur) this._renderAbsoluteBoard(cur.G, cur.ctx);
     });
   }
 
