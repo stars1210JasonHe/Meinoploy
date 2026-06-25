@@ -2,7 +2,7 @@
 // Usage: const mod = loadMod(modConfig) where modConfig contains parsed JSON objects
 
 // Default rules (used as fallback for any missing keys in rules.json)
-const DEFAULT_RULES = {
+export const DEFAULT_RULES = {
   core: {
     baseStartingMoney: 1500,
     goSalary: 200,
@@ -97,7 +97,7 @@ const VALID_PASSIVE_IDS = ['financier', 'pioneer', 'operator', 'speculator', 'en
 const STAT_NAMES = ['capital', 'luck', 'negotiation', 'charisma', 'tech', 'stamina'];
 
 // Deep merge: target gets values from source for missing keys
-function deepMerge(target, source) {
+export function deepMerge(target, source) {
   const result = { ...source };
   for (const key of Object.keys(target)) {
     if (target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])
@@ -108,6 +108,23 @@ function deepMerge(target, source) {
     }
   }
   return result;
+}
+
+// Deep clone: structural copy of plain objects/arrays (no Dates/Maps/etc. in rules data).
+// Used to capture a PRISTINE snapshot of a mod's rules at registry load so a later
+// setActiveMod can reseed from the original, not from a live (possibly mutated) object.
+export function deepClone(value) {
+  if (Array.isArray(value)) {
+    return value.map(deepClone);
+  }
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const key of Object.keys(value)) {
+      out[key] = deepClone(value[key]);
+    }
+    return out;
+  }
+  return value;
 }
 
 // Validate and return errors array (empty = valid)
