@@ -1,22 +1,24 @@
 import { Client } from 'boardgame.io/client';
 import { SocketIO } from 'boardgame.io/multiplayer';
-import { Monopoly, setActiveMap, setVictoryConfig } from './Game';
+import { Monopoly, setActiveMap, setActiveMod, setVictoryConfig } from './Game';
 import { PLAYER_COLORS, BUILDING_ICONS, BUILDING_NAMES, UPGRADE_COST_MULTIPLIERS, RENT_MULTIPLIERS, SEASONS } from './constants';
-import { CHARACTERS, getLoreById, RULES } from '../mods/dominion';
+// RULES is the live engine singleton (mutated in place by setActiveMod) — NOT the Dominion
+// barrel. Mod CONTENT (characters/lore/maps/keyart/atlas) is read off `this.activeMod` (the
+// active mod's Tier-B client bundle), so swapping mods doesn't depend on Parcel rebinding.
+import { RULES } from '../mods/active-rules';
 import { Lobby } from './Lobby';
 import { loadMap, getGridDimensions, positionsToGrid } from './map-loader';
 import { CharacterAI, EVENT_TYPES, VERBOSITY } from './character-ai';
-import classicMapJson from '../mods/dominion/maps/classic/map.json';
-import stuttgartMapJson from '../mods/dominion/maps/stuttgart-fracture-loop/map.json';
-import outerRimMapJson from '../mods/dominion/maps/outer-rim-station/map.json';
-import nightveilMapJson from '../mods/dominion/maps/nightveil-intrigue/map.json';
 import { loadWorld } from './world-loader';
 import { routeChoices } from './atlas-movement';
-import { TERRA_ASSETS } from '../mods/dominion/atlas/terra-assets';
 
-// Client-only real-city background assets, keyed by atlas world id. Lives here (not in
-// loadWorld output) because the images are ES-module imports the engine/sim can't load.
-const ATLAS_ASSETS = { 'terra-circuit': TERRA_ASSETS, 'terra-globe': TERRA_ASSETS };
+// Client-side mod registry — static bundle imports (Parcel v1 forces all imports static, so
+// every registered mod is bundled at build; only WHICH is active is chosen at runtime). This
+// mirrors AVAILABLE_MAPS one level up. Each entry is a Tier-B client bundle with images:
+// { id, name, characters (portrait-merged), portraits, getLoreById, maps, worlds, keyArt,
+//   atlasAssets, getGlobe }. Stage 3 adds more entries here.
+import dominionMod from '../mods/dominion/bundle.client';
+const MODS = [dominionMod];
 
 // True if a (lat,lng) on the globe faces the camera (cos-distance vs the POV center).
 // Overlays on the far hemisphere are hidden. > a small positive epsilon hides points
@@ -27,20 +29,6 @@ function onGlobeNearSide(lat, lng, pov) {
     + Math.cos(pov.lat * _D2R) * Math.cos(lat * _D2R) * Math.cos((lng - pov.lng) * _D2R) > 0.04;
 }
 import { ARCHETYPES } from '../mods/dominion/atlas/archetypes';
-import { TERRA_CIRCUIT } from '../mods/dominion/atlas/worlds/terra-circuit';
-import { TERRA_GLOBE } from '../mods/dominion/atlas/worlds/terra-globe';
-import { getGlobe } from '../mods/dominion/atlas/globe-lib';
-import keyArt from '../mods/dominion/keyart.png';
-
-// Available maps for selection
-const AVAILABLE_MAPS = [
-  classicMapJson,
-  stuttgartMapJson,
-  outerRimMapJson,
-  nightveilMapJson,
-  TERRA_CIRCUIT,
-  TERRA_GLOBE,
-];
 
 const STAT_KEYS = [
   { key: 'capital', label: 'CAP' },
@@ -164,7 +152,12 @@ class MonopolyBoard {
     this.mode = null; // 'local' or 'online'
     this.onlinePlayerID = null;
     this._pendingCharId = null; // local character-select preview
-    this.setMap(classicMapJson);
+    // Active mod (default Dominion). All mod CONTENT reads route through this.activeMod;
+    // selectMod() swaps it + the engine RULES singleton. availableMaps = the active mod's
+    // boards (maps + atlas worlds), the same set the old module-level AVAILABLE_MAPS held.
+    this.activeMod = MODS[0];
+    this.availableMaps = this.activeMod.maps.concat(this.activeMod.worlds);
+    this.setMap(this.availableMaps[0]); // classic map.json is the mod's first board
 
     // AI system
     const savedKey = localStorage.getItem('meinopoly_ai_key') || '';
@@ -190,7 +183,7 @@ class MonopolyBoard {
     this.colorGroups = this.mapData.colorGroupsFlat;
     // Attach client-only real-city imagery (world bg + per-place photos) if this atlas
     // world has a bundled asset set. Null for classic / asset-less maps → color fallback.
-    this.mapData.atlasAssets = (mapJson && ATLAS_ASSETS[mapJson.id]) || null;
+    this.mapData.atlasAssets = (mapJson && this.activeMod.atlasAssets[mapJson.id]) || null;
     // Globe renderer: carry the render mode + the raw places (geo lat/lng + connectors)
     // so the globe can plot city points and great-circle route arcs. Display-only.
     this.mapData.renderMode = (mapJson && mapJson.renderMode) || null;
@@ -200,7 +193,7 @@ class MonopolyBoard {
     // Pre-warm the (async) globe library the moment a globe map is picked — by the time
     // the player rolls, window.Globe is ready, so the first fork can't freeze waiting on
     // the fetch. Errors are handled later in _renderGlobeBoard's load path.
-    if (this.mapData.renderMode === 'globe') getGlobe().catch(() => {});
+    if (this.mapData.renderMode === 'globe') this.activeMod.getGlobe().catch(() => {});
     setActiveMap(this.mapData);
   }
 
@@ -340,7 +333,7 @@ class MonopolyBoard {
     this._showScreen('menu');
     this.menuEl.className = 'screen screen--hero';
     this.menuEl.innerHTML = `
-      <img class="hero-art" src="${keyArt}" alt="Meinopoly: Dominion" draggable="false" />
+      <img class="hero-art" src="${this.activeMod.keyArt}" alt="Meinopoly: Dominion" draggable="false" />
       <div class="hero-overlay">
         <div class="mode-grid">
           <button class="pix-btn pix-btn--primary pix-btn--lg mode-btn" id="btn-mode-local">LOCAL GAME</button>
@@ -350,15 +343,70 @@ class MonopolyBoard {
         <div class="title__foot">v0.4 · 10 CHARACTERS · 4 MAPS · TRADE &amp; AUCTION</div>
       </div>
     `;
-    document.getElementById('btn-mode-local').onclick = () => { this.mode = 'local'; this.showMapSelect(); };
+    document.getElementById('btn-mode-local').onclick = () => { this.mode = 'local'; this.showModSelect(); };
     document.getElementById('btn-mode-online').onclick = () => { this.mode = 'online'; this.showOnlineLobby(); };
+  }
+
+  // Mod-pick step (LOCAL only) — sits BEFORE map-select, mirroring the map-card UI.
+  // With only one mod registered it AUTO-ADVANCES: selectMod() + straight to map-select, so
+  // the step is invisible and the existing E2E flow (hero → map → players → …) is unchanged.
+  // When >1 mod exists (Stage 3), the cards render and the player picks.
+  showModSelect() {
+    if (MODS.length <= 1) {
+      this.selectMod(MODS[0]); // installs the engine RULES + rebuilds availableMaps
+      this.showMapSelect();
+      return;
+    }
+    this._showScreen('menu');
+    this.menuEl.className = 'screen screen--menu';
+    let cards = '';
+    MODS.forEach((mod, idx) => {
+      const sel = this.activeMod && this.activeMod.id === mod.id;
+      cards += `
+        <div class="pix-panel map-card ${sel ? 'map-card--sel' : ''}" data-mod-idx="${idx}">
+          <div class="pix-panel__accent" style="background:var(--accent)"></div>
+          <div class="pix-panel__body">
+            <div class="map-card__title">${esc(mod.name)}</div>
+            <div class="map-card__meta">
+              <span class="map-tag">${esc((mod.characters || []).length + ' CHARACTERS')}</span>
+              <span class="map-tag">${esc((mod.maps.length + mod.worlds.length) + ' MAPS')}</span>
+            </div>
+          </div>
+        </div>`;
+    });
+    this.menuEl.innerHTML = `
+      <div><div class="menu__heading">SELECT MOD</div><div class="menu__sub">Choose the game world to play</div></div>
+      <div class="map-grid">${cards}</div>
+      <button class="pix-btn pix-btn--ghost" id="btn-back-mode-mods">&#9666; BACK</button>
+    `;
+    this.menuEl.querySelectorAll('.map-card').forEach(card => {
+      card.onclick = () => {
+        const idx = parseInt(card.dataset.modIdx);
+        this.selectMod(MODS[idx]);
+        this.showMapSelect();
+      };
+    });
+    document.getElementById('btn-back-mode-mods').onclick = () => this.showModeSelect();
+  }
+
+  // Install a mod: set activeMod, point the engine RULES singleton + board defaults at it
+  // (setActiveMod, from Game.js), then rebuild availableMaps from this mod's boards. Char
+  // cards / keyArt / atlas assets all read from this.activeMod afterward. LOCAL only — the
+  // online path pins Dominion (never calls setActiveMod over the wire).
+  selectMod(mod) {
+    this.activeMod = mod;
+    setActiveMod(mod.id);
+    this.availableMaps = mod.maps.concat(mod.worlds);
+    // Land on this mod's default board so a subsequent victory-select / quick-start reads
+    // a board that belongs to the chosen mod (map-select overrides this on pick).
+    this.setMap(this.availableMaps[0]);
   }
 
   showMapSelect() {
     this._showScreen('menu');
     this.menuEl.className = 'screen screen--menu';
     let cards = '';
-    AVAILABLE_MAPS.forEach((mapJson, idx) => {
+    this.availableMaps.forEach((mapJson, idx) => {
       const isWorld = mapJson.movementMode === 'atlas';
       const layoutLabel = isWorld ? 'ATLAS' : mapJson.layout.type;
       const spaceLabel = isWorld ? (mapJson.places.length + ' PLACES') : (mapJson.spaceCount + ' SPACES');
@@ -390,11 +438,14 @@ class MonopolyBoard {
     this.menuEl.querySelectorAll('.map-card').forEach(card => {
       card.onclick = () => {
         const idx = parseInt(card.dataset.mapIdx);
-        this.setMap(AVAILABLE_MAPS[idx]);
+        this.setMap(this.availableMaps[idx]);
         this.showPlayerCountSelect();
       };
     });
-    document.getElementById('btn-back-mode').onclick = () => this.showModeSelect();
+    // BACK from map-select returns to mod-select (which auto-advances back to the hero when
+    // only one mod exists, so the single-mod flow still goes map → hero).
+    document.getElementById('btn-back-mode').onclick = () =>
+      MODS.length > 1 ? this.showModSelect() : this.showModeSelect();
   }
 
   showPlayerCountSelect() {
@@ -495,6 +546,10 @@ class MonopolyBoard {
   }
 
   showOnlineLobby() {
+    // Online pins Dominion: mod-select is LOCAL-only (we never setActiveMod over the wire,
+    // and the server runs the default mod). If a prior local game switched mods, reset the
+    // engine RULES singleton + activeMod back to Dominion before joining an online match.
+    if (this.activeMod !== MODS[0]) this.selectMod(MODS[0]);
     this._showScreen('lobby');
     this.lobbyEl.className = 'screen screen--menu';
     const serverUrl = window.location.protocol + '//' + window.location.hostname + ':8088';
@@ -609,7 +664,7 @@ class MonopolyBoard {
     const isLast = remaining <= 1;
 
     let cards = '';
-    CHARACTERS.forEach(char => {
+    this.activeMod.characters.forEach(char => {
       const taken = takenIds.includes(char.id);
       const selected = this._pendingCharId === char.id;
       const startMoney = RULES.core.baseStartingMoney + char.stats.capital * RULES.stats.capital.startingMoneyBonus;
@@ -637,7 +692,7 @@ class MonopolyBoard {
         </div>`;
     });
 
-    const picked = this._pendingCharId ? CHARACTERS.find(c => c.id === this._pendingCharId) : null;
+    const picked = this._pendingCharId ? this.activeMod.characters.find(c => c.id === this._pendingCharId) : null;
     const chosenHtml = picked
       ? `${portraitHtml(picked, 40, false)}<span style="color:${picked.color}">${esc(picked.name)}</span><span class="select__chosen-title">${esc(picked.title)}</span>`
       : '<span class="select__chosen-empty">Select a councillor to continue</span>';
@@ -870,7 +925,7 @@ class MonopolyBoard {
     const epoch = (this._globeEpoch || 0);
     const tex = this.mapData.atlasAssets ? this.mapData.atlasAssets.worldBg : null;
 
-    getGlobe().then(Globe => {
+    this.activeMod.getGlobe().then(Globe => {
       this._globeLoading = false;
       if (epoch !== (this._globeEpoch || 0) || this.mapData.renderMode !== 'globe' || !this.client) return;
       const host = document.createElement('div');
@@ -1671,8 +1726,8 @@ class MonopolyBoard {
   }
 
   showLoreModal(charId) {
-    const char = CHARACTERS.find(c => c.id === charId);
-    const lore = getLoreById(charId);
+    const char = this.activeMod.characters.find(c => c.id === charId);
+    const lore = this.activeMod.getLoreById(charId);
     if (!char || !lore) return;
     const sections = `
       <div class="lore__sectlabel">背景故事</div>
@@ -1958,7 +2013,7 @@ class MonopolyBoard {
   }
 
   async _triggerAIResponse(char, eventType, eventData, gameState) {
-    const lore = getLoreById(char.id);
+    const lore = this.activeMod.getLoreById(char.id);
     this._nextAIId = (this._nextAIId || 0) + 1;
     const loadingId = this._nextAIId;
     this.aiResponses.push({ id: loadingId, charName: char.name, charColor: char.color, portrait: char.portrait, text: null });
@@ -2048,9 +2103,9 @@ class MonopolyBoard {
   }
 
   async _sendChat(charId, userMessage, G, ctx) {
-    const char = CHARACTERS.find(c => c.id === charId);
+    const char = this.activeMod.characters.find(c => c.id === charId);
     if (!char) return;
-    const lore = getLoreById(charId);
+    const lore = this.activeMod.getLoreById(charId);
     if (!this.chatHistories[charId]) this.chatHistories[charId] = [];
     const history = this.chatHistories[charId];
     history.push({ role: 'user', content: userMessage });
@@ -2076,9 +2131,9 @@ class MonopolyBoard {
 
   async _charSelectIntro(charId) {
     if (!this.characterAI.apiKey) return;
-    const char = CHARACTERS.find(c => c.id === charId);
+    const char = this.activeMod.characters.find(c => c.id === charId);
     if (!char) return;
-    const lore = getLoreById(charId);
+    const lore = this.activeMod.getLoreById(charId);
     const chatEl = document.getElementById('char-chat-' + charId);
     if (chatEl) { chatEl.style.display = 'block'; chatEl.innerHTML = '<div class="charcard__intro">Thinking…</div>'; }
     const text = await this.characterAI.introduce(char, lore);
@@ -2108,7 +2163,7 @@ class MonopolyBoard {
     this.closeUiModal();
     this.stateModalEl.classList.remove('open');
     setVictoryConfig(null);
-    this.setMap(classicMapJson);
+    this.setMap(this.availableMaps[0]); // active mod's default board (classic for Dominion)
     this.showModeSelect();
   }
 
@@ -2146,7 +2201,9 @@ class MonopolyBoard {
 
   loadGame(saveData) {
     this._cancelRoll(); // kill any in-flight dice animation before the client is replaced
-    const savedMap = AVAILABLE_MAPS.find(m => m.id === saveData.mapId) || classicMapJson;
+    // Saves carry no modId yet (Stage 4) — resolve the saved board from the active mod's
+    // boards, falling back to its default. Dominion is the only registered mod today.
+    const savedMap = this.availableMaps.find(m => m.id === saveData.mapId) || this.availableMaps[0];
     this.setMap(savedMap);
     if (this.client) this.client.stop(); // null when loading from the menu (no active game)
     // Reset per-game UI caches so a load (possibly from a different prior game) doesn't replay
