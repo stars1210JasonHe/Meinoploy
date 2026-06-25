@@ -15,7 +15,7 @@
 // rolls -> resolves card -> builds -> ends is several decideMoves calls.
 
 import { routeChoices } from '../atlas-movement';
-import { RULES } from '../../mods/dominion/rules';
+import { RULES } from '../../mods/active-rules';
 
 // Default greedy-developer policy. Every knob here is overridable per contestant
 // via the `policy` arg so tournaments can vary aggression without code edits.

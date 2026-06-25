@@ -6,7 +6,7 @@
 // use only at the sim turn cap. When the engine declares its own gameover the sim
 // trusts over.standings directly — this code only runs on the maxTurns path.
 
-import { RULES } from '../../mods/dominion/rules';
+import { RULES } from '../../mods/active-rules';
 
 // Mirror of Game.getTotalAssets: cash + property value (mortgaged → mortgage payout,
 // else full price) + summed building costs. No season mod (matches the engine: it

@@ -2,8 +2,10 @@ import { INVALID_MOVE } from 'boardgame.io/core';
 import { validateRoute, autoRoute } from './atlas-movement';
 import { BOARD_SPACES as DEFAULT_BOARD_SPACES, COLOR_GROUPS as DEFAULT_COLOR_GROUPS } from '../mods/dominion/board';
 import { CHANCE_CARDS as DEFAULT_CHANCE_CARDS, COMMUNITY_CARDS as DEFAULT_COMMUNITY_CARDS } from '../mods/dominion/cards';
-import { RULES } from '../mods/dominion/rules';
-import { getCharacterById, getStartingMoney } from '../mods/dominion/characters-data';
+import { RULES } from '../mods/active-rules';
+import { MODS, PRISTINE } from '../mods/index';
+import { deepMerge, DEFAULT_RULES } from './mod-loader';
+import { refreshConstants } from './constants';
 
 // Active map data — defaults to classic mod, can be overridden via setActiveMap().
 // Per-match board config is snapshotted into G.board at setup(); all engine readers
@@ -11,6 +13,13 @@ import { getCharacterById, getStartingMoney } from '../mods/dominion/characters-
 // G.board does not yet exist while setup() runs (it is being built from _pendingMap).
 var _mapVictory = null;        // victory config from the active map (map.json)
 var _victoryOverride = null;   // per-session override from the game-start selector
+
+// Active mod (Tier-A data bundle). Default is Dominion at module load so the engine,
+// server, and sim behave byte-identically without anyone calling setActiveMod. Character
+// reads (getCharacterById / getStartingMoney) route through this so a switched mod uses its
+// own roster + starting-money formula. NEVER auto-call setActiveMod here (server/sim import
+// Game.js under `node -r esm`; setActiveMod must be safe to define, but not run server-side).
+var _activeMod = MODS.dominion;
 
 // Active-board source for setup(). setup() wraps these into a fresh per-match G.board
 // object so each match reads its OWN board config (not process-global mutable state).
@@ -48,6 +57,69 @@ export function setActiveMap(mapData) {
     winPaths: mapData.winPaths || null,
   };
   _mapVictory = mapData.victory || null;
+}
+
+// Install a mod into the engine singletons (mirrors setActiveMap, one level up).
+//
+// The CRUX is RULES: it is imported by-value and read as RULES.* at ~206 sites, plus mutated
+// in place by ~16 tests. The live RULES (mods/active-rules.js) shares object identity with
+// Dominion's source rules. We must NEVER rebind RULES — instead we mutate the SAME object in
+// place so every existing read and every test mutation keeps reaching it:
+//   (a) delete ALL own keys of the live RULES;
+//   (b) resolved = deepMerge(PRISTINE[modId], DEFAULT_RULES)  — mod overrides win, defaults
+//       fill gaps (arg order matters). PRISTINE is a clone taken at load, so reseeding here
+//       can never be corrupted by an earlier in-place mutation of the live RULES;
+//   (c) deep Object.assign `resolved` INTO the live RULES object in place.
+// Then re-seed the _pendingMap board DEFAULTS from the mod (so a mod chosen without a
+// specific map still gets its own board) and refresh constants.js derived exports.
+export function setActiveMod(modId) {
+  const mod = MODS[modId];
+  if (!mod) throw new Error('Unknown mod: ' + modId);
+
+  // (a) clear own keys of the live RULES object (do NOT rebind the binding).
+  for (const key of Object.keys(RULES)) {
+    delete RULES[key];
+  }
+  // (b) resolve from the PRISTINE clone (never from the live object) so switch-back is safe.
+  const resolved = deepMerge(PRISTINE[modId], DEFAULT_RULES);
+  // (c) deep-assign resolved INTO the live RULES object in place.
+  deepAssignInto(RULES, resolved);
+
+  _activeMod = mod;
+
+  // Re-seed _pendingMap board defaults from the mod (a mod with no specific map still plays
+  // on its own board). Keeps movement/affinity fields neutral as before.
+  _pendingMap = {
+    spaces: mod.board.spaces,
+    colorGroups: mod.board.colorGroups,
+    chanceCards: mod.cards.chance,
+    communityCards: mod.cards.community,
+    boardSize: RULES.core.boardSize,
+    jail: RULES.core.jailPosition,
+    mapMechanics: { incomeMultiplier: 1, rentMultiplier: 1, taxMultiplier: 1, priceMultiplier: 1, upgradeCostMultiplier: 1 },
+    movementMode: 'loop',
+    edges: null,
+    hubs: null,
+    traits: null,
+    winPaths: null,
+  };
+
+  // Re-derive constants.js exports from the now-updated live RULES.
+  refreshConstants();
+}
+
+// Deep Object.assign: copy source's keys onto target in place, recursing into plain objects
+// so nested config objects are also overwritten key-by-key (arrays/primitives assigned whole).
+function deepAssignInto(target, source) {
+  for (const key of Object.keys(source)) {
+    const sv = source[key];
+    if (sv && typeof sv === 'object' && !Array.isArray(sv)
+        && target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
+      deepAssignInto(target[key], sv);
+    } else {
+      target[key] = sv;
+    }
+  }
 }
 
 // Set a per-session victory override (from the game-start selector). Pass null to clear.
@@ -958,7 +1030,7 @@ export const Monopoly = {
     selectCharacter: (G, ctx, characterId) => {
       if (G.phase !== 'characterSelect') return INVALID_MOVE;
 
-      const char = getCharacterById(characterId);
+      const char = _activeMod.getCharacterById(characterId);
       if (!char) return INVALID_MOVE;
 
       // Check not already taken
@@ -968,7 +1040,7 @@ export const Monopoly = {
       if (player.character) return INVALID_MOVE; // Already selected
 
       player.character = char;
-      player.money = getStartingMoney(char);
+      player.money = _activeMod.getStartingMoney(char);
 
       // Map affinity: one-time, stat-scaled head start on a traits (atlas) map.
       const affinityBonus = computeAffinityBonus(char, G.board.traits);
