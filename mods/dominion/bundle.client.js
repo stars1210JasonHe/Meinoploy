@@ -21,6 +21,10 @@ CHARACTERS.forEach(function (c) {
 });
 
 export const dominionClient = Object.assign({}, dominionData, {
+  // Override the Tier-A `characters` (CHARACTERS_DATA, no images) with the portrait-merged
+  // CHARACTERS array so App.js can read `activeMod.characters` directly with `.portrait` set —
+  // byte-identical to what App.js used to import from the `../mods/dominion` barrel.
+  characters: CHARACTERS,
   portraits: portraits,
   keyArt: keyArt,
   // Both Terra worlds reuse the same real-city asset pack (city photos + world bg).
