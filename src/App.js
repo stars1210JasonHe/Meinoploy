@@ -907,7 +907,7 @@ class MonopolyBoard {
       if (!p.connectors) return;
       Object.keys(p.connectors).forEach(dir => {
         const t = byId[p.connectors[dir]];
-        if (t) arcs.push({ sLat: p.geo.lat, sLng: p.geo.lng, eLat: t.geo.lat, eLng: t.geo.lng });
+        if (t) arcs.push({ sLat: p.geo.lat, sLng: p.geo.lng, eLat: t.geo.lat, eLng: t.geo.lng, fromId: p.id, toId: t.id, hot: false });
       });
     });
     this._globeData = { points, arcs };
@@ -945,10 +945,20 @@ class MonopolyBoard {
         .showAtmosphere(true).atmosphereColor('#6f7cd6').atmosphereAltitude(0.12)
         .pointsData(d.points).pointLat('lat').pointLng('lng')
         .pointColor(() => '#ff5c5c').pointAltitude(0.02).pointRadius(0.9)
-        .arcsData(d.arcs).arcColor(() => '#e9b23c').arcAltitude(0.22).arcStroke(1.1)
+        // Arcs are dim by default; the walkable travel route lights up + flows when the
+        // player rolls into a fork (see _globeSetRouteArcs). 'hot' is set per-arc.
+        .arcsData(d.arcs)
+        .arcColor(a => a.hot ? ['#fff3c0', '#ffd24a'] : 'rgba(233,178,60,0.33)')
+        .arcStroke(a => a.hot ? 2.3 : 0.8)
+        .arcAltitude(a => a.hot ? 0.3 : 0.2)
+        .arcDashLength(a => a.hot ? 0.5 : 1)
+        .arcDashGap(a => a.hot ? 0.22 : 0)
+        .arcDashAnimateTime(a => a.hot ? 1100 : 0)
         .arcStartLat('sLat').arcStartLng('sLng').arcEndLat('eLat').arcEndLng('eLng');
       g.controls().autoRotate = false;
-      g.controls().enableZoom = false;
+      g.controls().enableZoom = true;       // allow scroll/pinch zoom (was disabled)
+      g.controls().minDistance = 140;       // clamp the dolly so you can't fly through / lose the globe
+      g.controls().maxDistance = 480;
       g.renderer().setPixelRatio(this.mapData.globePixelRatio); // ← the pixelation (lower = blockier)
       this._globe = g;
       this._setupGlobeOverlay();
@@ -1032,6 +1042,8 @@ class MonopolyBoard {
     // Route picker (globe): highlight the destination city of each branch, clickable.
     const routeTargets = this._globeComputeRouteTargets(G, ctx);
     this._globeRouteTargets = routeTargets;
+    // Light up the walkable travel route(s) along the sphere arcs (dim otherwise).
+    this._globeSetRouteArcs(G, ctx);
 
     places.forEach(p => {
       let el = ov.querySelector(`.gcity[data-place="${p.id}"]`);
@@ -1098,6 +1110,33 @@ class MonopolyBoard {
     return t;
   }
 
+  // Light the WALKABLE travel route on the sphere: when the active player has rolled into
+  // a genuine fork (awaitingRoute, >1 choice), mark every arc on each reachable branch's
+  // full path as 'hot' so it brightens + flows toward the destination; all other arcs stay
+  // dim. A place-transition (placeId changes) maps to one directed arc. Cleared otherwise,
+  // so the network is quiet until you can actually move. Pure read of route enumeration.
+  _globeSetRouteArcs(G, ctx) {
+    if (!this._globe || !this._globeData) return;
+    const arcs = this._globeData.arcs;
+    const hot = new Set();
+    const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
+    if (G.awaitingRoute && isMyTurn && G.lastDice) {
+      const player = G.players[ctx.currentPlayer];
+      const choices = routeChoices(G.board.edges, player.position, G.lastDice.total);
+      if (choices.length > 1) {
+        choices.forEach(c => {
+          for (let i = 0; i < c.route.length - 1; i++) {
+            const a = this.boardSpaces[c.route[i]], b = this.boardSpaces[c.route[i + 1]];
+            if (a && b && a.placeId && b.placeId && a.placeId !== b.placeId) hot.add(a.placeId + '>' + b.placeId);
+          }
+        });
+      }
+    }
+    let changed = false;
+    arcs.forEach(a => { const h = hot.has(a.fromId + '>' + a.toId); if (h !== a.hot) { a.hot = h; changed = true; } });
+    if (changed) this._globe.arcsData(arcs); // re-eval arc accessors (color/stroke/dash)
+  }
+
   // Tween the camera to the active player's city when it changes, so the hidden far
   // side never blocks play. instant=true snaps (first render).
   _globeCameraFollow(G, ctx, instant) {
@@ -1109,7 +1148,10 @@ class MonopolyBoard {
     if (!p || !p.geo) return;
     if (this._globePovKey === pid && !instant) return;
     this._globePovKey = pid;
-    this._globe.pointOfView({ lat: p.geo.lat, lng: p.geo.lng, altitude: 2.2 }, instant ? 0 : 900);
+    // Preserve the user's current zoom (altitude) when following between turns — only the
+    // first render snaps to the default 2.2. Otherwise camera-follow would undo a manual zoom.
+    const alt = instant ? 2.2 : (((this._globe.pointOfView() || {}).altitude) || 2.2);
+    this._globe.pointOfView({ lat: p.geo.lat, lng: p.geo.lng, altitude: alt }, instant ? 0 : 900);
   }
 
   // Ensure boardEl has two persistent children: a grid wrapper (rebuilt each
