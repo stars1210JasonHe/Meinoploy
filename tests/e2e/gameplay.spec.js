@@ -435,7 +435,8 @@ test.describe('Full Game Process', () => {
   });
 
   test('property management: upgrade and mortgage', async ({ page }) => {
-    test.setTimeout(120000); // ~40 turns × small waits — needs headroom
+    test.setTimeout(240000); // ~40 turns × (~0.9s dice animation + per-turn waits); a full game
+                             // (no early victory) runs ~128s, so 120s was too tight (flaked).
     const pageErrors = [];
     page.on('pageerror', err => pageErrors.push(err.message));
 
