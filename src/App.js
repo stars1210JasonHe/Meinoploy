@@ -1125,8 +1125,12 @@ class MonopolyBoard {
       const choices = routeChoices(G.board.edges, player.position, G.lastDice.total);
       if (choices.length > 1) {
         choices.forEach(c => {
-          for (let i = 0; i < c.route.length - 1; i++) {
-            const a = this.boardSpaces[c.route[i]], b = this.boardSpaces[c.route[i + 1]];
+          // routeChoices() omits the starting tile, so prepend player.position — otherwise
+          // the opening hop (current city → first branch city) never lights, and 1-step
+          // forks light nothing at all.
+          const path = [player.position].concat(c.route);
+          for (let i = 0; i < path.length - 1; i++) {
+            const a = this.boardSpaces[path[i]], b = this.boardSpaces[path[i + 1]];
             if (a && b && a.placeId && b.placeId && a.placeId !== b.placeId) hot.add(a.placeId + '>' + b.placeId);
           }
         });
@@ -1547,6 +1551,9 @@ class MonopolyBoard {
       if (this.mapData.movementMode === 'atlas') this.client.moves.rollOnly();
       else this.client.moves.rollDice();
     };
+    // E2E fast path: skip the ~0.9s tumble so long game tests stay fast + deterministic
+    // (the animation is visual-only; real play keeps it). Flag set via Playwright addInitScript.
+    if (typeof window !== 'undefined' && window.__MP_FAST_ROLL) { fire(); return; }
     if (!wrap) { fire(); return; } // no dice DOM → just roll
     this._rolling = true;
     const rnd = () => 1 + Math.floor(Math.random() * 6);
