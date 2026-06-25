@@ -121,6 +121,14 @@ async function completeTurn(page, { buy = false } = {}) {
   }
 }
 
+// Make the dice roll INSTANT in E2E: the ~0.9s tumble animation (great UX in real play)
+// otherwise makes long game tests slow + flaky (a full 40-turn game ran ~128s). addInitScript
+// runs before every page load, so App.js's _animateRollThenMove reads the flag and skips the
+// animation, dispatching the move immediately. Visual-only behaviour; no test asserts the tumble.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => { window.__MP_FAST_ROLL = true; });
+});
+
 // ─── CHARACTER SELECTION ────────────────────────────────
 test.describe('Character Selection', () => {
   test('hero loads on / and char-select shows 10 characters', async ({ page }) => {
@@ -505,10 +513,12 @@ test.describe('Full Game Process', () => {
     test.setTimeout(180000); // 22 turns × completeTurn waits (incl. the ~0.9s dice animation) — needs headroom
     await selectCharacters(page);
 
-    // Play 22 turns (season cycles every 10)
+    // Play 22 turns (season cycles every 10). Don't buy: this test only verifies the season
+    // counter advances past a cycle boundary, and buying creates rent that can bankrupt a
+    // player before turn 11 (the unseeded-RNG flake that made this assert turnNum===10).
     for (let turn = 0; turn < 22; turn++) {
       if (await page.locator('.results__victory').isVisible().catch(() => false)) break;
-      await completeTurn(page, { buy: turn % 2 === 0 });
+      await completeTurn(page, { buy: false });
     }
 
     // The "Turn N" number in the season strip should exceed 10
