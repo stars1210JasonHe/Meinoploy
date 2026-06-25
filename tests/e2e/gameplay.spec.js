@@ -4,7 +4,19 @@ const { test, expect } = require('@playwright/test');
 // Navigation helpers for the pixel UI + victory-select flow
 // ─────────────────────────────────────────────────────────────
 
-// Steps 1-4: hero → map select → player count → victory select → land on
+// SELECT MOD step (LOCAL only, after Local Game). It renders mod cards (.map-card with
+// data-mod-idx) only when >1 mod is registered; with one mod it auto-advances and this
+// returns immediately. Picks the mod card whose title matches `modName`.
+async function selectMod(page, modName) {
+  // Mod cards carry data-mod-idx; map cards carry data-map-idx. Wait briefly for the mod
+  // step; if it auto-advanced (single mod) we won't find one and just return.
+  const modCard = page.locator('.map-card[data-mod-idx]', { hasText: modName }).first();
+  if (await modCard.isVisible({ timeout: 4000 }).catch(() => false)) {
+    await modCard.click();
+  }
+}
+
+// Steps 1-4: hero → mod select → map select → player count → victory select → land on
 // the character-select screen for player 1.
 async function gotoCharSelect(page) {
   await page.goto('/');
@@ -12,6 +24,10 @@ async function gotoCharSelect(page) {
   // 1. Hero start screen
   await page.waitForSelector('#btn-mode-local', { timeout: 10000 });
   await page.click('#btn-mode-local');
+
+  // 1b. Mod select — with >1 mod registered the SELECT MOD step renders. Pick Dominion
+  // so the rest of this flow (and every existing Dominion test) is unchanged.
+  await selectMod(page, 'Dominion');
 
   // 2. Map select — classic is the first card
   await page.waitForSelector('.map-card[data-map-idx="0"]', { timeout: 10000 });
@@ -512,9 +528,12 @@ async function selectCharactersAtlas(page) {
   await page.waitForSelector('#btn-mode-local', { timeout: 10000 });
   await page.click('#btn-mode-local');
 
+  // 1b. Mod select — Terra Circuit is a Dominion world, so pick the Dominion mod.
+  await selectMod(page, 'Dominion');
+
   // 2. Map select — pick the Terra Circuit card by title (not the classic card)
-  await page.waitForSelector('.map-card', { timeout: 10000 });
-  await page.locator('.map-card', { hasText: 'Terra Circuit' }).click();
+  await page.waitForSelector('.map-card[data-map-idx]', { timeout: 10000 });
+  await page.locator('.map-card[data-map-idx]', { hasText: 'Terra Circuit' }).click();
 
   // 3. Player count — 2 players
   await page.waitForSelector('.count-btn[data-count="2"]', { timeout: 10000 });
@@ -582,6 +601,62 @@ async function completeTurnAtlas(page) {
     await page.waitForTimeout(300);
   }
 }
+
+// ─── TERRA TITANS MOD (globe world, 16 historical leaders) ──
+// Exercises the now-live mod-select step: pick Terra Titans → its globe world →
+// confirm all 16 leader cards render → start → the (globe) board loads.
+test.describe('Terra Titans mod', () => {
+  test('select mod → globe world → 16 leaders → board loads', async ({ page }) => {
+    test.setTimeout(60000);
+    const pageErrors = [];
+    page.on('pageerror', err => pageErrors.push(err.message));
+
+    await page.goto('/');
+
+    // 1. Hero → Local Game
+    await page.waitForSelector('#btn-mode-local', { timeout: 10000 });
+    await page.click('#btn-mode-local');
+
+    // 2. SELECT MOD — pick Terra Titans (now that 2 mods are registered, this renders)
+    await page.waitForSelector('.map-card[data-mod-idx]', { timeout: 10000 });
+    const ttCard = page.locator('.map-card[data-mod-idx]', { hasText: 'Terra Titans' }).first();
+    await expect(ttCard).toBeVisible();
+    await ttCard.click();
+
+    // 3. Map select — Terra Titans' only board is its globe world. Pick it by title.
+    await page.waitForSelector('.map-card[data-map-idx]', { timeout: 10000 });
+    await page.locator('.map-card[data-map-idx]', { hasText: 'Terra Titans' }).click();
+
+    // 4. Player count — 2 players
+    await page.waitForSelector('.count-btn[data-count="2"]', { timeout: 10000 });
+    await page.click('.count-btn[data-count="2"]');
+
+    // 5. Victory select — defaults to the world's primary path (dominion); start
+    await page.waitForSelector('#btn-vic-start', { timeout: 10000 });
+    await page.click('#btn-vic-start');
+
+    // 6. Character select — all 16 historical leaders render as cards
+    await page.waitForSelector('.charcard', { timeout: 10000 });
+    await expect(page.locator('.charcard')).toHaveCount(16);
+    // Portraits are placeholders: colored-initial fallback (no <img>), via .portrait__empty.
+    await expect(page.locator('.charcard .portrait__empty').first()).toBeVisible();
+
+    // Pick two leaders → game board
+    await pickAndConfirm(page);
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.select__p');
+      return el && /PLAYER 2/.test(el.textContent);
+    }, { timeout: 10000 });
+    await pickAndConfirm(page);
+
+    // 7. Board loads — roll button present + the globe renderer class is applied.
+    await page.waitForSelector('#btn-roll', { timeout: 10000 });
+    await expect(page.locator('.board--globe')).toHaveCount(1);
+
+    // No render/setup crash across the mod-select → globe-board flow.
+    expect(pageErrors).toEqual([]);
+  });
+});
 
 test.describe('Atlas World', () => {
   test('atlas map: Terra Circuit renders and is playable', async ({ page }) => {
