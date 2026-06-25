@@ -2180,7 +2180,7 @@ class MonopolyBoard {
       }
       return;
     }
-    const saveData = { G: G, currentPlayer: ctx.currentPlayer, numPlayers: G.players.length, mapId: this.mapData.id, timestamp: Date.now() };
+    const saveData = { G: G, currentPlayer: ctx.currentPlayer, numPlayers: G.players.length, modId: this.activeMod.id, mapId: this.mapData.id, timestamp: Date.now() };
     const saveName = `meinopoly_save_${new Date().toLocaleString().replace(/[/:]/g, '-')}`;
     const saves = JSON.parse(localStorage.getItem('meinopoly_saves') || '{}');
     saves[saveName] = saveData;
@@ -2202,8 +2202,16 @@ class MonopolyBoard {
 
   loadGame(saveData) {
     this._cancelRoll(); // kill any in-flight dice animation before the client is replaced
-    // Saves carry no modId yet (Stage 4) — resolve the saved board from the active mod's
-    // boards, falling back to its default. Dominion is the only registered mod today.
+    // Restore the saved MOD first (its rules singleton + character provider + board set),
+    // BEFORE resolving the map — the saved board lives in that mod's world list, and RULES
+    // is off-G so it must be installed to match the saved economy. Pre-Stage-4 saves (no
+    // modId) default to the first mod (Dominion), so old saves still load.
+    const mod = MODS.find(m => m.id === saveData.modId) || MODS[0];
+    if (mod !== this.activeMod) {
+      this.activeMod = mod;
+      setActiveMod(mod.id);
+      this.availableMaps = mod.maps.concat(mod.worlds);
+    }
     const savedMap = this.availableMaps.find(m => m.id === saveData.mapId) || this.availableMaps[0];
     this.setMap(savedMap);
     if (this.client) this.client.stop(); // null when loading from the menu (no active game)
