@@ -5,10 +5,12 @@
 // The CLIENT registry (with portraits/keyart/atlas assets) lives in App.js, NOT here.
 import { deepClone } from '../src/mod-loader';
 import { dominionData } from './dominion/bundle.data';
+import { terraTitansData } from './terra-titans/bundle.data';
 
 // Tier-A data bundles, keyed by mod id.
 export const MODS = {
   dominion: dominionData,
+  'terra-titans': terraTitansData,
 };
 
 // PRISTINE deep-clone of each mod's rules, captured at registry load — BEFORE any

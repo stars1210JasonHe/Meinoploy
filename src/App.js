@@ -18,7 +18,8 @@ import { routeChoices } from './atlas-movement';
 // { id, name, characters (portrait-merged), portraits, getLoreById, maps, worlds, keyArt,
 //   atlasAssets, getGlobe }. Stage 3 adds more entries here.
 import dominionMod from '../mods/dominion/bundle.client';
-const MODS = [dominionMod];
+import terraTitansMod from '../mods/terra-titans/bundle.client';
+const MODS = [dominionMod, terraTitansMod];
 
 // True if a (lat,lng) on the globe faces the camera (cos-distance vs the POV center).
 // Overlays on the far hemisphere are hidden. > a small positive epsilon hides points
