@@ -31,7 +31,7 @@ She turns charm and statecraft into a standing discount on everyone else's groun
 
 - **Julius Caesar** — Famous allies whose interests aligned at a pivotal moment
 - **Moshoeshoe I** — Two leaders who won with words what others sought by force
-- **Wu Zetian** — Two highly capable women who governed through skill and statecraft
+- **Liu Bei** — Two who won loyalty and allies through charm rather than force
 
 ## Theme
 

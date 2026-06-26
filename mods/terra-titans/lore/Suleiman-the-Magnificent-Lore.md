@@ -29,7 +29,7 @@ He turns ownership into architecture, raising more on each plot than his rivals 
 
 ## Relationships
 
-- **Qin Shi Huang** — Two patrons of monumental construction at the peak of their states
+- **Pachacuti** — Two patrons of monumental construction at the peak of their states
 - **Mansa Musa** — Great patrons of cities, scholarship, and the arts
 - **Pachacuti** — Builders whose works reshaped whole landscapes
 

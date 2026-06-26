@@ -29,7 +29,7 @@ He bends fortune toward fresh ground, turning unlucky moments into second chance
 
 ## Relationships
 
-- **Wu Zetian** — Both reformed how a state selects and rewards its servants
+- **Cao Cao** — Both raised servants by merit rather than birth
 - **Chandragupta Maurya** — Founders who built institutions meant to outlast them
 - **Tokugawa Ieyasu** — Two founders of enduring, long-ruling orders
 

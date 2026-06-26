@@ -30,7 +30,7 @@ He prospers by keeping in motion — each lap a little richer than the last.
 ## Relationships
 
 - **Mansa Musa** — Both grow stronger the more they travel and the more they give
-- **Qin Shi Huang** — Two empire-builders who organized vast lands under one system
+- **Liu Bei** — Two founders who built states from humble beginnings
 - **Cyrus the Great** — Founders who valued durable administration over raw conquest
 
 ## Theme

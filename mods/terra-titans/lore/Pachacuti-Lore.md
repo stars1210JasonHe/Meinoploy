@@ -29,7 +29,7 @@ He turns difficult ground into developed value, raising more for less on every p
 
 ## Relationships
 
-- **Qin Shi Huang** — Master builders who reshaped the land itself
+- **Suleiman the Magnificent** — Master builders who reshaped the land itself
 - **Suleiman the Magnificent** — Builders whose works reshaped whole landscapes
 - **Moctezuma I** — Two great rulers of the pre-Columbian Americas
 

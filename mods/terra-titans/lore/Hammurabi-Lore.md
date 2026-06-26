@@ -31,7 +31,7 @@ He rarely chases the flashiest deal. He waits, codifies, and collects.
 
 - **Genghis Khan** — Both extract tribute, but Hammurabi prefers the written claim to the open road
 - **Cyrus the Great** — Mutual respect between a lawgiver and a tolerant administrator
-- **Wu Zetian** — Two rulers who trust process over improvisation
+- **Cao Cao** — Two who plan in detail and trust foresight over improvisation
 
 ## Theme
 

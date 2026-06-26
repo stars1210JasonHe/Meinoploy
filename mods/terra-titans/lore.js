@@ -5,9 +5,9 @@
 //   nameZh, titleZh (header lines), identity, alignment, background, noticed (optional),
 //   joining, styleIntro, style[] (required array), styleOutro, relationships[] (required
 //   array of {target, description}), themeSummary (required string).
-// SENSITIVITY GUARDRAILS (design vet): Wu Zetian = administrator/statecraft (not
-// intrigue/deceit); Genghis/Suleiman/Moctezuma/Cyrus = builders/patrons/lawgivers; Mansa
-// Musa = patron of trade & learning; no national flags, state emblems, or religious
+// SENSITIVITY GUARDRAILS (design vet): Cao Cao / Liu Bei = respectful historical portrayal
+// (rivals, not caricatures); Genghis/Suleiman/Moctezuma/Cyrus = builders/patrons/lawgivers;
+// Mansa Musa = patron of trade & learning; no national flags, state emblems, or religious
 // iconography in the prose. The markdown originals live in ./lore/*.md.
 
 export const CHARACTER_LORE = {
@@ -30,7 +30,7 @@ His code set out fixed penalties, contract terms, wages, and protections — an 
     relationships: [
       { target: 'Genghis Khan', description: 'Both extract tribute, but Hammurabi prefers the written claim to the open road' },
       { target: 'Cyrus the Great', description: 'Mutual respect between a lawgiver and a tolerant administrator' },
-      { target: 'Wu Zetian', description: 'Two rulers who trust process over improvisation' },
+      { target: 'Cao Cao', description: 'Two who plan in detail and trust foresight over improvisation' },
     ],
     themeSummary: 'Carve the rule in stone,\nand let everyone read what they owe.',
   },
@@ -77,58 +77,58 @@ His reign laid the groundwork for one of antiquity's largest and best-organized 
     styleOutro: 'He prospers by keeping in motion — each lap a little richer than the last.',
     relationships: [
       { target: 'Mansa Musa', description: 'Both grow stronger the more they travel and the more they give' },
-      { target: 'Qin Shi Huang', description: 'Two empire-builders who organized vast lands under one system' },
+      { target: 'Liu Bei', description: 'Two founders who built states from humble beginnings' },
       { target: 'Cyrus the Great', description: 'Founders who valued durable administration over raw conquest' },
     ],
     themeSummary: 'Found the system once,\nand let it pay you forever.',
   },
 
-  'qin-shi-huang': {
-    nameZh: 'First Emperor',
-    titleZh: 'Unifier of China',
-    identity: 'First emperor of a unified China',
-    alignment: 'Construction / Standardization / Scale',
-    background: `Qin Shi Huang unified the warring states of China in 221 BCE, becoming its first emperor. He standardized writing, currency, weights, and even axle widths across the realm, and connected and extended great defensive walls along the northern frontier.
+  'cao-cao': {
+    nameZh: 'Hero of Chaos',
+    titleZh: 'Chancellor of Wei',
+    identity: 'Warlord-statesman of the late Han, founder of Wei',
+    alignment: 'Strategy / Statecraft / Pragmatism',
+    background: `Cao Cao rose during the collapse of the Han dynasty in the late second and early third centuries, becoming the most powerful warlord in northern China. A gifted strategist, administrator, and poet, he reunified the north and laid the foundations of the state of Wei.
 
-His reign is remembered for monumental construction on an unprecedented scale — projects that demanded enormous resources but reshaped the land for centuries.`,
-    joining: `On the board, Qin builds big and builds cheap. Reduced upgrade costs let him stack structures faster than rivals, turning territory into towers.`,
-    styleIntro: 'Qin governs by three convictions:',
+He is remembered for the tuntian system — settling soldiers and refugees as military-agricultural colonies — which fed his armies and rebuilt a war-torn economy. Pragmatic and far-sighted, he famously called for talent to be raised on merit alone.`,
+    joining: `On the board, Cao Cao plays the long game of information. He reads the next event before it lands and keeps his true strength concealed at the table — outmaneuvering rivals through foresight rather than force.`,
+    styleIntro: 'Cao Cao operates by three convictions:',
     style: [
-      'Standardize everything, and everything becomes buildable',
-      'Monuments outlast the hands that raised them',
-      'Scale, applied early, compounds into dominance',
+      'Know the move before your rival makes it',
+      'A concealed strength is a strength doubled',
+      'Talent and results outweigh birth and ceremony',
     ],
-    styleOutro: 'He plays for the long, vertical game: fewer plots, taller than anyone else can afford.',
+    styleOutro: 'He waits, watches, and strikes only once the board has already tilted his way.',
     relationships: [
-      { target: 'Suleiman the Magnificent', description: 'Two patrons of monumental construction at the height of their states' },
-      { target: 'Pachacuti', description: 'Master builders who reshaped the land itself' },
-      { target: 'Chandragupta Maurya', description: 'Fellow unifiers who organized vast territory under one rule' },
+      { target: 'Liu Bei', description: 'Great rivals of a fractured age — cold strategy against benevolence' },
+      { target: 'Tokugawa Ieyasu', description: 'Patient unifiers who outlasted bolder rivals' },
+      { target: 'Genghis Khan', description: 'Commanders who reforged shattered lands through war and will' },
     ],
-    themeSummary: 'Make the standard,\nthen build higher than the standard allows.',
+    themeSummary: 'See the next move,\nand conceal your own.',
   },
 
-  'wu-zetian': {
-    nameZh: 'The Only Empress',
-    titleZh: 'Empress Regnant of China',
-    identity: "China's only reigning empress in her own name",
-    alignment: 'Statecraft / Administration / Talent',
-    background: `Wu Zetian rose to become the only woman in Chinese history to rule as emperor in her own right, governing in the late seventh and early eighth centuries. She is recognized as a capable and reform-minded administrator.
+  'liu-bei': {
+    nameZh: 'The Benevolent Lord',
+    titleZh: 'Founder of Shu Han',
+    identity: 'Warlord of the Three Kingdoms, founder of Shu Han',
+    alignment: 'Benevolence / Loyalty / Charisma',
+    background: `Liu Bei rose from humble beginnings during the fall of the Han to found the state of Shu Han in the southwest. Claiming distant imperial descent, he built his cause on benevolence and personal loyalty rather than wealth or birth.
 
-She expanded the civil-service examination system, promoting officials on merit rather than birth, and oversaw a period of competent government and stability. Her record is one of skilled statecraft and institutional reform.`,
-    joining: `On the board, Wu Zetian governs by information. She reads the next event before it arrives and keeps her true position discreet at the negotiating table — pure administrative foresight, never deceit.`,
-    styleIntro: 'Wu Zetian leads by three administrative habits:',
+He is remembered for winning devoted followers — the sworn brotherhood with Guan Yu and Zhang Fei, and the famous "three visits" to recruit the strategist Zhuge Liang. His reputation for humane rule drew people and territory to him where force alone would have failed.`,
+    joining: `On the board, Liu Bei builds through goodwill. The people raise his estates willingly, so he develops property faster and cheaper than rivals who rule by pressure alone.`,
+    styleIntro: 'Liu Bei leads by three principles:',
     style: [
-      'Promote on merit, and the able will serve you',
-      'Know what is coming before your rivals do',
-      'A quiet ledger is a strong ledger',
+      'Win the people first, and the land follows',
+      'Loyalty freely given outlasts loyalty bought',
+      'A just reputation is worth more than a full treasury',
     ],
-    styleOutro: 'She wins by preparation and good judgment — informed, measured, and never caught off guard.',
+    styleOutro: 'He grows steadily on the strength of goodwill, turning followers into foundations.',
     relationships: [
-      { target: 'Hammurabi', description: 'Two rulers who trust written process over improvisation' },
-      { target: 'Taejo of Joseon', description: 'Both reformed how a state selects and rewards its servants' },
-      { target: 'Cyrus the Great', description: 'Administrators who valued capable governance above spectacle' },
+      { target: 'Cao Cao', description: 'Great rivals of a fractured age — benevolence against cold strategy' },
+      { target: 'Moshoeshoe I', description: 'Lords who held their people through trust and diplomacy, not fear' },
+      { target: 'Cyrus the Great', description: 'Rulers remembered for clemency toward those they won over' },
     ],
-    themeSummary: 'Govern by merit and foresight,\nand the realm runs itself.',
+    themeSummary: 'Win the people,\nand the realm builds itself.',
   },
 
   'alexander-the-great': {
@@ -220,7 +220,7 @@ Under his patronage, master architects raised mosques, bridges, aqueducts, and p
     ],
     styleOutro: 'He turns ownership into architecture, raising more on each plot than his rivals can match.',
     relationships: [
-      { target: 'Qin Shi Huang', description: 'Two patrons of monumental construction at the peak of their states' },
+      { target: 'Pachacuti', description: 'Two patrons of monumental construction at the peak of their states' },
       { target: 'Mansa Musa', description: 'Great patrons of cities, scholarship, and the arts' },
       { target: 'Pachacuti', description: 'Builders whose works reshaped whole landscapes' },
     ],
@@ -268,7 +268,7 @@ His founding reforms set the institutional course for one of the longest-lasting
     ],
     styleOutro: 'He bends fortune toward fresh ground, turning unlucky moments into second chances.',
     relationships: [
-      { target: 'Wu Zetian', description: 'Both reformed how a state selects and rewards its servants' },
+      { target: 'Cao Cao', description: 'Both raised servants by merit rather than birth' },
       { target: 'Chandragupta Maurya', description: 'Founders who built institutions meant to outlast them' },
       { target: 'Tokugawa Ieyasu', description: 'Two founders of enduring, long-ruling orders' },
     ],
@@ -316,7 +316,7 @@ The famed mountain estate of Machu Picchu is associated with his reign — a tes
     ],
     styleOutro: 'He turns difficult ground into developed value, raising more for less on every plot.',
     relationships: [
-      { target: 'Qin Shi Huang', description: 'Master builders who reshaped the land itself' },
+      { target: 'Suleiman the Magnificent', description: 'Master builders who reshaped the land itself' },
       { target: 'Suleiman the Magnificent', description: 'Builders whose works reshaped whole landscapes' },
       { target: 'Moctezuma I', description: 'Two great rulers of the pre-Columbian Americas' },
     ],
@@ -390,7 +390,7 @@ For decades she preserved Egypt's standing through alliance and negotiation rath
     relationships: [
       { target: 'Julius Caesar', description: 'Famous allies whose interests aligned at a pivotal moment' },
       { target: 'Moshoeshoe I', description: 'Two leaders who won with words what others sought by force' },
-      { target: 'Wu Zetian', description: 'Two highly capable women who governed through skill and statecraft' },
+      { target: 'Liu Bei', description: 'Two who won loyalty and allies through charm rather than force' },
     ],
     themeSummary: 'Negotiate everything,\nand pay less to walk every road.',
   },
