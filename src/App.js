@@ -1014,6 +1014,7 @@ class MonopolyBoard {
     if (!g || !ov) return;
     const pov = g.pointOfView();
     const els = ov.querySelectorAll('[data-lat]');
+    const cities = []; // visible .gcity name labels, for collision declutter below
     for (let i = 0; i < els.length; i++) {
       const el = els[i];
       const lat = parseFloat(el.dataset.lat), lng = parseFloat(el.dataset.lng);
@@ -1024,9 +1025,32 @@ class MonopolyBoard {
       el.style.display = show ? '' : 'none';
       if (!show) continue;
       const sc = g.getScreenCoords(lat, lng, parseFloat(el.dataset.alt || '0.01'));
-      if (!sc) continue;
+      if (!sc) { el.style.display = 'none'; continue; }
       const ox = parseFloat(el.dataset.offx || '0');
-      el.style.transform = `translate(-50%,-50%) translate(${sc.x + ox}px, ${sc.y}px)`;
+      const x = sc.x + ox;
+      el.style.transform = `translate(-50%,-50%) translate(${x}px, ${sc.y}px)`;
+      if (el.classList.contains('gcity')) {
+        const txt = el.textContent || '';
+        const route = !!el.dataset.route;
+        cities.push({ el, x, y: sc.y, w: txt.length * 6.5 + (route ? 14 : 2), h: route ? 18 : 11,
+          force: route, prio: parseFloat(el.dataset.prio || '0') });
+      }
+    }
+    // Declutter the 49 city labels: keep route targets + then highest-population cities,
+    // hiding any whose screen box overlaps an already-kept label. Screen-space, so it's
+    // zoom-aware — zooming in spreads cities apart and more labels survive. Cheap (~49²).
+    cities.sort((a, b) => (b.force - a.force) || (b.prio - a.prio));
+    const kept = [];
+    for (let i = 0; i < cities.length; i++) {
+      const c = cities[i];
+      let hide = false;
+      if (!c.force) {
+        for (let k = 0; k < kept.length; k++) {
+          const r = kept[k];
+          if (Math.abs(c.x - r.x) * 2 < (c.w + r.w) && Math.abs(c.y - r.y) * 2 < (c.h + r.h)) { hide = true; break; }
+        }
+      }
+      if (hide) c.el.style.display = 'none'; else kept.push(c);
     }
   }
 
@@ -1052,6 +1076,9 @@ class MonopolyBoard {
         el.className = 'gcity';
         el.dataset.place = p.id;
         el.dataset.lat = p.geo.lat; el.dataset.lng = p.geo.lng; el.dataset.alt = '0.06';
+        // Declutter priority: bigger cities keep their label when labels collide (hubs are
+        // all large, so this also favors them). Static per place → set once at creation.
+        el.dataset.prio = String((p.data && p.data.population) || 0);
         ov.appendChild(el);
       }
       el.textContent = (p.realName || p.id).toUpperCase();
