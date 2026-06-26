@@ -710,7 +710,7 @@ class MonopolyBoard {
 
     const picked = this._pendingCharId ? this.activeMod.characters.find(c => c.id === this._pendingCharId) : null;
     const chosenHtml = picked
-      ? `${portraitHtml(picked, 40, false)}<span style="color:${picked.color}">${esc(picked.name)}</span><span class="select__chosen-title">${esc(picked.title)}</span>`
+      ? `${portraitHtml(picked, 40, false)}<span style="color:${readableNameColor(picked.color)}">${esc(picked.name)}</span><span class="select__chosen-title">${esc(picked.title)}</span>`
       : '<span class="select__chosen-empty">Select a councillor to continue</span>';
 
     this.charSelectEl.innerHTML = `
@@ -1838,7 +1838,7 @@ class MonopolyBoard {
       <div class="lore">
         <div class="lore__left">
           ${portraitHtml(char, 150, true)}
-          <div class="lore__name" style="color:${char.color}">${esc(lore.nameZh)}<br/>${esc(char.name)}</div>
+          <div class="lore__name" style="color:${readableNameColor(char.color)}">${esc(lore.nameZh)}<br/>${esc(char.name)}</div>
           <div class="lore__title">${esc(lore.titleZh)}</div>
           <div class="lore__stats">${statRowsHtml(char.stats, char.color)}</div>
         </div>
@@ -2132,7 +2132,7 @@ class MonopolyBoard {
       const textHtml = r.text === null
         ? '<div class="aibubble__loading">Thinking…</div>'
         : `<div class="aibubble__text">${esc(r.text)}</div>`;
-      items += `<div class="aibubble">${avatar}<div class="aibubble__body"><div class="aibubble__name" style="color:${r.charColor}">${esc(r.charName)}</div>${textHtml}</div></div>`;
+      items += `<div class="aibubble">${avatar}<div class="aibubble__body"><div class="aibubble__name" style="color:${readableNameColor(r.charColor)}">${esc(r.charName)}</div>${textHtml}</div></div>`;
     });
     this.aiResponsesEl.innerHTML = `<div class="airesp"><div class="airesp__title">COUNCIL CHATTER</div><div class="airesp__list">${items}</div></div>`;
   }
@@ -2160,7 +2160,7 @@ class MonopolyBoard {
     } else {
       msgs = history.map(m => m.role === 'user'
         ? `<div class="chat__msg user"><div class="chat__sender">YOU</div>${esc(m.content)}</div>`
-        : `<div class="chat__msg ai"><div class="chat__sender" style="color:${activeChar.color}">${esc(activeChar.name)}</div>${esc(m.content)}</div>`).join('');
+        : `<div class="chat__msg ai"><div class="chat__sender" style="color:${readableNameColor(activeChar.color)}">${esc(activeChar.name)}</div>${esc(m.content)}</div>`).join('');
     }
 
     const disabled = !this.characterAI.apiKey ? 'disabled' : '';

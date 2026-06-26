@@ -649,8 +649,8 @@ test.describe('Terra Titans mod', () => {
     // 6. Character select — all 16 historical leaders render as cards
     await page.waitForSelector('.charcard', { timeout: 10000 });
     await expect(page.locator('.charcard')).toHaveCount(16);
-    // Portraits are placeholders: colored-initial fallback (no <img>), via .portrait__empty.
-    await expect(page.locator('.charcard .portrait__empty').first()).toBeVisible();
+    // Portraits are real pixel-art images now (16 leaders) — assert the first card's <img> renders.
+    await expect(page.locator('.charcard .portrait img').first()).toBeVisible();
 
     // Pick two leaders → game board
     await pickAndConfirm(page);
