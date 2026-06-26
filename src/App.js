@@ -80,6 +80,21 @@ function portraitHtml(char, size, selected) {
   return `<div class="portrait ${selected ? 'portrait--sel' : ''}" style="width:${size}px;height:${size}px;--pcol:${color}">${inner}</div>`;
 }
 
+// Character names are painted in the character's color on the dark card. Very dark colors
+// (e.g. Cao Cao #212121) become unreadable. Lighten ONLY genuinely-dark colors (luminance
+// < 60) toward white to ~luminance 90, preserving hue so the identity color is kept. Bright
+// colors (all Dominion chars; most Terra Titans) are returned unchanged.
+function readableNameColor(hex) {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex || '');
+  if (!m) return hex;
+  let r = parseInt(m[1].slice(0, 2), 16), g = parseInt(m[1].slice(2, 4), 16), b = parseInt(m[1].slice(4, 6), 16);
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  if (lum >= 60) return hex;
+  const f = (90 - lum) / (255 - lum); // blend toward white to reach ~luminance 90
+  r = Math.round(r + (255 - r) * f); g = Math.round(g + (255 - g) * f); b = Math.round(b + (255 - b) * f);
+  return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
 function statRowsHtml(stats, color) {
   return STAT_KEYS.map(s => {
     const value = stats[s.key];
@@ -674,7 +689,7 @@ class MonopolyBoard {
           <div class="charcard__top">
             ${portraitHtml(char, 72, selected)}
             <div class="charcard__id">
-              <span class="charcard__name" style="color:${char.color}">${esc(char.name)}</span>
+              <span class="charcard__name" style="color:${readableNameColor(char.color)}">${esc(char.name)}</span>
               <span class="charcard__title">${esc(char.title)}</span>
               <span class="charcard__money">START ${money(startMoney)}</span>
             </div>
