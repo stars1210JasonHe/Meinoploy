@@ -135,10 +135,16 @@ export var TERRA_TITANS = {
   places: PLACES,
   hubs: ['new-york', 'sao-paulo', 'london', 'paris', 'dubai', 'lagos', 'mumbai', 'singapore', 'shanghai', 'tokyo'],
   winPaths: ['dominion', 'wealth', 'survival'],
-  // maxTurns 300 is a PLACEHOLDER — the board tripled (12→49 cities, 147 spaces) vs
-  // terra-globe, so game length must be re-tuned with a >=200-game sim (Stage 3.7).
-  // groupsToWin 6 is well below the ~49 buildable groups on this board.
-  victory: { maxTurns: 300, params: { groupsToWin: 6 } },
+  // Balance-tuned via sim (2026-06-26). On this 49-city board greedy bots essentially
+  // never complete monopolies: groupsToWin 6/4/3 NEVER ended a game in 300 turns, and
+  // survival never bankrupts (rent spread too thin). groupsToWin 2 is the only achievable
+  // dominion target — ~43% of games end in a natural dominion win (median <60 turns),
+  // the rest hit the timer. maxTurns 150 (down from 300) halves marathon games AND gives
+  // the least-bad strategy balance (tourer dominance rises with game length: 64% @150 vs
+  // 73% @250). KNOWN FOLLOW-UP (out of param-tuning scope): "take the longest route"
+  // (tourer) structurally beats camping ~64% on this sprawling board — fixing it needs
+  // economy/board work (hub-salary, route costs, rent scaling), not a victory knob.
+  victory: { maxTurns: 150, params: { groupsToWin: 2 } },
   // 49 cities × 3 slots = 147 spaces — blows the inherited 16/96 default, so raise.
   size: { maxPlaces: 56, maxSpaces: 176 },
   // globe.pixelRatio: WebGL drawing-buffer scale — lower = chunkier pixels.
