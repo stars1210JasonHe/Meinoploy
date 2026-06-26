@@ -487,11 +487,13 @@ export function loadWorld(world, archetypes) {
     chanceCards: cards.chance || [],
     communityCards: cards.community || [],
     mapMechanics: {
-      incomeMultiplier: 1.0,
-      rentMultiplier: 1.0,
-      taxMultiplier: 1.0,
-      priceMultiplier: 1.0,
-      upgradeCostMultiplier: 1.0,
+      // Pass through the world's economy multipliers (were previously hardcoded to 1.0,
+      // so atlas worlds silently couldn't tune economy). Default 1.0 when unset.
+      incomeMultiplier: mechanics.incomeMultiplier !== undefined ? mechanics.incomeMultiplier : 1.0,
+      rentMultiplier: mechanics.rentMultiplier !== undefined ? mechanics.rentMultiplier : 1.0,
+      taxMultiplier: mechanics.taxMultiplier !== undefined ? mechanics.taxMultiplier : 1.0,
+      priceMultiplier: mechanics.priceMultiplier !== undefined ? mechanics.priceMultiplier : 1.0,
+      upgradeCostMultiplier: mechanics.upgradeCostMultiplier !== undefined ? mechanics.upgradeCostMultiplier : 1.0,
       branchChoice: mechanics.branchChoice || 'player',
     },
     riskProfile: {

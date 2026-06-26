@@ -14,10 +14,10 @@ major tasks below are to **discuss + design before building** — each is a larg
 ## Near-term polish
 1. **Game-entry UI polish** — the flow `mode → mod → map → players → victory → character select`.
    Make the entry screens cleaner / nicer (layout, spacing, transitions, readability).
-2. **Balance follow-up (economy/board, NOT a victory knob)** — found via sim: on the sprawling
-   49-city board, "take the longest route" (tourer) structurally beats camping (~64%, rises with
-   game length). Fixing it needs economy/board work: hub-salary, route/length costs, or rent
-   scaling. Out of parameter-tuning scope; a deliberate later task.
+2. ~~Balance follow-up (tourer dominance)~~ **RESOLVED 2026-06-26.** Root cause measured: tourer
+   grabbed ~6.5x more cheap land (net-worth only 1.04x, but a consistent edge → ~63% wins). Fixed by
+   wiring per-world economy (`loadWorld` was hardcoding mapMechanics to 1.0) + terra-titans
+   `priceMultiplier: 1.5` — tourer win% 63%→~50%, both fairness gates PASS, dominion still ~57% natural.
 
 ## Major Task 1 — Create-Mod Engine (authoring → LLM-driven)
 **Goal:** build whole mods without hand-coding; ultimately drive it with an LLM.

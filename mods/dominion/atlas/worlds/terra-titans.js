@@ -135,16 +135,18 @@ export var TERRA_TITANS = {
   places: PLACES,
   hubs: ['new-york', 'sao-paulo', 'london', 'paris', 'dubai', 'lagos', 'mumbai', 'singapore', 'shanghai', 'tokyo'],
   winPaths: ['dominion', 'wealth', 'survival'],
-  // Balance-tuned via sim (2026-06-26). On this 49-city board greedy bots essentially
-  // never complete monopolies: groupsToWin 6/4/3 NEVER ended a game in 300 turns, and
-  // survival never bankrupts (rent spread too thin). groupsToWin 2 is the only achievable
-  // dominion target — ~43% of games end in a natural dominion win (median <60 turns),
-  // the rest hit the timer. maxTurns 150 (down from 300) halves marathon games AND gives
-  // the least-bad strategy balance (tourer dominance rises with game length: 64% @150 vs
-  // 73% @250). KNOWN FOLLOW-UP (out of param-tuning scope): "take the longest route"
-  // (tourer) structurally beats camping ~64% on this sprawling board — fixing it needs
-  // economy/board work (hub-salary, route costs, rent scaling), not a victory knob.
+  // Balance-tuned via sim (2026-06-26). Greedy bots essentially never complete monopolies
+  // here: groupsToWin 6/4/3 NEVER ended a game in 300 turns; survival never bankrupts (rent
+  // spread too thin). groupsToWin 2 is the only achievable dominion target (~43% natural
+  // wins, median <60 turns). maxTurns 150 (from 300) halves marathon games + acts as the
+  // timed backstop.
   victory: { maxTurns: 150, params: { groupsToWin: 2 } },
+  // Strategy balance: on this open board "take the longest route" (tourer) snowballs by
+  // grabbing cheap land — sim showed it owning ~6.5x more property than a camper and winning
+  // ~63%. priceMultiplier 1.5 makes land cost enough to curb the land-grab: tourer win% 63%
+  // -> 50% (balanced), prop gap 24.5/5.0 -> 21.9/7.4. (Relies on loadWorld's mapMechanics
+  // pass-through.)
+  mapMechanics: { priceMultiplier: 1.5 },
   // 49 cities × 3 slots = 147 spaces — blows the inherited 16/96 default, so raise.
   size: { maxPlaces: 56, maxSpaces: 176 },
   // globe.pixelRatio: WebGL drawing-buffer scale — lower = chunkier pixels.
