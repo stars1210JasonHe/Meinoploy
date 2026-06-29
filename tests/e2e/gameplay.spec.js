@@ -702,3 +702,87 @@ test.describe('Atlas World', () => {
     expect(pageErrors).toEqual([]);
   });
 });
+
+test.describe('Entry-UI polish', () => {
+  // Map cards now embed a live SVG mini-preview (square board dots / atlas globe).
+  test('map cards render a live SVG preview', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#btn-mode-local', { timeout: 10000 });
+    await page.click('#btn-mode-local');
+    await selectMod(page, 'Dominion');
+    await page.waitForSelector('.map-card[data-map-idx]', { timeout: 10000 });
+    const svgCount = await page.locator('.map-card[data-map-idx] svg.minimap').count();
+    expect(svgCount).toBeGreaterThan(0);
+  });
+
+  // The merged GAME SETUP screen exposes player-count AND victory controls at once.
+  test('merged SETUP shows player count and victory cards together', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#btn-mode-local', { timeout: 10000 });
+    await page.click('#btn-mode-local');
+    await selectMod(page, 'Dominion');
+    await page.waitForSelector('.map-card[data-map-idx="0"]', { timeout: 10000 });
+    await page.click('.map-card[data-map-idx="0"]');
+    // SETUP: both controls present simultaneously.
+    await page.waitForSelector('#btn-vic-start', { timeout: 10000 });
+    await expect(page.locator('.count-btn[data-count="2"]')).toBeVisible();
+    await expect(page.locator('.vic-card[data-mode="monopoly"]')).toBeVisible();
+    // Default count 2 is highlighted (primary).
+    await expect(page.locator('.count-btn[data-count="2"]')).toHaveClass(/pix-btn--primary/);
+  });
+
+  // Breadcrumb jump-back from SETUP preserves the chosen player count (same-map _setupSel persists).
+  test('breadcrumb SETUP→back→SETUP keeps the chosen player count', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#btn-mode-local', { timeout: 10000 });
+    await page.click('#btn-mode-local');
+    await selectMod(page, 'Dominion');
+    await page.waitForSelector('.map-card[data-map-idx="0"]', { timeout: 10000 });
+    await page.click('.map-card[data-map-idx="0"]');
+    await page.waitForSelector('#btn-vic-start', { timeout: 10000 });
+    // Pick a non-default count + dominion victory.
+    await page.click('.count-btn[data-count="5"]');
+    await page.click('.vic-card[data-mode="monopoly"]');
+    // Jump back to MAP via the breadcrumb, then re-enter SETUP for the same map.
+    await page.click('.breadcrumb__step--clickable[data-step="map"]');
+    await page.waitForSelector('.map-card[data-map-idx="0"]', { timeout: 10000 });
+    await page.click('.map-card[data-map-idx="0"]');
+    await page.waitForSelector('#btn-vic-start', { timeout: 10000 });
+    // Count 5 + dominion still selected (picks preserved).
+    await expect(page.locator('.count-btn[data-count="5"]')).toHaveClass(/pix-btn--primary/);
+    await expect(page.locator('.vic-card[data-mode="monopoly"]')).toHaveClass(/vic-card--sel/);
+  });
+
+  // Soft-exit: jumping back from CHARACTER (post-START, client running) must tear the client
+  // down and still let a fresh game start cleanly — exactly one board, no leaked client, no crash.
+  test('breadcrumb jump-back from character select leaves a single clean game', async ({ page }) => {
+    test.setTimeout(60000);
+    const pageErrors = [];
+    page.on('pageerror', err => pageErrors.push(err.message));
+
+    await gotoCharSelect(page); // reaches CHARACTER — a boardgame.io client is now live
+    // Scope to the visible character-select screen: the hidden #menu-screen still holds its
+    // last-rendered breadcrumb (display:none), so an unscoped selector matches two nodes.
+    const mapCrumb = page.locator('#character-select .breadcrumb__step--clickable[data-step="map"]');
+    await expect(mapCrumb).toBeVisible();
+    await mapCrumb.click(); // soft-exit → MAP
+    await page.waitForSelector('.map-card[data-map-idx]', { timeout: 10000 });
+
+    // Re-complete the flow to a real game board.
+    await page.click('.map-card[data-map-idx="0"]');
+    await page.waitForSelector('#btn-vic-start', { timeout: 10000 });
+    await page.click('#btn-vic-start');
+    await page.waitForSelector('.charcard', { timeout: 10000 });
+    await pickAndConfirm(page);
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.select__p');
+      return el && /PLAYER 2/.test(el.textContent);
+    }, { timeout: 10000 });
+    await pickAndConfirm(page);
+
+    // Exactly one game board context — no duplicate/leaked client.
+    await page.waitForSelector('#btn-roll', { timeout: 10000 });
+    await expect(page.locator('#btn-roll')).toHaveCount(1);
+    expect(pageErrors).toEqual([]);
+  });
+});
