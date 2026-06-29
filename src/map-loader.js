@@ -156,7 +156,7 @@ function generateHexagonPositions(spaceCount, params) {
   return positions;
 }
 
-function generatePositions(layoutType, spaceCount, params) {
+export function generatePositions(layoutType, spaceCount, params) {
   switch (layoutType) {
     case 'square': return generateSquarePositions(spaceCount);
     case 'circle': return generateCirclePositions(spaceCount, params);
