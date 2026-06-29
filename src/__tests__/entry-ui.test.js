@@ -1,4 +1,4 @@
-const { pluralize, breadcrumbSteps, mapPreviewPoints } = require('../entry-ui');
+const { pluralize, breadcrumbSteps, mapPreviewPoints, miniMapSvg } = require('../entry-ui');
 
 describe('pluralize', () => {
   test('singular for 1', () => expect(pluralize(1, 'MAP')).toBe('1 MAP'));
@@ -72,5 +72,25 @@ describe('mapPreviewPoints', () => {
   });
   test('deterministic', () => {
     expect(mapPreviewPoints(atlasGeo)).toEqual(mapPreviewPoints(atlasGeo));
+  });
+});
+
+describe('miniMapSvg', () => {
+  const atlasGeo = { movementMode: 'atlas', places: [{ id: 'a', geo: { lat: 0, lng: 0 } }], theme: {} };
+  const square = { layout: { type: 'square', params: {} }, spaceCount: 40, spaces: [], theme: { logoColor: '#0f0' } };
+  test('atlas -> svg with a globe circle', () => {
+    const svg = miniMapSvg(atlasGeo);
+    expect(svg.startsWith('<svg')).toBe(true);
+    expect(svg).toContain('<circle');
+  });
+  test('square -> svg with dots', () => {
+    expect(miniMapSvg(square)).toContain('<svg');
+  });
+  test('coordless -> placeholder svg (no throw)', () => {
+    const svg = miniMapSvg({ layout: { type: 'mystery' }, spaceCount: 0, theme: {} });
+    expect(svg).toContain('<svg');
+  });
+  test('deterministic', () => {
+    expect(miniMapSvg(atlasGeo)).toBe(miniMapSvg(atlasGeo));
   });
 });

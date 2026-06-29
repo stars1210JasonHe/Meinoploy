@@ -83,4 +83,27 @@ function mapPreviewPoints(mapJson) {
   }
 }
 
-module.exports = { pluralize, breadcrumbSteps, mapPreviewPoints };
+function _dot(p) {
+  return '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) +
+    '" r="2.4" fill="' + p.color + '"/>';
+}
+
+function miniMapSvg(mapJson) {
+  var open = '<svg viewBox="0 0 100 100" class="minimap" preserveAspectRatio="xMidYMid meet" aria-hidden="true">';
+  var pts = mapPreviewPoints(mapJson);
+  var isAtlas = mapJson && mapJson.movementMode === 'atlas';
+  if (!pts.length) {
+    var label = (mapJson && mapJson.layout && mapJson.layout.type ? mapJson.layout.type : 'MAP').toUpperCase();
+    return open +
+      '<rect x="6" y="6" width="88" height="88" rx="6" fill="none" stroke="var(--accent)" stroke-opacity="0.5" stroke-width="2"/>' +
+      '<text x="50" y="54" text-anchor="middle" font-size="12" fill="var(--accent)" opacity="0.7">' + label + '</text></svg>';
+  }
+  var backdrop = isAtlas
+    ? '<circle cx="50" cy="50" r="46" fill="none" stroke="var(--accent)" stroke-width="2" stroke-opacity="0.7"/>'
+    : '<rect x="4" y="4" width="92" height="92" rx="6" fill="none" stroke="var(--accent)" stroke-width="2" stroke-opacity="0.5"/>';
+  var dots = '';
+  for (var i = 0; i < pts.length; i++) dots += _dot(pts[i]);
+  return open + backdrop + dots + '</svg>';
+}
+
+module.exports = { pluralize, breadcrumbSteps, mapPreviewPoints, miniMapSvg };
