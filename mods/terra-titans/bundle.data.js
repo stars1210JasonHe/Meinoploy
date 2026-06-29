@@ -17,6 +17,7 @@ import { TERRA_TITANS } from '../dominion/atlas/worlds/terra-titans';
 export const terraTitansData = {
   id: 'terra-titans',
   name: 'Terra Titans',
+  tagline: 'History’s greatest empire-builders contest a 49-city pixel Earth.',
   version: '1.0',
 
   rules: RULES,

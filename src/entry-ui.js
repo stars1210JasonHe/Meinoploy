@@ -2,7 +2,7 @@
 // must NOT import images, the globe lib, or boardgame.io. App.js imports from here.
 // map-loader is the ONLY allowed import (it is itself Jest-safe — no image/globe imports).
 
-const { generatePositions } = require('./map-loader');
+import { generatePositions } from './map-loader';
 
 function pluralize(n, word) {
   return n + ' ' + word + (n === 1 ? '' : 'S');
@@ -106,4 +106,4 @@ function miniMapSvg(mapJson) {
   return open + backdrop + dots + '</svg>';
 }
 
-module.exports = { pluralize, breadcrumbSteps, mapPreviewPoints, miniMapSvg };
+export { pluralize, breadcrumbSteps, mapPreviewPoints, miniMapSvg };

@@ -11,6 +11,7 @@ import { loadMap, getGridDimensions, positionsToGrid } from './map-loader';
 import { CharacterAI, EVENT_TYPES, VERBOSITY } from './character-ai';
 import { loadWorld } from './world-loader';
 import { routeChoices } from './atlas-movement';
+import { miniMapSvg, pluralize } from './entry-ui';
 
 // Client-side mod registry — static bundle imports (Parcel v1 forces all imports static, so
 // every registered mod is bundled at build; only WHICH is active is chosen at runtime). This
@@ -351,6 +352,7 @@ class MonopolyBoard {
   showModeSelect() {
     this._showScreen('menu');
     this.menuEl.className = 'screen screen--hero';
+    const totalMaps = MODS.reduce((n, m) => n + m.maps.length + m.worlds.length, 0);
     this.menuEl.innerHTML = `
       <img class="hero-art" src="${this.activeMod.keyArt}" alt="Meinopoly: Dominion" draggable="false" />
       <div class="hero-overlay">
@@ -359,7 +361,7 @@ class MonopolyBoard {
           <button class="pix-btn pix-btn--default pix-btn--lg mode-btn" id="btn-mode-online">ONLINE GAME</button>
         </div>
         <div class="title__press"><span class="glyph glyph--arrow"></span> PRESS START</div>
-        <div class="title__foot">v0.4 · 10 CHARACTERS · 4 MAPS · TRADE &amp; AUCTION</div>
+        <div class="title__foot">v0.4 · ${MODS.length} MODS · ${pluralize(totalMaps, 'MAP')} · TRADE &amp; AUCTION</div>
       </div>
     `;
     document.getElementById('btn-mode-local').onclick = () => { this.mode = 'local'; this.showModSelect(); };
@@ -386,9 +388,10 @@ class MonopolyBoard {
           <div class="pix-panel__accent" style="background:var(--accent)"></div>
           <div class="pix-panel__body">
             <div class="map-card__title">${esc(mod.name)}</div>
+            <div class="map-card__desc">${esc(mod.tagline || '')}</div>
             <div class="map-card__meta">
-              <span class="map-tag">${esc((mod.characters || []).length + ' CHARACTERS')}</span>
-              <span class="map-tag">${esc((mod.maps.length + mod.worlds.length) + ' MAPS')}</span>
+              <span class="map-tag">${esc(pluralize((mod.characters || []).length, 'CHARACTER'))}</span>
+              <span class="map-tag">${esc(pluralize(mod.maps.length + mod.worlds.length, 'MAP'))}</span>
             </div>
           </div>
         </div>`;

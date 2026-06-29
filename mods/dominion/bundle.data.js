@@ -24,6 +24,7 @@ import { TERRA_GLOBE } from './atlas/worlds/terra-globe';
 export const dominionData = {
   id: 'dominion',
   name: 'Dominion: Multi-dimensional World Property Council',
+  tagline: 'Ten sci-fi councillors vie for control of a multi-dimensional property council.',
   version: '1.0.0',
 
   rules: RULES,
