@@ -11,7 +11,7 @@ import { loadMap, getGridDimensions, positionsToGrid } from './map-loader';
 import { CharacterAI, EVENT_TYPES, VERBOSITY } from './character-ai';
 import { loadWorld } from './world-loader';
 import { routeChoices } from './atlas-movement';
-import { miniMapSvg, pluralize } from './entry-ui';
+import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
 
 // Client-side mod registry — static bundle imports (Parcel v1 forces all imports static, so
 // every registered mod is bundled at build; only WHICH is active is chosen at runtime). This
@@ -400,6 +400,7 @@ class MonopolyBoard {
         </div>`;
     });
     this.menuEl.innerHTML = `
+      ${this._breadcrumb('mod')}
       <div><div class="menu__heading">SELECT MOD</div><div class="menu__sub">Choose the game world to play</div></div>
       <div class="map-grid">${cards}</div>
       <button class="pix-btn pix-btn--ghost" id="btn-back-mode-mods"><span class="glyph glyph--arrow-back"></span> BACK</button>
@@ -412,6 +413,7 @@ class MonopolyBoard {
       };
     });
     document.getElementById('btn-back-mode-mods').onclick = () => this.showModeSelect();
+    this._wireBreadcrumb();
   }
 
   // Install a mod: set activeMod, point the engine RULES singleton + board defaults at it
@@ -458,6 +460,7 @@ class MonopolyBoard {
         </div>`;
     });
     this.menuEl.innerHTML = `
+      ${this._breadcrumb('map')}
       <div><div class="menu__heading">SELECT MAP</div><div class="menu__sub">Choose the board you want to play on</div></div>
       <div class="map-grid">${cards}</div>
       <button class="pix-btn pix-btn--ghost" id="btn-back-mode"><span class="glyph glyph--arrow-back"></span> BACK</button>
@@ -473,11 +476,56 @@ class MonopolyBoard {
     // only one mod exists, so the single-mod flow still goes map → hero).
     document.getElementById('btn-back-mode').onclick = () =>
       MODS.length > 1 ? this.showModSelect() : this.showModeSelect();
+    this._wireBreadcrumb();
   }
 
-  // Breadcrumb glue is added in a later step; stubs keep this screen self-contained until then.
-  _breadcrumb() { return ''; }
-  _wireBreadcrumb() {}
+  // Progress breadcrumb (LOCAL mode only). renderCharacterSelect is shared with the online flow,
+  // so the breadcrumb must never render/wire online (its clicks call local-only show* methods that
+  // mutate the RULES singleton + activeMod and would abandon a live online client).
+  _breadcrumb(current) {
+    if (this.mode !== 'local') return '';
+    const picks = {
+      mod: this.activeMod ? this.activeMod.name : '',
+      map: this.mapData ? (this.mapData.name || '') : '',
+    };
+    const steps = breadcrumbSteps({ current, picks, modCount: MODS.length });
+    const items = steps.map(s => {
+      const cls = 'breadcrumb__step breadcrumb__step--' + s.state + (s.interactive ? ' breadcrumb__step--clickable' : '');
+      const val = s.value ? `<span class="breadcrumb__val">${esc(s.value)}</span>` : '';
+      const attr = s.interactive ? ` data-step="${s.key}"` : '';
+      return `<span class="${cls}"${attr}>${s.label}${val}</span>`;
+    }).join('<span class="breadcrumb__sep">›</span>');
+    return `<div class="breadcrumb">${items}</div>`;
+  }
+
+  _wireBreadcrumb() {
+    if (this.mode !== 'local') return;
+    const routes = {
+      mode: () => this.showModeSelect(),
+      mod: () => (MODS.length > 1 ? this.showModSelect() : this.showModeSelect()),
+      map: () => this.showMapSelect(),
+      setup: () => this.showSetup(),
+    };
+    document.querySelectorAll('.breadcrumb__step--clickable').forEach(el => {
+      const key = el.dataset.step;
+      if (routes[key]) el.onclick = () => this._softExitTo(routes[key]);
+    });
+  }
+
+  // Soft exit: if a game client is already running (we're on CHARACTER, post-START), stop it +
+  // tear down the globe BUT preserve activeMod / mapData / _setupSel so the target menu step keeps
+  // the user's picks. Distinct from exitToMenu(), which also resets victory + map to defaults.
+  _softExitTo(fn) {
+    if (this.client) {
+      this._cancelRoll();
+      this._teardownGlobe();
+      this.client.stop();
+      this.client = null;
+      this._pendingCharId = null;
+      this._lastG = null;
+    }
+    fn();
+  }
 
   // Merged player-count + victory screen. _setupSel persists across re-entries and is keyed to
   // the map it was built for: a same-map re-entry (e.g. a breadcrumb jump-back) keeps the user's
@@ -728,6 +776,7 @@ class MonopolyBoard {
       : '<span class="select__chosen-empty">Select a councillor to continue</span>';
 
     this.charSelectEl.innerHTML = `
+      ${this._breadcrumb('character')}
       <div class="select__head">
         <div class="select__heading">
           <span class="select__p">PLAYER ${playerNo}</span>
@@ -763,6 +812,7 @@ class MonopolyBoard {
       this._pendingCharId = null;
       this.client.moves.selectCharacter(id);
     };
+    this._wireBreadcrumb();
   }
 
   // ─────────────────────────────────────────────────────────
