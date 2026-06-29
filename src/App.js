@@ -466,7 +466,7 @@ class MonopolyBoard {
       card.onclick = () => {
         const idx = parseInt(card.dataset.mapIdx);
         this.setMap(this.availableMaps[idx]);
-        this.showPlayerCountSelect();
+        this.showSetup();
       };
     });
     // BACK from map-select returns to mod-select (which auto-advances back to the hero when
@@ -475,44 +475,43 @@ class MonopolyBoard {
       MODS.length > 1 ? this.showModSelect() : this.showModeSelect();
   }
 
-  showPlayerCountSelect() {
+  // Breadcrumb glue is added in a later step; stubs keep this screen self-contained until then.
+  _breadcrumb() { return ''; }
+  _wireBreadcrumb() {}
+
+  // Merged player-count + victory screen. _setupSel persists across re-entries and is keyed to
+  // the map it was built for: a same-map re-entry (e.g. a breadcrumb jump-back) keeps the user's
+  // picks; a different map re-derives victory defaults (groups/turns are map-specific).
+  showSetup(playerCount) {
     this._showScreen('menu');
-    this.menuEl.className = 'screen screen--menu';
-    let btns = '';
-    for (let n = 2; n <= 10; n++) {
-      btns += `<button class="pix-btn pix-btn--default count-btn" data-count="${n}">${n} PLAYERS</button>`;
+    const mapId = this.mapData.id;
+    const prev = this._setupSel;
+    if (!prev || prev.mapId !== mapId) {
+      // pre-fill victory from the active map (treat bare wealth/no-cap as Last Standing so the
+      // UI default matches the game's feel — same rule the old showVictorySelect used).
+      const mv = this.mapData.victory || {};
+      let defPrimary = mv.primary || 'survival';
+      if (defPrimary === 'wealth' && !mv.maxTurns) defPrimary = 'survival';
+      this._setupSel = {
+        playerCount: playerCount || (prev && prev.playerCount) || 2,
+        primary: defPrimary,
+        maxTurns: mv.maxTurns || 30,
+        groupsToWin: (mv.params && mv.params.groupsToWin) || RULES.victory.groupsToWin || 3,
+        mapId: mapId,
+      };
+    } else if (playerCount) {
+      this._setupSel.playerCount = playerCount;
     }
-    this.menuEl.innerHTML = `
-      <div><div class="menu__heading">HOW MANY PLAYERS?</div><div class="menu__sub">2–10 players for local hot-seat play</div></div>
-      <div class="count-grid">${btns}</div>
-      <button class="pix-btn pix-btn--ghost" id="btn-back-map"><span class="glyph glyph--arrow-back"></span> BACK</button>
-    `;
-    this.menuEl.querySelectorAll('.count-btn').forEach(btn => {
-      btn.onclick = () => this.showVictorySelect(parseInt(btn.dataset.count));
-    });
-    document.getElementById('btn-back-map').onclick = () => this.showMapSelect();
+    this._renderSetup();
   }
 
-  showVictorySelect(playerCount) {
-    this._showScreen('menu');
+  _renderSetup() {
+    const s = this._setupSel;
     this.menuEl.className = 'screen screen--menu';
-    this._pendingPlayerCount = playerCount;
-
-    // "Both": pre-fill from the active map's victory; treat the loader's bare
-    // wealth/no-cap default as Last Standing so the UI default matches the game's feel.
-    const mv = this.mapData.victory || {};
-    let defPrimary = mv.primary || 'survival';
-    if (defPrimary === 'wealth' && !mv.maxTurns) defPrimary = 'survival';
-    this._victorySel = {
-      primary: defPrimary,
-      maxTurns: mv.maxTurns || 30,
-      groupsToWin: (mv.params && mv.params.groupsToWin) || RULES.victory.groupsToWin || 3,
-    };
-    this._renderVictorySelect();
-  }
-
-  _renderVictorySelect() {
-    const s = this._victorySel;
+    let counts = '';
+    for (let n = 2; n <= 10; n++) {
+      counts += `<button class="pix-btn ${s.playerCount === n ? 'pix-btn--primary' : 'pix-btn--default'} count-btn" data-count="${n}">${n}</button>`;
+    }
     const MODES = [
       { id: 'survival', label: 'LAST STANDING', desc: 'Last player not bankrupt wins. Classic elimination.' },
       { id: 'wealth', label: 'TIMED · RICHEST', desc: 'After a set number of turns, the highest net worth wins.' },
@@ -537,8 +536,10 @@ class MonopolyBoard {
     }
 
     this.menuEl.innerHTML = `
-      <div><div class="menu__heading">VICTORY CONDITION</div><div class="menu__sub">How is the winner decided? (${this._pendingPlayerCount} players)</div></div>
-      <div class="map-grid" style="max-width:760px;">${cards}</div>
+      ${this._breadcrumb('setup')}
+      <div><div class="menu__heading">GAME SETUP</div><div class="menu__sub">Players &amp; victory condition</div></div>
+      <div class="setup__count"><span class="aiset__label">PLAYERS</span><div class="count-grid">${counts}</div></div>
+      <div class="vic-grid">${cards}</div>
       <div class="vic-paramrow">${param}</div>
       <div class="vic-actions">
         <button class="pix-btn pix-btn--ghost" id="btn-vic-back"><span class="glyph glyph--arrow-back"></span> BACK</button>
@@ -546,30 +547,32 @@ class MonopolyBoard {
       </div>
     `;
 
-    this.menuEl.querySelectorAll('.vic-card').forEach(card => {
-      card.onclick = () => { this._victorySel.primary = card.dataset.mode; this._renderVictorySelect(); };
+    this.menuEl.querySelectorAll('.count-btn').forEach(btn => {
+      btn.onclick = () => { this._setupSel.playerCount = parseInt(btn.dataset.count); this._renderSetup(); };
     });
-    const dec = (id, key, min) => { const el = document.getElementById(id); if (el) el.onclick = () => { this._victorySel[key] = Math.max(min, this._victorySel[key] - (key === 'maxTurns' ? 5 : 1)); this._renderVictorySelect(); }; };
-    const inc = (id, key, max) => { const el = document.getElementById(id); if (el) el.onclick = () => { this._victorySel[key] = Math.min(max, this._victorySel[key] + (key === 'maxTurns' ? 5 : 1)); this._renderVictorySelect(); }; };
+    this.menuEl.querySelectorAll('.vic-card').forEach(card => {
+      card.onclick = () => { this._setupSel.primary = card.dataset.mode; this._renderSetup(); };
+    });
+    const dec = (id, key, min) => { const el = document.getElementById(id); if (el) el.onclick = () => { this._setupSel[key] = Math.max(min, this._setupSel[key] - (key === 'maxTurns' ? 5 : 1)); this._renderSetup(); }; };
+    const inc = (id, key, max) => { const el = document.getElementById(id); if (el) el.onclick = () => { this._setupSel[key] = Math.min(max, this._setupSel[key] + (key === 'maxTurns' ? 5 : 1)); this._renderSetup(); }; };
     dec('vic-mt-dec', 'maxTurns', 5); inc('vic-mt-inc', 'maxTurns', 200);
     dec('vic-gw-dec', 'groupsToWin', 1); inc('vic-gw-inc', 'groupsToWin', 8);
 
-    document.getElementById('btn-vic-back').onclick = () => this.showPlayerCountSelect();
+    document.getElementById('btn-vic-back').onclick = () => this.showMapSelect();
     document.getElementById('btn-vic-start').onclick = () => {
-      const sel = this._victorySel;
-      // A map's own victory.maxTurns is a FALLBACK terminator even for non-wealth
-      // modes — otherwise a survival/dominion game on a no-natural-end map (e.g.
-      // Terra) could run forever (highest net worth wins at the cap). Wealth mode
-      // uses the player-chosen turn limit; classic maps define no maxTurns (0) so
-      // their survival/dominion games are unchanged.
+      const sel = this._setupSel;
+      // A map's own victory.maxTurns is a FALLBACK terminator even for non-wealth modes —
+      // otherwise a survival/dominion game on a no-natural-end map (e.g. Terra) could run
+      // forever. Wealth mode uses the player-chosen turn limit; classic maps define no maxTurns.
       const mapMaxTurns = (this.mapData.victory && this.mapData.victory.maxTurns) || 0;
       setVictoryConfig({
         primary: sel.primary,
         maxTurns: sel.primary === 'wealth' ? sel.maxTurns : mapMaxTurns,
         groupsToWin: sel.groupsToWin,
       });
-      this.startGameWithPlayers(this._pendingPlayerCount);
+      this.startGameWithPlayers(sel.playerCount);
     };
+    this._wireBreadcrumb();
   }
 
   showOnlineLobby() {
