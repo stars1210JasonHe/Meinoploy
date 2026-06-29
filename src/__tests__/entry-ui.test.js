@@ -67,6 +67,19 @@ describe('mapPreviewPoints', () => {
   test('atlas points use var(--accent)', () => {
     expect(mapPreviewPoints(atlasPosOnly)[0].color).toBe('var(--accent)');
   });
+  test('custom map uses layout.positions (generatePositions returns {} for custom)', () => {
+    const custom = {
+      layout: { type: 'custom', positions: { '0': { x: 88, y: 88 }, '1': { x: 74, y: 88 } } },
+      spaceCount: 2,
+      spaces: [{ id: 0, color: '#f00' }, { id: 1 }],
+      theme: { logoColor: '#0ff' },
+    };
+    const pts = mapPreviewPoints(custom);
+    expect(pts).toHaveLength(2);
+    expect(pts).toContainEqual({ x: 88, y: 88, color: '#f00' });
+    // space with no color falls back to theme.logoColor
+    expect(pts).toContainEqual({ x: 74, y: 88, color: '#0ff' });
+  });
   test('coordless map -> [] (no throw)', () => {
     expect(mapPreviewPoints({})).toEqual([]);
   });

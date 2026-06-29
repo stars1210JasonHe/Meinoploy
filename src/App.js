@@ -413,7 +413,7 @@ class MonopolyBoard {
       };
     });
     document.getElementById('btn-back-mode-mods').onclick = () => this.showModeSelect();
-    this._wireBreadcrumb();
+    this._wireBreadcrumb(this.menuEl);
   }
 
   // Install a mod: set activeMod, point the engine RULES singleton + board defaults at it
@@ -476,7 +476,7 @@ class MonopolyBoard {
     // only one mod exists, so the single-mod flow still goes map → hero).
     document.getElementById('btn-back-mode').onclick = () =>
       MODS.length > 1 ? this.showModSelect() : this.showModeSelect();
-    this._wireBreadcrumb();
+    this._wireBreadcrumb(this.menuEl);
   }
 
   // Progress breadcrumb (LOCAL mode only). renderCharacterSelect is shared with the online flow,
@@ -498,7 +498,10 @@ class MonopolyBoard {
     return `<div class="breadcrumb">${items}</div>`;
   }
 
-  _wireBreadcrumb() {
+  // rootEl scopes the wiring to the screen just rendered (menuEl / charSelectEl). The non-active
+  // screen keeps its last-rendered breadcrumb at display:none, so an UNscoped document query would
+  // also attach handlers to those hidden, stale nodes.
+  _wireBreadcrumb(rootEl) {
     if (this.mode !== 'local') return;
     const routes = {
       mode: () => this.showModeSelect(),
@@ -506,7 +509,7 @@ class MonopolyBoard {
       map: () => this.showMapSelect(),
       setup: () => this.showSetup(),
     };
-    document.querySelectorAll('.breadcrumb__step--clickable').forEach(el => {
+    (rootEl || document).querySelectorAll('.breadcrumb__step--clickable').forEach(el => {
       const key = el.dataset.step;
       if (routes[key]) el.onclick = () => this._softExitTo(routes[key]);
     });
@@ -519,8 +522,7 @@ class MonopolyBoard {
     if (this.client) {
       this._cancelRoll();
       this._teardownGlobe();
-      this.client.stop();
-      this.client = null;
+      this._stopClient();
       this._pendingCharId = null;
       this._lastG = null;
     }
@@ -620,7 +622,7 @@ class MonopolyBoard {
       });
       this.startGameWithPlayers(sel.playerCount);
     };
-    this._wireBreadcrumb();
+    this._wireBreadcrumb(this.menuEl);
   }
 
   showOnlineLobby() {
@@ -650,12 +652,14 @@ class MonopolyBoard {
     this.client.updateCredentials(credentials);
     this.client.start();
     this.client.subscribe(state => this.update(state));
+    this._bumpClients(1);
   }
 
   startGameWithPlayers(numPlayers) {
     this.client = Client({ game: Monopoly, numPlayers: numPlayers, debug: false });
     this.client.start();
     this.client.subscribe(state => this.update(state));
+    this._bumpClients(1);
   }
 
   // ─────────────────────────────────────────────────────────
@@ -812,7 +816,7 @@ class MonopolyBoard {
       this._pendingCharId = null;
       this.client.moves.selectCharacter(id);
     };
-    this._wireBreadcrumb();
+    this._wireBreadcrumb(this.charSelectEl);
   }
 
   // ─────────────────────────────────────────────────────────
@@ -2300,15 +2304,25 @@ class MonopolyBoard {
   // ─────────────────────────────────────────────────────────
   // Lifecycle / save-load
   // ─────────────────────────────────────────────────────────
+  // Stop + drop the live boardgame.io client (and keep the live-client counter honest, used by
+  // the soft-exit/leak E2E). Safe to call when no client exists.
+  _bumpClients(n) {
+    if (typeof window !== 'undefined') window.__MP_LIVE_CLIENTS = Math.max(0, (window.__MP_LIVE_CLIENTS || 0) + n);
+  }
+  _stopClient() {
+    if (this.client) { this.client.stop(); this.client = null; this._bumpClients(-1); }
+  }
+
   exitToMenu() {
     this._cancelRoll(); // kill any in-flight dice animation before the client goes away
     this._teardownGlobe(); // stop the globe RAF loop + WebGL context (update() won't run again)
-    if (this.client) { this.client.stop(); this.client = null; }
+    this._stopClient();
     if (this._tokenResizeObs) { this._tokenResizeObs.disconnect(); this._tokenResizeObs = null; }
     this._lastG = null;
     this._tokenRetried = false;
     this.onlinePlayerID = null;
     this._pendingCharId = null;
+    this._setupSel = null; // FULL reset: the merged SETUP screen returns to fresh defaults next entry
     this.aiResponses = [];
     this.chatHistories = {};
     this.activeChatCharId = null;
@@ -2369,7 +2383,7 @@ class MonopolyBoard {
     }
     const savedMap = this.availableMaps.find(m => m.id === saveData.mapId) || this.availableMaps[0];
     this.setMap(savedMap);
-    if (this.client) this.client.stop(); // null when loading from the menu (no active game)
+    this._stopClient(); // null when loading from the menu (no active game)
     // Reset per-game UI caches so a load (possibly from a different prior game) doesn't replay
     // the entire saved log as fresh AI chatter or carry over stale chat history.
     this.aiResponses = [];
@@ -2385,6 +2399,7 @@ class MonopolyBoard {
     this.client = Client({ game: LoadedGame, numPlayers: saveData.numPlayers, debug: false });
     this.client.start();
     this.client.subscribe(state => this.update(state));
+    this._bumpClients(1);
   }
 }
 

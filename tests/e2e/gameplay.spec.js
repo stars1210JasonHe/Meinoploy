@@ -767,6 +767,8 @@ test.describe('Entry-UI polish', () => {
     await expect(mapCrumb).toBeVisible();
     await mapCrumb.click(); // soft-exit → MAP
     await page.waitForSelector('.map-card[data-map-idx]', { timeout: 10000 });
+    // The soft-exit stopped the running client — none should be live now (leak guard).
+    expect(await page.evaluate(() => window.__MP_LIVE_CLIENTS)).toBe(0);
 
     // Re-complete the flow to a real game board.
     await page.click('.map-card[data-map-idx="0"]');
@@ -783,6 +785,7 @@ test.describe('Entry-UI polish', () => {
     // Exactly one game board context — no duplicate/leaked client.
     await page.waitForSelector('#btn-roll', { timeout: 10000 });
     await expect(page.locator('#btn-roll')).toHaveCount(1);
+    expect(await page.evaluate(() => window.__MP_LIVE_CLIENTS)).toBe(1);
     expect(pageErrors).toEqual([]);
   });
 });
