@@ -12,8 +12,10 @@ major tasks below are to **discuss + design before building** — each is a larg
 - Scope so far: **local hot-seat**. Online cross-player moves (turn.activePlayers) still pending.
 
 ## Near-term polish
-1. **Game-entry UI polish** — the flow `mode → mod → map → players → victory → character select`.
-   Make the entry screens cleaner / nicer (layout, spacing, transitions, readability).
+1. ~~**Game-entry UI polish**~~ **DONE 2026-06-29 (main `6259b00`).** Centered menu screens (fixed the
+   inline-`block`-over-`flex` root cause), body-font nav arrows, dynamic hero footer + mod taglines, live SVG
+   map previews (`src/entry-ui.js miniMapSvg`), merged GAME SETUP screen (players+victory), local-only progress
+   breadcrumb with soft-exit jump-back. New `src/entry-ui.js` (17 unit tests) + 4 E2E; 481 Jest + 24 E2E green.
 2. ~~Balance follow-up (tourer dominance)~~ **RESOLVED 2026-06-26.** Root cause measured: tourer
    grabbed ~6.5x more cheap land (net-worth only 1.04x, but a consistent edge → ~63% wins). Fixed by
    wiring per-world economy (`loadWorld` was hardcoding mapMechanics to 1.0) + terra-titans
