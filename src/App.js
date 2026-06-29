@@ -383,10 +383,13 @@ class MonopolyBoard {
     let cards = '';
     MODS.forEach((mod, idx) => {
       const sel = this.activeMod && this.activeMod.id === mod.id;
+      const defMap = mod.maps.concat(mod.worlds)[0];
+      const preview = defMap ? miniMapSvg(defMap) : '';
       cards += `
-        <div class="pix-panel map-card ${sel ? 'map-card--sel' : ''}" data-mod-idx="${idx}">
+        <div class="pix-panel map-card mod-card ${sel ? 'map-card--sel' : ''}" data-mod-idx="${idx}">
           <div class="pix-panel__accent" style="background:var(--accent)"></div>
           <div class="pix-panel__body">
+            ${preview}
             <div class="map-card__title">${esc(mod.name)}</div>
             <div class="map-card__desc">${esc(mod.tagline || '')}</div>
             <div class="map-card__meta">
@@ -438,10 +441,12 @@ class MonopolyBoard {
       const accent = isWorld ? 'var(--accent)' : (mapJson.theme.logoColor || 'var(--accent)');
       const title = mapJson.name;
       const desc = isWorld ? (mapJson.story || '') : (mapJson.description || '');
+      const preview = miniMapSvg(mapJson);
       cards += `
         <div class="pix-panel map-card" data-map-idx="${idx}">
           <div class="pix-panel__accent" style="background:${accent}"></div>
           <div class="pix-panel__body">
+            ${preview}
             <div class="map-card__title">${esc(title)}</div>
             <div class="map-card__desc">${esc(desc)}</div>
             <div class="map-card__meta">
