@@ -332,8 +332,11 @@ class MonopolyBoard {
   }
 
   _showScreen(name) {
-    this.menuEl.style.display = name === 'menu' ? 'block' : 'none';
-    this.lobbyEl.style.display = name === 'lobby' ? 'block' : 'none';
+    // 'flex' (not 'block') so the .screen--menu flex centering actually applies — an inline
+    // 'block' overrides the class's display:flex. Lobby reuses .screen--menu, so it needs it too.
+    // (The hero also routes through 'menu' and now gets flex; harmless — its children are absolute.)
+    this.menuEl.style.display = name === 'menu' ? 'flex' : 'none';
+    this.lobbyEl.style.display = name === 'lobby' ? 'flex' : 'none';
     this.charSelectEl.style.display = name === 'select' ? 'block' : 'none';
     this.gameAreaEl.style.display = name === 'game' ? 'grid' : 'none';
     this.resultsEl.style.display = name === 'results' ? 'block' : 'none';
