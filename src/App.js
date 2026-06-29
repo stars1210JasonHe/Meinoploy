@@ -358,7 +358,7 @@ class MonopolyBoard {
           <button class="pix-btn pix-btn--primary pix-btn--lg mode-btn" id="btn-mode-local">LOCAL GAME</button>
           <button class="pix-btn pix-btn--default pix-btn--lg mode-btn" id="btn-mode-online">ONLINE GAME</button>
         </div>
-        <div class="title__press">&#9656; PRESS START</div>
+        <div class="title__press"><span class="glyph glyph--arrow"></span> PRESS START</div>
         <div class="title__foot">v0.4 · 10 CHARACTERS · 4 MAPS · TRADE &amp; AUCTION</div>
       </div>
     `;
@@ -396,7 +396,7 @@ class MonopolyBoard {
     this.menuEl.innerHTML = `
       <div><div class="menu__heading">SELECT MOD</div><div class="menu__sub">Choose the game world to play</div></div>
       <div class="map-grid">${cards}</div>
-      <button class="pix-btn pix-btn--ghost" id="btn-back-mode-mods">&#9666; BACK</button>
+      <button class="pix-btn pix-btn--ghost" id="btn-back-mode-mods"><span class="glyph glyph--arrow-back"></span> BACK</button>
     `;
     this.menuEl.querySelectorAll('.map-card').forEach(card => {
       card.onclick = () => {
@@ -452,7 +452,7 @@ class MonopolyBoard {
     this.menuEl.innerHTML = `
       <div><div class="menu__heading">SELECT MAP</div><div class="menu__sub">Choose the board you want to play on</div></div>
       <div class="map-grid">${cards}</div>
-      <button class="pix-btn pix-btn--ghost" id="btn-back-mode">&#9666; BACK</button>
+      <button class="pix-btn pix-btn--ghost" id="btn-back-mode"><span class="glyph glyph--arrow-back"></span> BACK</button>
     `;
     this.menuEl.querySelectorAll('.map-card').forEach(card => {
       card.onclick = () => {
@@ -477,7 +477,7 @@ class MonopolyBoard {
     this.menuEl.innerHTML = `
       <div><div class="menu__heading">HOW MANY PLAYERS?</div><div class="menu__sub">2–10 players for local hot-seat play</div></div>
       <div class="count-grid">${btns}</div>
-      <button class="pix-btn pix-btn--ghost" id="btn-back-map">&#9666; BACK</button>
+      <button class="pix-btn pix-btn--ghost" id="btn-back-map"><span class="glyph glyph--arrow-back"></span> BACK</button>
     `;
     this.menuEl.querySelectorAll('.count-btn').forEach(btn => {
       btn.onclick = () => this.showVictorySelect(parseInt(btn.dataset.count));
@@ -533,8 +533,8 @@ class MonopolyBoard {
       <div class="map-grid" style="max-width:760px;">${cards}</div>
       <div class="vic-paramrow">${param}</div>
       <div class="vic-actions">
-        <button class="pix-btn pix-btn--ghost" id="btn-vic-back">&#9666; BACK</button>
-        <button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-vic-start">START GAME &#9656;</button>
+        <button class="pix-btn pix-btn--ghost" id="btn-vic-back"><span class="glyph glyph--arrow-back"></span> BACK</button>
+        <button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-vic-start">START GAME <span class="glyph glyph--arrow"></span></button>
       </div>
     `;
 
@@ -726,9 +726,9 @@ class MonopolyBoard {
       </div>
       <div class="select__grid">${cards}</div>
       <div class="select__bar">
-        <button class="pix-btn pix-btn--ghost" id="btn-select-back">&#9666; BACK</button>
+        <button class="pix-btn pix-btn--ghost" id="btn-select-back"><span class="glyph glyph--arrow-back"></span> BACK</button>
         <div class="select__chosen">${chosenHtml}</div>
-        <button class="pix-btn pix-btn--primary" id="btn-select-confirm" ${picked ? '' : 'disabled'}>${isLast ? 'BEGIN GAME &#9656;' : 'NEXT PLAYER &#9656;'}</button>
+        <button class="pix-btn pix-btn--primary" id="btn-select-confirm" ${picked ? '' : 'disabled'}>${isLast ? 'BEGIN GAME <span class="glyph glyph--arrow"></span>' : 'NEXT PLAYER <span class="glyph glyph--arrow"></span>'}</button>
       </div>
     `;
 
