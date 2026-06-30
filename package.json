@@ -10,7 +10,8 @@
     "test:unit": "jest",
     "test:e2e": "npx playwright test",
     "server": "node -r esm server.js",
-    "sim": "node -r esm src/sim/cli.js"
+    "sim": "node -r esm src/sim/cli.js",
+    "create-mod": "node -r esm scripts/create-mod.js"
   },
   "browserslist": "defaults and supports async-functions",
   "dependencies": {
