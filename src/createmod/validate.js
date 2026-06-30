@@ -170,6 +170,9 @@ export function validateModInput(input, opts) {
         const hasPos = p.pos && typeof p.pos.x === 'number' && typeof p.pos.y === 'number';
         const hasGeo = p.geo && typeof p.geo.lat === 'number' && typeof p.geo.lng === 'number';
         if (!hasPos && !hasGeo) errors.push(`place "${p.id}": requires pos.{x,y} or geo.{lat,lng}`);
+        // Defensive backstop: normalizeAtlasWorld derives geo from pos for globe worlds, so a globe
+        // place lacks geo here only if it had neither pos nor geo (already caught above). pos-only
+        // globe places are intentionally accepted (geo is derived), which prevents a blank globe.
         if (normalized.world.renderMode === 'globe' && !hasGeo) errors.push(`place "${p.id}": renderMode "globe" requires geo.{lat,lng}`);
       });
       if (errors.length === 0) {

@@ -153,16 +153,21 @@ describe('validateModInput — atlas', () => {
     expect(r.ok).toBe(false);
     expect(r.errors.join(' ')).toMatch(/requires pos.*or geo/i);
   });
-  test('globe world with a geo-less place errors', () => {
+  test('globe world: a place with neither pos nor geo errors (renderability guard)', () => {
     const bad = atlasInput();
     bad.world.renderMode = 'globe';
-    bad.world.places[0].pos = { x: 10, y: 10 };
-    delete bad.world.places[0].geo;
-    // pos present so the "neither" check passes; but globe requires geo. However normalize
-    // derives geo from pos when globe -> so to truly trigger, remove pos too:
-    delete bad.world.places[0].pos;
+    delete bad.world.places[0].geo; // place has no pos either -> cannot derive geo -> cannot render
     const r = validateModInput(bad, OPTS);
-    expect(r.errors.join(' ')).toMatch(/globe.*requires geo|requires pos.*or geo/i);
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/requires pos.*or geo|globe.*requires geo/i);
+  });
+  test('globe world: a pos-only place is accepted (geo is derived from pos, not an error)', () => {
+    const ok = atlasInput();
+    ok.world.renderMode = 'globe';
+    ok.world.places[0].pos = { x: 30, y: 40 };
+    delete ok.world.places[0].geo; // pos present -> normalize derives geo -> renderable
+    const r = validateModInput(ok, OPTS);
+    expect(r.errors.join(' ')).not.toMatch(/requires geo|requires pos/i);
   });
 });
 
