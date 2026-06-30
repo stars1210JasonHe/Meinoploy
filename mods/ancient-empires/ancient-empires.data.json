@@ -1,0 +1,434 @@
+{
+  "roster": [
+    {
+      "id": "hammurabi",
+      "name": "Hammurabi",
+      "title": "The Lawgiver",
+      "stats": {
+        "capital": 6,
+        "luck": 3,
+        "negotiation": 6,
+        "charisma": 5,
+        "tech": 5,
+        "stamina": 9
+      },
+      "passive": {
+        "id": "enforcer",
+        "name": "Code of Law",
+        "description": "Designate one owned property as regulated; opponents pay +20% rent there."
+      },
+      "color": "#b5651d"
+    },
+    {
+      "id": "cyrus-the-great",
+      "name": "Cyrus the Great",
+      "title": "King of Kings",
+      "stats": {
+        "capital": 7,
+        "luck": 4,
+        "negotiation": 8,
+        "charisma": 7,
+        "tech": 4,
+        "stamina": 4
+      },
+      "passive": {
+        "id": "financier",
+        "name": "Edict of Tolerance",
+        "description": "Property purchase price -10%. Financial negative-event losses -20%."
+      },
+      "color": "#7e57c2"
+    },
+    {
+      "id": "alexander-the-great",
+      "name": "Alexander the Great",
+      "title": "World-Conqueror",
+      "stats": {
+        "capital": 5,
+        "luck": 7,
+        "negotiation": 4,
+        "charisma": 7,
+        "tech": 4,
+        "stamina": 7
+      },
+      "passive": {
+        "id": "arbitrageur",
+        "name": "Relentless March",
+        "description": "Gain $100 whenever any player goes bankrupt. Rebuild cost -30%."
+      },
+      "color": "#1565c0"
+    }
+  ],
+  "lore": {
+    "hammurabi": {
+      "nameZh": "Hammurabi",
+      "titleZh": "The Lawgiver",
+      "identity": "The Lawgiver",
+      "alignment": "Strategy",
+      "background": "Hammurabi, The Lawgiver, contends for control of the board.",
+      "joining": "On the board, Hammurabi plays to their strengths.",
+      "styleIntro": "Hammurabi plays by one rule:",
+      "style": [
+        "Press every advantage."
+      ],
+      "styleOutro": "They adapt to the board as it turns.",
+      "relationships": [
+        {
+          "target": "Cyrus the Great",
+          "description": "A rival contesting the board."
+        }
+      ],
+      "themeSummary": "Hammurabi\nplays to win."
+    },
+    "cyrus-the-great": {
+      "nameZh": "Cyrus the Great",
+      "titleZh": "King of Kings",
+      "identity": "King of Kings",
+      "alignment": "Strategy",
+      "background": "Cyrus the Great, King of Kings, contends for control of the board.",
+      "joining": "On the board, Cyrus the Great plays to their strengths.",
+      "styleIntro": "Cyrus the Great plays by one rule:",
+      "style": [
+        "Press every advantage."
+      ],
+      "styleOutro": "They adapt to the board as it turns.",
+      "relationships": [
+        {
+          "target": "Hammurabi",
+          "description": "A rival contesting the board."
+        }
+      ],
+      "themeSummary": "Cyrus the Great\nplays to win."
+    },
+    "alexander-the-great": {
+      "nameZh": "Alexander the Great",
+      "titleZh": "World-Conqueror",
+      "identity": "World-Conqueror",
+      "alignment": "Strategy",
+      "background": "Alexander the Great, World-Conqueror, contends for control of the board.",
+      "joining": "On the board, Alexander the Great plays to their strengths.",
+      "styleIntro": "Alexander the Great plays by one rule:",
+      "style": [
+        "Press every advantage."
+      ],
+      "styleOutro": "They adapt to the board as it turns.",
+      "relationships": [
+        {
+          "target": "Hammurabi",
+          "description": "A rival contesting the board."
+        }
+      ],
+      "themeSummary": "Alexander the Great\nplays to win."
+    }
+  },
+  "world": {
+    "movementMode": "atlas",
+    "renderMode": "globe",
+    "schemaVersion": "3.0-draft",
+    "places": [
+      {
+        "id": "newyork",
+        "realName": "New York",
+        "archetypes": [
+          "financial-district"
+        ],
+        "geo": {
+          "lat": 40.71,
+          "lng": -74.01
+        },
+        "connectors": {
+          "e": "london",
+          "s": "saopaulo"
+        },
+        "data": {
+          "population": 18800000,
+          "gdp": 1770,
+          "fame": 98
+        },
+        "pos": {
+          "x": 29.441666666666666,
+          "y": 27.383333333333333
+        }
+      },
+      {
+        "id": "saopaulo",
+        "realName": "Sao Paulo",
+        "archetypes": [
+          "market"
+        ],
+        "geo": {
+          "lat": -23.55,
+          "lng": -46.63
+        },
+        "connectors": {
+          "e": "lagos"
+        },
+        "data": {
+          "population": 22000000,
+          "gdp": 480,
+          "fame": 78
+        },
+        "pos": {
+          "x": 37.047222222222224,
+          "y": 63.083333333333336
+        }
+      },
+      {
+        "id": "london",
+        "realName": "London",
+        "archetypes": [
+          "downtown"
+        ],
+        "geo": {
+          "lat": 51.51,
+          "lng": -0.13
+        },
+        "connectors": {
+          "e": "cairo",
+          "s": "lagos"
+        },
+        "data": {
+          "population": 9500000,
+          "gdp": 980,
+          "fame": 96
+        },
+        "pos": {
+          "x": 49.96388888888889,
+          "y": 21.383333333333336
+        }
+      },
+      {
+        "id": "lagos",
+        "realName": "Lagos",
+        "archetypes": [
+          "frontier"
+        ],
+        "geo": {
+          "lat": 6.52,
+          "lng": 3.38
+        },
+        "connectors": {
+          "e": "johannesburg"
+        },
+        "data": {
+          "population": 15000000,
+          "gdp": 130,
+          "fame": 68
+        },
+        "pos": {
+          "x": 50.93888888888889,
+          "y": 46.37777777777778
+        }
+      },
+      {
+        "id": "johannesburg",
+        "realName": "Johannesburg",
+        "archetypes": [
+          "industrial"
+        ],
+        "geo": {
+          "lat": -26.2,
+          "lng": 28.05
+        },
+        "connectors": {
+          "n": "dubai"
+        },
+        "data": {
+          "population": 5600000,
+          "gdp": 160,
+          "fame": 66
+        },
+        "pos": {
+          "x": 57.79166666666667,
+          "y": 64.55555555555556
+        }
+      },
+      {
+        "id": "cairo",
+        "realName": "Cairo",
+        "archetypes": [
+          "landmark"
+        ],
+        "geo": {
+          "lat": 30.04,
+          "lng": 31.24
+        },
+        "connectors": {
+          "e": "dubai"
+        },
+        "data": {
+          "population": 21000000,
+          "gdp": 140,
+          "fame": 74
+        },
+        "pos": {
+          "x": 58.677777777777784,
+          "y": 33.31111111111112
+        }
+      },
+      {
+        "id": "dubai",
+        "realName": "Dubai",
+        "archetypes": [
+          "market"
+        ],
+        "geo": {
+          "lat": 25.2,
+          "lng": 55.27
+        },
+        "connectors": {
+          "e": "mumbai"
+        },
+        "data": {
+          "population": 3500000,
+          "gdp": 145,
+          "fame": 76
+        },
+        "pos": {
+          "x": 65.35277777777779,
+          "y": 36
+        }
+      },
+      {
+        "id": "mumbai",
+        "realName": "Mumbai",
+        "archetypes": [
+          "residential"
+        ],
+        "geo": {
+          "lat": 19.08,
+          "lng": 72.88
+        },
+        "connectors": {
+          "e": "singapore"
+        },
+        "data": {
+          "population": 21000000,
+          "gdp": 370,
+          "fame": 72
+        },
+        "pos": {
+          "x": 70.24444444444444,
+          "y": 39.4
+        }
+      },
+      {
+        "id": "singapore",
+        "realName": "Singapore",
+        "archetypes": [
+          "transit-hub"
+        ],
+        "geo": {
+          "lat": 1.35,
+          "lng": 103.82
+        },
+        "connectors": {
+          "n": "shanghai"
+        },
+        "data": {
+          "population": 5700000,
+          "gdp": 470,
+          "fame": 80
+        },
+        "pos": {
+          "x": 78.83888888888889,
+          "y": 49.25000000000001
+        }
+      },
+      {
+        "id": "shanghai",
+        "realName": "Shanghai",
+        "archetypes": [
+          "port"
+        ],
+        "geo": {
+          "lat": 31.23,
+          "lng": 121.47
+        },
+        "connectors": {
+          "n": "tokyo"
+        },
+        "data": {
+          "population": 27000000,
+          "gdp": 1100,
+          "fame": 82
+        },
+        "pos": {
+          "x": 83.74166666666667,
+          "y": 32.65
+        }
+      },
+      {
+        "id": "tokyo",
+        "realName": "Tokyo",
+        "archetypes": [
+          "tech-hub"
+        ],
+        "geo": {
+          "lat": 35.68,
+          "lng": 139.65
+        },
+        "connectors": {
+          "s": "sydney"
+        },
+        "data": {
+          "population": 37000000,
+          "gdp": 2050,
+          "fame": 95
+        },
+        "pos": {
+          "x": 88.79166666666666,
+          "y": 30.177777777777777
+        }
+      },
+      {
+        "id": "sydney",
+        "realName": "Sydney",
+        "archetypes": [
+          "capital-hub"
+        ],
+        "geo": {
+          "lat": -33.87,
+          "lng": 151.21
+        },
+        "connectors": {
+          "e": "newyork"
+        },
+        "data": {
+          "population": 5300000,
+          "gdp": 410,
+          "fame": 84
+        },
+        "pos": {
+          "x": 92.0027777777778,
+          "y": 68.81666666666668
+        }
+      }
+    ],
+    "hubs": [
+      "newyork",
+      "dubai",
+      "tokyo"
+    ],
+    "winPaths": [
+      "dominion",
+      "wealth",
+      "survival"
+    ],
+    "victory": {
+      "maxTurns": 200,
+      "params": {
+        "groupsToWin": 4
+      }
+    },
+    "theme": {
+      "logoText": "ANCIENT",
+      "logoSubtitle": "EMPIRES"
+    },
+    "id": "ancient-empires",
+    "name": "Ancient Empires",
+    "size": {
+      "maxPlaces": 12,
+      "maxSpaces": 36
+    }
+  }
+}

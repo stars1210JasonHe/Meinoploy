@@ -31,8 +31,23 @@ describe('create-mod integration (pure pipeline)', () => {
   });
 
   test('registry patch on both fixtures keeps mods/index.js + App.js parseable, then unpatch reverts', () => {
-    const indexSrc = fs.readFileSync(path.join(__dirname, '../../mods/index.js'), 'utf8');
-    const appSrc = fs.readFileSync(path.join(__dirname, '../../src/App.js'), 'utf8');
+    // Use MINIMAL inline fixtures (not the live files) so this test is idempotent whether or
+    // not the acceptance task has already committed the two example mods into the live registries.
+    const indexSrc = [
+      "import { deepClone } from '../src/mod-loader';",
+      "import { dominionData } from './dominion/bundle.data';",
+      "export const MODS = {",
+      "  dominion: dominionData,",
+      "};",
+      "export const PRISTINE = {};",
+      "for (const id of Object.keys(MODS)) {",
+      "  PRISTINE[id] = deepClone(MODS[id].rules);",
+      "}",
+    ].join('\n') + '\n';
+    const appSrc = [
+      "import dominionMod from '../mods/dominion/bundle.client';",
+      "const MODS = [dominionMod];",
+    ].join('\n') + '\n';
     const p1 = patchRegistries('ancient-empires', { indexSrc, appSrc });
     const p2 = patchRegistries('steam-barons', { indexSrc: p1.indexSrc, appSrc: p1.appSrc });
     const parse = s => require('@babel/core').parseSync(s, { sourceType: 'module' });

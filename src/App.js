@@ -20,7 +20,9 @@ import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
 //   atlasAssets, getGlobe }. Stage 3 adds more entries here.
 import dominionMod from '../mods/dominion/bundle.client';
 import terraTitansMod from '../mods/terra-titans/bundle.client';
-const MODS = [dominionMod, terraTitansMod];
+import ancientEmpiresMod from '../mods/ancient-empires/bundle.client';
+import steamBaronsMod from '../mods/steam-barons/bundle.client';
+const MODS = [dominionMod, terraTitansMod, ancientEmpiresMod, steamBaronsMod];
 
 // True if a (lat,lng) on the globe faces the camera (cos-distance vs the POV center).
 // Overlays on the far hemisphere are hidden. > a small positive epsilon hides points

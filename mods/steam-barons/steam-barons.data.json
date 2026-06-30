@@ -1,0 +1,305 @@
+{
+  "roster": [
+    {
+      "id": "ada-ironwright",
+      "name": "Ada Ironwright",
+      "title": "The Engineer",
+      "stats": {
+        "capital": 6,
+        "luck": 4,
+        "negotiation": 5,
+        "charisma": 5,
+        "tech": 8,
+        "stamina": 6
+      },
+      "passive": {
+        "id": "pioneer",
+        "name": "Precision Works",
+        "description": "Property upgrade cost -20%."
+      },
+      "color": "#2e7d32"
+    },
+    {
+      "id": "silas-vance",
+      "name": "Silas Vance",
+      "title": "The Financier",
+      "stats": {
+        "capital": 8,
+        "luck": 3,
+        "negotiation": 7,
+        "charisma": 5,
+        "tech": 4,
+        "stamina": 7
+      },
+      "passive": {
+        "id": "financier",
+        "name": "Hard Reserves",
+        "description": "Property purchase price -10%. Financial negative-event losses -20%."
+      },
+      "color": "#c62828"
+    }
+  ],
+  "lore": {
+    "ada-ironwright": {
+      "nameZh": "Ada Ironwright",
+      "titleZh": "The Engineer",
+      "identity": "The Engineer",
+      "alignment": "Strategy",
+      "background": "Ada Ironwright, The Engineer, contends for control of the board.",
+      "joining": "On the board, Ada Ironwright plays to their strengths.",
+      "styleIntro": "Ada Ironwright plays by one rule:",
+      "style": [
+        "Press every advantage."
+      ],
+      "styleOutro": "They adapt to the board as it turns.",
+      "relationships": [
+        {
+          "target": "Silas Vance",
+          "description": "A rival contesting the board."
+        }
+      ],
+      "themeSummary": "Ada Ironwright\nplays to win."
+    },
+    "silas-vance": {
+      "nameZh": "Silas Vance",
+      "titleZh": "The Financier",
+      "identity": "The Financier",
+      "alignment": "Strategy",
+      "background": "Silas Vance, The Financier, contends for control of the board.",
+      "joining": "On the board, Silas Vance plays to their strengths.",
+      "styleIntro": "Silas Vance plays by one rule:",
+      "style": [
+        "Press every advantage."
+      ],
+      "styleOutro": "They adapt to the board as it turns.",
+      "relationships": [
+        {
+          "target": "Ada Ironwright",
+          "description": "A rival contesting the board."
+        }
+      ],
+      "themeSummary": "Silas Vance\nplays to win."
+    }
+  },
+  "map": {
+    "spaceCount": 12,
+    "layout": {
+      "type": "circle"
+    },
+    "spaces": [
+      {
+        "id": 0,
+        "name": "GO",
+        "type": "go"
+      },
+      {
+        "id": 1,
+        "name": "Foundry Row",
+        "type": "property",
+        "color": "red",
+        "price": 60,
+        "rent": 4
+      },
+      {
+        "id": 2,
+        "name": "Coal Yard",
+        "type": "property",
+        "color": "red",
+        "price": 60,
+        "rent": 4
+      },
+      {
+        "id": 3,
+        "name": "Chance",
+        "type": "chance"
+      },
+      {
+        "id": 4,
+        "name": "Rail Exchange",
+        "type": "property",
+        "color": "blue",
+        "price": 100,
+        "rent": 6
+      },
+      {
+        "id": 5,
+        "name": "Excise Office",
+        "type": "tax",
+        "taxAmount": 100
+      },
+      {
+        "id": 6,
+        "name": "Jail",
+        "type": "jail"
+      },
+      {
+        "id": 7,
+        "name": "Gasworks",
+        "type": "property",
+        "color": "blue",
+        "price": 100,
+        "rent": 6
+      },
+      {
+        "id": 8,
+        "name": "Community Chest",
+        "type": "community"
+      },
+      {
+        "id": 9,
+        "name": "Grand Terminal",
+        "type": "property",
+        "color": "green",
+        "price": 140,
+        "rent": 10
+      },
+      {
+        "id": 10,
+        "name": "Steel Mill",
+        "type": "property",
+        "color": "green",
+        "price": 140,
+        "rent": 10
+      },
+      {
+        "id": 11,
+        "name": "Chance",
+        "type": "chance"
+      }
+    ],
+    "colorGroups": {
+      "red": {
+        "name": "Ironworks",
+        "spaces": [
+          1,
+          2
+        ]
+      },
+      "blue": {
+        "name": "Rail",
+        "spaces": [
+          4,
+          7
+        ]
+      },
+      "green": {
+        "name": "Civic",
+        "spaces": [
+          9,
+          10
+        ]
+      }
+    },
+    "specialSpaces": {
+      "go": 0,
+      "jail": 6
+    },
+    "theme": {
+      "boardBackground": "#1b1b2a",
+      "cellBackground": "#2c2c3e"
+    },
+    "id": "steam-barons",
+    "name": "Steam Barons",
+    "cards": {
+      "chance": [
+        {
+          "text": "Advance to GO! Collect $200.",
+          "action": "moveTo",
+          "value": 0
+        },
+        {
+          "text": "Advance to St. Charles Place.",
+          "action": "moveTo",
+          "value": 11
+        },
+        {
+          "text": "Bank pays you dividend of $50.",
+          "action": "gain",
+          "value": 50
+        },
+        {
+          "text": "Go to Jail. Do not pass GO.",
+          "action": "goToJail",
+          "value": 0
+        },
+        {
+          "text": "Black Swan Event! Pay 10% of your total assets.",
+          "action": "payPercent",
+          "value": 10
+        },
+        {
+          "text": "Market Boom! Collect $50 per property you own.",
+          "action": "gainPerProperty",
+          "value": 50
+        },
+        {
+          "text": "Tech Breakthrough! Free upgrade on one of your properties.",
+          "action": "freeUpgrade",
+          "value": 0
+        },
+        {
+          "text": "Hostile Takeover! Force-buy an opponent's cheapest property at 150% price.",
+          "action": "forceBuy",
+          "value": 150
+        },
+        {
+          "text": "Stimulus Package! All players receive $100.",
+          "action": "gainAll",
+          "value": 100
+        }
+      ],
+      "community": [
+        {
+          "text": "Advance to GO! Collect $200.",
+          "action": "moveTo",
+          "value": 0
+        },
+        {
+          "text": "Bank error in your favor. Collect $200.",
+          "action": "gain",
+          "value": 200
+        },
+        {
+          "text": "Go to Jail. Do not pass GO.",
+          "action": "goToJail",
+          "value": 0
+        },
+        {
+          "text": "Income tax refund. Collect $20.",
+          "action": "gain",
+          "value": 20
+        },
+        {
+          "text": "Life insurance matures. Collect $100.",
+          "action": "gain",
+          "value": 100
+        },
+        {
+          "text": "Tax Audit! Pay 15% of your total assets.",
+          "action": "payPercent",
+          "value": 15
+        },
+        {
+          "text": "Infrastructure Grant! Free upgrade on a property.",
+          "action": "freeUpgrade",
+          "value": 0
+        },
+        {
+          "text": "Market Crash! Your best building loses 1 level.",
+          "action": "downgrade",
+          "value": 0
+        },
+        {
+          "text": "Insurance Payout! Collect $200.",
+          "action": "gain",
+          "value": 200
+        },
+        {
+          "text": "Community Fund! All players receive $50.",
+          "action": "gainAll",
+          "value": 50
+        }
+      ]
+    }
+  }
+}

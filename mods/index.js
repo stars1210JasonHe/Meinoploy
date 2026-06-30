@@ -8,7 +8,11 @@ import { dominionData } from './dominion/bundle.data';
 import { terraTitansData } from './terra-titans/bundle.data';
 
 // Tier-A data bundles, keyed by mod id.
+import { ancientEmpiresData } from './ancient-empires/bundle.data';
+import { steamBaronsData } from './steam-barons/bundle.data';
 export const MODS = {
+  'steam-barons': steamBaronsData,
+  'ancient-empires': ancientEmpiresData,
   dominion: dominionData,
   'terra-titans': terraTitansData,
 };
