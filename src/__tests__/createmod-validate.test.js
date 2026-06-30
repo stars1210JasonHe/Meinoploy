@@ -1,4 +1,4 @@
-import { normalizeAtlasWorld } from '../createmod/validate';
+import { normalizeAtlasWorld, normalizeClassicMap } from '../createmod/validate';
 
 const ARCH = {
   'downtown': { spaceSlots: [{ role: 'property' }, { role: 'property' }, { role: 'property' }] },
@@ -34,5 +34,41 @@ describe('normalizeAtlasWorld', () => {
     const input = { places: [{ id: 'a', archetypes: ['downtown'], geo: { lat: 0, lng: 0 } }] };
     normalizeAtlasWorld(input, ARCH);
     expect(input.places[0].pos).toBeUndefined();
+  });
+});
+
+const REUSED = {
+  chance: [
+    { text: 'GO', action: 'moveTo', value: 0 },
+    { text: 'Illinois', action: 'moveTo', value: 24 },
+    { text: 'StCharles', action: 'moveTo', value: 11 },
+    { text: 'Div', action: 'gain', value: 50 },
+  ],
+  community: [{ text: 'GO', action: 'moveTo', value: 0 }, { text: 'Bank', action: 'gain', value: 200 }],
+};
+
+describe('normalizeClassicMap', () => {
+  test('defaults id/name from input when absent', () => {
+    const m = normalizeClassicMap({ spaceCount: 12 }, { id: 'steam-barons', name: 'Steam Barons' }, REUSED);
+    expect(m.id).toBe('steam-barons');
+    expect(m.name).toBe('Steam Barons');
+  });
+  test('injects sanitized cards when absent — drops out-of-range moveTo', () => {
+    const m = normalizeClassicMap({ spaceCount: 10 }, { id: 'x', name: 'X' }, REUSED);
+    // spaceCount 10 -> valid indices 0..9; moveTo 24 AND 11 dropped, moveTo 0 kept
+    const moves = m.cards.chance.filter(c => c.action === 'moveTo').map(c => c.value);
+    expect(moves).toEqual([0]);
+    expect(m.cards.chance.some(c => c.action === 'gain')).toBe(true);
+    expect(m.cards.community.length).toBe(2);
+  });
+  test('keeps in-range moveTo', () => {
+    const m = normalizeClassicMap({ spaceCount: 30 }, { id: 'x', name: 'X' }, REUSED);
+    const moves = m.cards.chance.filter(c => c.action === 'moveTo').map(c => c.value).sort((a, b) => a - b);
+    expect(moves).toEqual([0, 11, 24]);
+  });
+  test('preserves explicit cards', () => {
+    const explicit = { chance: [{ text: 'c', action: 'gain', value: 1 }], community: [{ text: 'c', action: 'gain', value: 1 }] };
+    const m = normalizeClassicMap({ spaceCount: 12, cards: explicit }, { id: 'x', name: 'X' }, REUSED);
+    expect(m.cards).toBe(explicit);
   });
 });

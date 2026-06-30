@@ -30,3 +30,15 @@ export function normalizeAtlasWorld(world, archetypes) {
   }
   return Object.assign({}, world, { places, size });
 }
+
+export function normalizeClassicMap(map, input, reusedCards) {
+  const out = Object.assign({}, map);
+  if (!out.id) out.id = input.id;
+  if (!out.name) out.name = input.name;
+  if (!out.cards) {
+    const sc = out.spaceCount;
+    const safe = deck => (deck || []).filter(c => c.action !== 'moveTo' || (c.value >= 0 && c.value < sc));
+    out.cards = { chance: safe(reusedCards.chance), community: safe(reusedCards.community) };
+  }
+  return out;
+}
