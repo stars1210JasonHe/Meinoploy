@@ -68,4 +68,28 @@ describe('createMod / removeMod fs round-trip', () => {
     expect(r.ok).toBe(false);
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  test('dup id without --force errors; --force overrides', () => {
+    const root = makeRoot();
+    expect(createMod({ inputPath: ATLAS, rootDir: root }).ok).toBe(true);
+    const dup = createMod({ inputPath: ATLAS, rootDir: root });
+    expect(dup.ok).toBe(false);
+    expect(dup.errors.join(' ')).toMatch(/already registered/);
+    expect(createMod({ inputPath: ATLAS, rootDir: root, force: true }).ok).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('missing portrait source returns {ok:false} and writes no mod tree', () => {
+    const root = makeRoot();
+    const badInput = path.join(root, 'bad.atlas.json');
+    const spec = JSON.parse(fs.readFileSync(ATLAS, 'utf8'));
+    spec.id = 'ghost-mod';
+    spec.roster[0].portrait = 'portraits/does-not-exist.png';
+    fs.writeFileSync(badInput, JSON.stringify(spec));
+    const r = createMod({ inputPath: badInput, rootDir: root });
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/portrait source not found/);
+    expect(fs.existsSync(path.join(root, 'mods', 'ghost-mod'))).toBe(false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });

@@ -57,12 +57,14 @@ export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, forc
   const indexSrc = fs.readFileSync(indexPath, 'utf8');
   const appSrc = fs.readFileSync(appPath, 'utf8');
 
-  if (!force && new RegExp(`['"]${input.id}['"]\\s*:`).test(indexSrc)) {
-    return { ok: false, errors: [`mod "${input.id}" already registered (use --force)`], warnings: [], id: input.id, written: [] };
-  }
-
+  // Validate FIRST so a malformed id is rejected cleanly before we ever build a RegExp from it.
   const { ok, errors, warnings, normalized } = validateModInput(input, OPTS);
   if (!ok) return { ok: false, errors, warnings, id: input.id, written: [] };
+
+  // id is now validated kebab-case ([a-z0-9-]) — safe to interpolate into a RegExp.
+  if (!force && new RegExp(`['"]${input.id}['"]\\s*:`).test(indexSrc)) {
+    return { ok: false, errors: [`mod "${input.id}" already registered (use --force)`], warnings, id: input.id, written: [] };
+  }
 
   if (balance) {
     if (normalized.mapType === 'atlas') runBalance(normalized);
@@ -80,6 +82,15 @@ export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, forc
     return { ok: true, errors: [], warnings, id: input.id, written: [] };
   }
 
+  // Pre-flight: every declared portrait source must exist BEFORE we write anything —
+  // avoids a half-written mod tree and keeps the {ok,errors} return contract.
+  for (const c of copies) {
+    const fromAbs = path.resolve(inputDir, c.from);
+    if (!fs.existsSync(fromAbs)) {
+      return { ok: false, errors: [`portrait source not found: ${fromAbs}`], warnings, id: input.id, written: [] };
+    }
+  }
+
   const written = [];
   for (const f of files) {
     const abs = path.join(rootDir, f.path);
@@ -89,7 +100,6 @@ export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, forc
   }
   for (const c of copies) {
     const fromAbs = path.resolve(inputDir, c.from);
-    if (!fs.existsSync(fromAbs)) throw new Error('portrait source not found: ' + fromAbs);
     const toAbs = path.join(rootDir, c.to);
     fs.mkdirSync(path.dirname(toAbs), { recursive: true });
     fs.copyFileSync(fromAbs, toAbs);
