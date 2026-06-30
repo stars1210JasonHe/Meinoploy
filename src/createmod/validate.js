@@ -42,3 +42,41 @@ export function normalizeClassicMap(map, input, reusedCards) {
   }
   return out;
 }
+
+function stubLore(char, roster) {
+  const others = roster.filter(c => c.id !== char.id);
+  const rel = others.length
+    ? { target: others[0].name, description: 'A rival contesting the board.' }
+    : { target: char.name, description: 'Stands alone on the board.' };
+  const titlePart = char.title ? ', ' + char.title + ',' : '';
+  return {
+    nameZh: char.name,
+    titleZh: char.title || '',
+    identity: char.title || char.name,
+    alignment: 'Strategy',
+    background: `${char.name}${titlePart} contends for control of the board.`,
+    joining: `On the board, ${char.name} plays to their strengths.`,
+    styleIntro: `${char.name} plays by one rule:`,
+    style: ['Press every advantage.'],
+    styleOutro: 'They adapt to the board as it turns.',
+    relationships: [rel],
+    themeSummary: `${char.name}\nplays to win.`,
+  };
+}
+
+export function normalizeRoster(roster, inputLore) {
+  const lore = Object.assign({}, inputLore);
+  const data = roster.map(c => ({
+    id: c.id,
+    name: c.name,
+    title: c.title || '',
+    stats: c.stats,
+    passive: c.passive,
+    color: c.color,
+  }));
+  const portraits = roster.filter(c => c.portrait).map(c => ({ id: c.id, path: c.portrait }));
+  for (const c of data) {
+    if (!lore[c.id]) lore[c.id] = stubLore(c, data);
+  }
+  return { data, portraits, lore };
+}
