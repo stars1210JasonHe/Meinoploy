@@ -1,0 +1,36 @@
+{
+  "id": "steam-barons",
+  "name": "Steam Barons",
+  "tagline": "Industrialists race to corner a compact circuit.",
+  "version": "1.0.0",
+  "mapType": "classic",
+  "map": {
+    "spaceCount": 12,
+    "layout": { "type": "circle" },
+    "spaces": [
+      { "id": 0, "name": "GO", "type": "go" },
+      { "id": 1, "name": "Foundry Row", "type": "property", "color": "red", "price": 60, "rent": 4 },
+      { "id": 2, "name": "Coal Yard", "type": "property", "color": "red", "price": 60, "rent": 4 },
+      { "id": 3, "name": "Chance", "type": "chance" },
+      { "id": 4, "name": "Rail Exchange", "type": "property", "color": "blue", "price": 100, "rent": 6 },
+      { "id": 5, "name": "Excise Office", "type": "tax", "taxAmount": 100 },
+      { "id": 6, "name": "Jail", "type": "jail" },
+      { "id": 7, "name": "Gasworks", "type": "property", "color": "blue", "price": 100, "rent": 6 },
+      { "id": 8, "name": "Community Chest", "type": "community" },
+      { "id": 9, "name": "Grand Terminal", "type": "property", "color": "green", "price": 140, "rent": 10 },
+      { "id": 10, "name": "Steel Mill", "type": "property", "color": "green", "price": 140, "rent": 10 },
+      { "id": 11, "name": "Chance", "type": "chance" }
+    ],
+    "colorGroups": {
+      "red": { "name": "Ironworks", "spaces": [1, 2] },
+      "blue": { "name": "Rail", "spaces": [4, 7] },
+      "green": { "name": "Civic", "spaces": [9, 10] }
+    },
+    "specialSpaces": { "go": 0, "jail": 6 },
+    "theme": { "boardBackground": "#1b1b2a", "cellBackground": "#2c2c3e" }
+  },
+  "roster": [
+    { "id": "ada-ironwright", "name": "Ada Ironwright", "title": "The Engineer", "stats": { "capital": 6, "luck": 4, "negotiation": 5, "charisma": 5, "tech": 8, "stamina": 6 }, "passive": { "id": "pioneer", "name": "Precision Works", "description": "Property upgrade cost -20%." }, "color": "#2e7d32" },
+    { "id": "silas-vance", "name": "Silas Vance", "title": "The Financier", "stats": { "capital": 8, "luck": 3, "negotiation": 7, "charisma": 5, "tech": 4, "stamina": 7 }, "passive": { "id": "financier", "name": "Hard Reserves", "description": "Property purchase price -10%. Financial negative-event losses -20%." }, "color": "#c62828" }
+  ]
+}

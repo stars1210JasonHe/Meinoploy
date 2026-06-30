@@ -1,0 +1,35 @@
+{
+  "id": "ancient-empires",
+  "name": "Ancient Empires",
+  "tagline": "The old powers of a pixel Earth contend for dominion.",
+  "version": "1.0.0",
+  "mapType": "atlas",
+  "world": {
+    "movementMode": "atlas",
+    "renderMode": "globe",
+    "schemaVersion": "3.0-draft",
+    "places": [
+      { "id": "newyork", "realName": "New York", "archetypes": ["financial-district"], "geo": { "lat": 40.71, "lng": -74.01 }, "connectors": { "e": "london", "s": "saopaulo" }, "data": { "population": 18800000, "gdp": 1770, "fame": 98 } },
+      { "id": "saopaulo", "realName": "Sao Paulo", "archetypes": ["market"], "geo": { "lat": -23.55, "lng": -46.63 }, "connectors": { "e": "lagos" }, "data": { "population": 22000000, "gdp": 480, "fame": 78 } },
+      { "id": "london", "realName": "London", "archetypes": ["downtown"], "geo": { "lat": 51.51, "lng": -0.13 }, "connectors": { "e": "cairo", "s": "lagos" }, "data": { "population": 9500000, "gdp": 980, "fame": 96 } },
+      { "id": "lagos", "realName": "Lagos", "archetypes": ["frontier"], "geo": { "lat": 6.52, "lng": 3.38 }, "connectors": { "e": "johannesburg" }, "data": { "population": 15000000, "gdp": 130, "fame": 68 } },
+      { "id": "johannesburg", "realName": "Johannesburg", "archetypes": ["industrial"], "geo": { "lat": -26.20, "lng": 28.05 }, "connectors": { "n": "dubai" }, "data": { "population": 5600000, "gdp": 160, "fame": 66 } },
+      { "id": "cairo", "realName": "Cairo", "archetypes": ["landmark"], "geo": { "lat": 30.04, "lng": 31.24 }, "connectors": { "e": "dubai" }, "data": { "population": 21000000, "gdp": 140, "fame": 74 } },
+      { "id": "dubai", "realName": "Dubai", "archetypes": ["market"], "geo": { "lat": 25.20, "lng": 55.27 }, "connectors": { "e": "mumbai" }, "data": { "population": 3500000, "gdp": 145, "fame": 76 } },
+      { "id": "mumbai", "realName": "Mumbai", "archetypes": ["residential"], "geo": { "lat": 19.08, "lng": 72.88 }, "connectors": { "e": "singapore" }, "data": { "population": 21000000, "gdp": 370, "fame": 72 } },
+      { "id": "singapore", "realName": "Singapore", "archetypes": ["transit-hub"], "geo": { "lat": 1.35, "lng": 103.82 }, "connectors": { "n": "shanghai" }, "data": { "population": 5700000, "gdp": 470, "fame": 80 } },
+      { "id": "shanghai", "realName": "Shanghai", "archetypes": ["port"], "geo": { "lat": 31.23, "lng": 121.47 }, "connectors": { "n": "tokyo" }, "data": { "population": 27000000, "gdp": 1100, "fame": 82 } },
+      { "id": "tokyo", "realName": "Tokyo", "archetypes": ["tech-hub"], "geo": { "lat": 35.68, "lng": 139.65 }, "connectors": { "s": "sydney" }, "data": { "population": 37000000, "gdp": 2050, "fame": 95 } },
+      { "id": "sydney", "realName": "Sydney", "archetypes": ["capital-hub"], "geo": { "lat": -33.87, "lng": 151.21 }, "connectors": { "e": "newyork" }, "data": { "population": 5300000, "gdp": 410, "fame": 84 } }
+    ],
+    "hubs": ["newyork", "dubai", "tokyo"],
+    "winPaths": ["dominion", "wealth", "survival"],
+    "victory": { "maxTurns": 200, "params": { "groupsToWin": 4 } },
+    "theme": { "logoText": "ANCIENT", "logoSubtitle": "EMPIRES" }
+  },
+  "roster": [
+    { "id": "hammurabi", "name": "Hammurabi", "title": "The Lawgiver", "stats": { "capital": 6, "luck": 3, "negotiation": 6, "charisma": 5, "tech": 5, "stamina": 9 }, "passive": { "id": "enforcer", "name": "Code of Law", "description": "Designate one owned property as regulated; opponents pay +20% rent there." }, "color": "#b5651d" },
+    { "id": "cyrus-the-great", "name": "Cyrus the Great", "title": "King of Kings", "stats": { "capital": 7, "luck": 4, "negotiation": 8, "charisma": 7, "tech": 4, "stamina": 4 }, "passive": { "id": "financier", "name": "Edict of Tolerance", "description": "Property purchase price -10%. Financial negative-event losses -20%." }, "color": "#7e57c2" },
+    { "id": "alexander-the-great", "name": "Alexander the Great", "title": "World-Conqueror", "stats": { "capital": 5, "luck": 7, "negotiation": 4, "charisma": 7, "tech": 4, "stamina": 7 }, "passive": { "id": "arbitrageur", "name": "Relentless March", "description": "Gain $100 whenever any player goes bankrupt. Rebuild cost -30%." }, "color": "#1565c0" }
+  ]
+}
