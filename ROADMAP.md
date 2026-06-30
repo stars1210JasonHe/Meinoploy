@@ -23,6 +23,15 @@ major tasks below are to **discuss + design before building** — each is a larg
 
 ## Major Task 1 — Create-Mod Engine (authoring → LLM-driven)
 **Goal:** build whole mods without hand-coding; ultimately drive it with an LLM.
+
+> **SP1 — Create-Mod compiler: DONE 2026-06-30 (main `1fabb9f`).** `npm run create-mod -- <input.json>`
+> turns a near-final JSON spec (atlas world OR classic map + roster) into a validated, registered, runnable
+> mod under `mods/<id>/`, reusing Dominion's economy. Pure core in `src/createmod/` + `scripts/create-mod.js`
+> CLI; idempotent registry patch (kebab→camelId) with `--remove`/`--dry-run`/`--force`/`--balance`. Ships two
+> example mods (`ancient-empires` atlas + `steam-barons` classic), both build + selectable in-game. 536 unit
+> tests + a create-mod E2E. This is the no-LLM vertical slice; SP2–SP4 below layer on its input contract.
+
+
 - **Map module** — a builder for atlas worlds (places, geo lat/lng, connectors, archetypes, hubs)
   that auto-satisfies the loader contract (no dead ends, every tile reaches a hub ≤N steps,
   value-share cap, groupsToWin ≤ buildable groups). Today worlds are hand-authored JS.
