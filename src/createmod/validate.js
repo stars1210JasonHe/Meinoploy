@@ -183,6 +183,11 @@ export function validateModInput(input, opts) {
   } else if (input.mapType === 'classic') {
     if (!normalized.map) errors.push('classic input requires a "map"');
     else {
+      // Reused Dominion cards may reference spaces that don't exist / differ on a non-40-space
+      // board (only out-of-range moveTo is dropped). Warn so the author supplies map.cards.
+      if (!input.map.cards && normalized.map.spaceCount !== 40) {
+        warnings.push(`classic map "${normalized.map.id}" omits cards on a ${normalized.map.spaceCount}-space board; injected Dominion cards may reference mismatched spaces — supply map.cards`);
+      }
       errors.push(...validateMap(normalized.map));
       if (errors.length === 0) {
         try { loadMap(normalized.map); }

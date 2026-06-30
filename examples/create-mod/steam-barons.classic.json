@@ -27,7 +27,21 @@
       "green": { "name": "Civic", "spaces": [9, 10] }
     },
     "specialSpaces": { "go": 0, "jail": 6 },
-    "theme": { "boardBackground": "#1b1b2a", "cellBackground": "#2c2c3e" }
+    "theme": { "boardBackground": "#1b1b2a", "cellBackground": "#2c2c3e" },
+    "cards": {
+      "chance": [
+        { "text": "All aboard — advance to GO. Collect $200.", "action": "moveTo", "value": 0 },
+        { "text": "Patent royalties pay out. Collect $75.", "action": "gain", "value": 75 },
+        { "text": "Boiler inspection levy. Pay 10% of your assets.", "action": "payPercent", "value": 10 },
+        { "text": "Hauled before the magistrate. Go to Jail.", "action": "goToJail", "value": 0 }
+      ],
+      "community": [
+        { "text": "Dividend from the works. Collect $50.", "action": "gain", "value": 50 },
+        { "text": "Town subsidy — every baron collects $40.", "action": "gainAll", "value": 40 },
+        { "text": "Grand exhibition! Free upgrade on one property.", "action": "freeUpgrade", "value": 0 },
+        { "text": "Back taxes assessed. Pay 8% of your assets.", "action": "payPercent", "value": 8 }
+      ]
+    }
   },
   "roster": [
     { "id": "ada-ironwright", "name": "Ada Ironwright", "title": "The Engineer", "stats": { "capital": 6, "luck": 4, "negotiation": 5, "charisma": 5, "tech": 8, "stamina": 6 }, "passive": { "id": "pioneer", "name": "Precision Works", "description": "Property upgrade cost -20%." }, "color": "#2e7d32" },

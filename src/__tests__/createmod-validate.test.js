@@ -253,5 +253,6 @@ describe('validateModInput — classic', () => {
     // spaceCount 12 -> moveTo 24 dropped (out of range), 11 kept
     const moves = r.normalized.map.cards.chance.filter(c => c.action === 'moveTo').map(c => c.value);
     expect(moves).not.toContain(24);
+    expect(r.warnings.join(' ')).toMatch(/omits cards on a 12-space board/);
   });
 });

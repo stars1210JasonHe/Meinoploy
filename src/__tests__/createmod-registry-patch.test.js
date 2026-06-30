@@ -53,5 +53,6 @@ describe('unpatchRegistries — byte-identical revert', () => {
     const u = unpatchRegistries('not-there', { indexSrc: INDEX, appSrc: APP });
     expect(u.changed).toBe(false);
     expect(u.indexSrc).toBe(INDEX);
+    expect(u.appSrc).toBe(APP);
   });
 });
