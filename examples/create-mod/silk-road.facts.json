@@ -1,0 +1,31 @@
+{
+  "id": "silk-road",
+  "name": "Silk Road",
+  "tagline": "Caravans race along the old road from Chang'an to Venice.",
+  "version": "1.0.0",
+  "mapType": "atlas",
+  "seed": "silk-road",
+  "world": {
+    "renderMode": "globe",
+    "winPaths": ["dominion", "wealth", "survival"],
+    "victory": { "maxTurns": 200, "params": { "groupsToWin": 3 } },
+    "places": [
+      { "id": "xian", "realName": "Xi'an", "archetypes": ["downtown"], "geo": { "lat": 34.34, "lng": 108.94 }, "data": { "population": 12000000, "gdp": 150, "fame": 85 } },
+      { "id": "dunhuang", "realName": "Dunhuang", "archetypes": ["wilderness"], "geo": { "lat": 40.14, "lng": 94.66 }, "data": { "population": 190000, "gdp": 5, "fame": 70 } },
+      { "id": "kashgar", "realName": "Kashgar", "archetypes": ["market"], "geo": { "lat": 39.47, "lng": 75.99 }, "data": { "population": 700000, "gdp": 12, "fame": 68 } },
+      { "id": "samarkand", "realName": "Samarkand", "archetypes": ["landmark"], "geo": { "lat": 39.65, "lng": 66.96 }, "data": { "population": 550000, "gdp": 10, "fame": 82 } },
+      { "id": "bukhara", "realName": "Bukhara", "archetypes": ["market"], "geo": { "lat": 39.77, "lng": 64.42 }, "data": { "population": 280000, "gdp": 6, "fame": 74 } },
+      { "id": "merv", "realName": "Merv", "archetypes": ["frontier"], "geo": { "lat": 37.66, "lng": 62.19 }, "data": { "population": 120000, "gdp": 3, "fame": 60 } },
+      { "id": "baghdad", "realName": "Baghdad", "archetypes": ["capital-hub"], "geo": { "lat": 33.31, "lng": 44.36 }, "data": { "population": 8000000, "gdp": 100, "fame": 88 } },
+      { "id": "palmyra", "realName": "Palmyra", "archetypes": ["wilderness"], "geo": { "lat": 34.55, "lng": 38.28 }, "data": { "population": 50000, "gdp": 2, "fame": 72 } },
+      { "id": "constantinople", "realName": "Constantinople", "archetypes": ["port"], "geo": { "lat": 41.01, "lng": 28.98 }, "data": { "population": 15000000, "gdp": 240, "fame": 95 } },
+      { "id": "venice", "realName": "Venice", "archetypes": ["port"], "geo": { "lat": 45.44, "lng": 12.32 }, "data": { "population": 260000, "gdp": 25, "fame": 90 } }
+    ]
+  },
+  "roster": [
+    { "id": "zhang-qian", "name": "Zhang Qian", "title": "The Trailblazer", "passive": "pioneer" },
+    { "id": "marco-polo", "name": "Marco Polo", "title": "The Traveler", "passive": "merchant" },
+    { "id": "ibn-battuta", "name": "Ibn Battuta", "title": "The Wanderer", "passive": "idealist", "emphasis": "stamina" },
+    { "id": "tomyris", "name": "Tomyris", "title": "The Steppe Queen", "passive": { "id": "enforcer", "name": "Steppe Levy", "description": "Designate one owned property as regulated; opponents pay +20% rent there." }, "stats": { "capital": 5, "luck": 4, "negotiation": 6, "charisma": 6, "tech": 4, "stamina": 9 }, "color": "#b71c1c" }
+  ]
+}

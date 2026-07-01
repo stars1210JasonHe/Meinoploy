@@ -1,0 +1,21 @@
+{
+  "id": "gilded-rails",
+  "name": "Gilded Rails",
+  "tagline": "Rail barons carve up a booming frontier line.",
+  "version": "1.0.0",
+  "mapType": "classic",
+  "seed": "gilded-rails",
+  "board": {
+    "theme": { "boardBackground": "#141b26", "cellBackground": "#22304a" },
+    "groups": [
+      { "name": "Prairie Line", "color": "goldenrod", "places": ["Homestead Halt", "Granary Junction", "Prairie Depot"] },
+      { "name": "Mountain Line", "color": "slategray", "places": ["Summit Pass", "Silver Gorge"] },
+      { "name": "Coast Line", "color": "seagreen", "places": ["Harbor Terminal", "Cannery Row", "Lighthouse Spur"] }
+    ]
+  },
+  "roster": [
+    { "id": "augusta-vane", "name": "Augusta Vane", "title": "The Magnate", "passive": "financier" },
+    { "id": "eli-crowe", "name": "Eli Crowe", "title": "The Surveyor", "passive": "speculator" },
+    { "id": "min-zhou", "name": "Min Zhou", "title": "The Engineer", "passive": "pioneer", "emphasis": "tech" }
+  ]
+}
