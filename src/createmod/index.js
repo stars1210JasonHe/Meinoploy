@@ -3,3 +3,4 @@ export { toCamelId } from './templates';
 export { normalizeInput, validateModInput } from './validate';
 export { emitMod } from './emit';
 export { patchRegistries, unpatchRegistries } from './registry-patch';
+export { expandFacts, makeRng } from './smart/index';
