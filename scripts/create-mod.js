@@ -1,6 +1,7 @@
 // Create-Mod CLI — the ONLY fs/sim-touching module. Run via `npm run create-mod -- <input.json>`.
 //
 //   npm run create-mod -- <input.json> [--dry-run] [--force] [--balance]
+//   npm run create-mod -- <facts.json> --smart [--seed <s>] [--dry-run] [--force] [--balance]
 //   npm run create-mod -- --remove <id>
 //
 // Pure logic lives in src/createmod/* (Jest-tested). This file reads/writes files + runs the
@@ -10,6 +11,7 @@ import path from 'path';
 import { validateModInput } from '../src/createmod/validate';
 import { emitMod } from '../src/createmod/emit';
 import { patchRegistries, unpatchRegistries } from '../src/createmod/registry-patch';
+import { expandFacts } from '../src/createmod/smart/index';
 import { ARCHETYPES } from '../mods/dominion/atlas/archetypes';
 import { CHANCE_CARDS, COMMUNITY_CARDS } from '../mods/dominion/cards';
 
@@ -17,13 +19,15 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const OPTS = { ARCHETYPES, reusedCards: { chance: CHANCE_CARDS, community: COMMUNITY_CARDS } };
 
 export function parseArgs(argv) {
-  const out = { input: null, remove: null, dryRun: false, force: false, balance: false };
+  const out = { input: null, remove: null, dryRun: false, force: false, balance: false, smart: false, seed: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--remove') { out.remove = argv[++i]; }
     else if (a === '--dry-run') { out.dryRun = true; }
     else if (a === '--force') { out.force = true; }
     else if (a === '--balance') { out.balance = true; }
+    else if (a === '--smart') { out.smart = true; }
+    else if (a === '--seed') { out.seed = argv[++i]; }
     else if (!a.startsWith('--') && !out.input) { out.input = a; }
   }
   return out;
@@ -49,8 +53,20 @@ function runBalance(normalized) {
   console.log(`[balance] gate 60/40: ${g.pass ? 'PASS' : 'FAIL'} (leader ${g.leader} ${(g.maxWinPct * 100).toFixed(1)}%)`);
 }
 
-export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, force = false, balance = false }) {
-  const input = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, force = false, balance = false, smart = false, seed = null }) {
+  let input;
+  if (smart) {
+    // Facts -> near-final input. A throw here is an IMPOSSIBLE derivation: return the
+    // {ok,errors} contract with NO input (nothing to inspect, even in dry-run).
+    const facts = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+    try {
+      input = expandFacts(facts, { ARCHETYPES, seed: seed !== null ? seed : undefined });
+    } catch (e) {
+      return { ok: false, errors: ['smart-build failed: ' + e.message], warnings: [], id: facts.id, written: [] };
+    }
+  } else {
+    input = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+  }
   const inputDir = path.dirname(path.resolve(inputPath));
   const indexPath = path.join(rootDir, 'mods', 'index.js');
   const appPath = path.join(rootDir, 'src', 'App.js');
@@ -59,6 +75,22 @@ export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, forc
 
   // Validate FIRST so a malformed id is rejected cleanly before we ever build a RegExp from it.
   const { ok, errors, warnings, normalized } = validateModInput(input, OPTS);
+
+  // --smart --dry-run: print the derived JSON REGARDLESS of validity (the inspect/tweak
+  // escape hatch), plus validation results as clearly-labeled non-blocking advisory.
+  if (smart && dryRun) {
+    console.log(JSON.stringify(input, null, 2));
+    if (errors.length) {
+      console.log('[advisory] validation errors (non-blocking in smart dry-run):');
+      errors.forEach(e => console.log('  - ' + e));
+    }
+    if (warnings.length) {
+      console.log('[advisory] warnings:');
+      warnings.forEach(w => console.log('  - ' + w));
+    }
+    return { ok, errors, warnings, id: input.id, written: [], input };
+  }
+
   if (!ok) return { ok: false, errors, warnings, id: input.id, written: [] };
 
   // id is now validated kebab-case ([a-z0-9-]) — safe to interpolate into a RegExp.
@@ -139,10 +171,13 @@ function main(argv) {
     return;
   }
   if (!args.input) {
-    console.error('Usage: npm run create-mod -- <input.json> [--dry-run] [--force] [--balance] | --remove <id>');
+    console.error('Usage: npm run create-mod -- <input.json> [--smart] [--seed <s>] [--dry-run] [--force] [--balance] | --remove <id>');
     process.exit(1);
   }
-  const r = createMod({ inputPath: args.input, dryRun: args.dryRun, force: args.force, balance: args.balance });
+  const r = createMod({ inputPath: args.input, dryRun: args.dryRun, force: args.force, balance: args.balance, smart: args.smart, seed: args.seed });
+  // Smart dry-run owns its own output (derived JSON + advisory) and exits 0 — but only
+  // when a derived input exists; an impossible derivation falls through to ERROR + exit 1.
+  if (args.smart && args.dryRun && r.input) return;
   (r.warnings || []).forEach(w => console.warn('WARN: ' + w));
   if (!r.ok) { r.errors.forEach(e => console.error('ERROR: ' + e)); process.exit(1); }
   if (!args.dryRun) console.log(`Created mod ${r.id} (${r.written.length} files). Run \`npm run build\` to play it.`);
