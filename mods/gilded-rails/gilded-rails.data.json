@@ -1,0 +1,296 @@
+{
+  "roster": [
+    {
+      "id": "augusta-vane",
+      "name": "Augusta Vane",
+      "title": "The Magnate",
+      "stats": {
+        "capital": 8,
+        "luck": 6,
+        "negotiation": 6,
+        "charisma": 5,
+        "tech": 5,
+        "stamina": 4
+      },
+      "passive": {
+        "id": "financier",
+        "name": "Financier",
+        "description": "Property purchase price -10%. Financial negative-event losses -20%."
+      },
+      "color": "#ff8f00"
+    },
+    {
+      "id": "eli-crowe",
+      "name": "Eli Crowe",
+      "title": "The Surveyor",
+      "stats": {
+        "capital": 5,
+        "luck": 8,
+        "negotiation": 5,
+        "charisma": 5,
+        "tech": 6,
+        "stamina": 5
+      },
+      "passive": {
+        "id": "speculator",
+        "name": "Speculator",
+        "description": "Re-draw an event card you do not like. Negative event duration -1 turn."
+      },
+      "color": "#212121"
+    },
+    {
+      "id": "min-zhou",
+      "name": "Min Zhou",
+      "title": "The Engineer",
+      "stats": {
+        "capital": 5,
+        "luck": 5,
+        "negotiation": 5,
+        "charisma": 5,
+        "tech": 9,
+        "stamina": 5
+      },
+      "passive": {
+        "id": "pioneer",
+        "name": "Pioneer",
+        "description": "Property upgrade cost -20%."
+      },
+      "color": "#c2185b"
+    }
+  ],
+  "lore": {
+    "augusta-vane": {
+      "nameZh": "Augusta Vane",
+      "titleZh": "The Magnate",
+      "identity": "The Magnate",
+      "alignment": "Strategy",
+      "background": "Augusta Vane, The Magnate, contends for control of the board.",
+      "joining": "On the board, Augusta Vane plays to their strengths.",
+      "styleIntro": "Augusta Vane plays by one rule:",
+      "style": [
+        "Press every advantage."
+      ],
+      "styleOutro": "They adapt to the board as it turns.",
+      "relationships": [
+        {
+          "target": "Eli Crowe",
+          "description": "A rival contesting the board."
+        }
+      ],
+      "themeSummary": "Augusta Vane\nplays to win."
+    },
+    "eli-crowe": {
+      "nameZh": "Eli Crowe",
+      "titleZh": "The Surveyor",
+      "identity": "The Surveyor",
+      "alignment": "Strategy",
+      "background": "Eli Crowe, The Surveyor, contends for control of the board.",
+      "joining": "On the board, Eli Crowe plays to their strengths.",
+      "styleIntro": "Eli Crowe plays by one rule:",
+      "style": [
+        "Press every advantage."
+      ],
+      "styleOutro": "They adapt to the board as it turns.",
+      "relationships": [
+        {
+          "target": "Augusta Vane",
+          "description": "A rival contesting the board."
+        }
+      ],
+      "themeSummary": "Eli Crowe\nplays to win."
+    },
+    "min-zhou": {
+      "nameZh": "Min Zhou",
+      "titleZh": "The Engineer",
+      "identity": "The Engineer",
+      "alignment": "Strategy",
+      "background": "Min Zhou, The Engineer, contends for control of the board.",
+      "joining": "On the board, Min Zhou plays to their strengths.",
+      "styleIntro": "Min Zhou plays by one rule:",
+      "style": [
+        "Press every advantage."
+      ],
+      "styleOutro": "They adapt to the board as it turns.",
+      "relationships": [
+        {
+          "target": "Augusta Vane",
+          "description": "A rival contesting the board."
+        }
+      ],
+      "themeSummary": "Min Zhou\nplays to win."
+    }
+  },
+  "map": {
+    "spaceCount": 12,
+    "layout": {
+      "type": "circle"
+    },
+    "spaces": [
+      {
+        "id": 0,
+        "name": "GO",
+        "type": "go"
+      },
+      {
+        "id": 1,
+        "name": "Homestead Halt",
+        "type": "property",
+        "color": "goldenrod",
+        "price": 60,
+        "rent": 4
+      },
+      {
+        "id": 2,
+        "name": "Granary Junction",
+        "type": "property",
+        "color": "goldenrod",
+        "price": 80,
+        "rent": 5
+      },
+      {
+        "id": 3,
+        "name": "Prairie Depot",
+        "type": "property",
+        "color": "goldenrod",
+        "price": 100,
+        "rent": 6
+      },
+      {
+        "id": 4,
+        "name": "Chance",
+        "type": "chance"
+      },
+      {
+        "id": 5,
+        "name": "Summit Pass",
+        "type": "property",
+        "color": "slategray",
+        "price": 120,
+        "rent": 7
+      },
+      {
+        "id": 6,
+        "name": "Jail",
+        "type": "jail"
+      },
+      {
+        "id": 7,
+        "name": "Silver Gorge",
+        "type": "property",
+        "color": "slategray",
+        "price": 140,
+        "rent": 8
+      },
+      {
+        "id": 8,
+        "name": "Harbor Terminal",
+        "type": "property",
+        "color": "seagreen",
+        "price": 160,
+        "rent": 10
+      },
+      {
+        "id": 9,
+        "name": "Community Chest",
+        "type": "community"
+      },
+      {
+        "id": 10,
+        "name": "Cannery Row",
+        "type": "property",
+        "color": "seagreen",
+        "price": 180,
+        "rent": 11
+      },
+      {
+        "id": 11,
+        "name": "Lighthouse Spur",
+        "type": "property",
+        "color": "seagreen",
+        "price": 200,
+        "rent": 12
+      }
+    ],
+    "colorGroups": {
+      "goldenrod": {
+        "name": "Prairie Line",
+        "spaces": [
+          1,
+          2,
+          3
+        ]
+      },
+      "slategray": {
+        "name": "Mountain Line",
+        "spaces": [
+          5,
+          7
+        ]
+      },
+      "seagreen": {
+        "name": "Coast Line",
+        "spaces": [
+          8,
+          10,
+          11
+        ]
+      }
+    },
+    "specialSpaces": {
+      "go": 0,
+      "jail": 6
+    },
+    "cards": {
+      "chance": [
+        {
+          "text": "Advance to GO! Collect $200.",
+          "action": "moveTo",
+          "value": 0
+        },
+        {
+          "text": "A windfall arrives. Collect $75.",
+          "action": "gain",
+          "value": 75
+        },
+        {
+          "text": "Caught cutting corners. Go to Jail.",
+          "action": "goToJail",
+          "value": 0
+        },
+        {
+          "text": "Audit! Pay 10% of your total assets.",
+          "action": "payPercent",
+          "value": 10
+        }
+      ],
+      "community": [
+        {
+          "text": "Community dividend. Collect $50.",
+          "action": "gain",
+          "value": 50
+        },
+        {
+          "text": "Public works grant! All players receive $40.",
+          "action": "gainAll",
+          "value": 40
+        },
+        {
+          "text": "Advance to GO! Collect $200.",
+          "action": "moveTo",
+          "value": 0
+        },
+        {
+          "text": "Levy assessed. Pay 8% of your total assets.",
+          "action": "payPercent",
+          "value": 8
+        }
+      ]
+    },
+    "theme": {
+      "boardBackground": "#141b26",
+      "cellBackground": "#22304a"
+    },
+    "id": "gilded-rails",
+    "name": "Gilded Rails"
+  }
+}

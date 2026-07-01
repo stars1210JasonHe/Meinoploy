@@ -1,0 +1,424 @@
+{
+  "roster": [
+    {
+      "id": "zhang-qian",
+      "name": "Zhang Qian",
+      "title": "The Trailblazer",
+      "stats": {
+        "capital": 6,
+        "luck": 5,
+        "negotiation": 5,
+        "charisma": 6,
+        "tech": 7,
+        "stamina": 5
+      },
+      "passive": {
+        "id": "pioneer",
+        "name": "Pioneer",
+        "description": "Property upgrade cost -20%."
+      },
+      "color": "#0277bd"
+    },
+    {
+      "id": "marco-polo",
+      "name": "Marco Polo",
+      "title": "The Traveler",
+      "stats": {
+        "capital": 6,
+        "luck": 5,
+        "negotiation": 6,
+        "charisma": 4,
+        "tech": 8,
+        "stamina": 5
+      },
+      "passive": {
+        "id": "merchant",
+        "name": "Merchant",
+        "description": "Preview the next event card before drawing. Conceal your assets during trades."
+      },
+      "color": "#37474f"
+    },
+    {
+      "id": "ibn-battuta",
+      "name": "Ibn Battuta",
+      "title": "The Wanderer",
+      "stats": {
+        "capital": 5,
+        "luck": 5,
+        "negotiation": 5,
+        "charisma": 5,
+        "tech": 6,
+        "stamina": 8
+      },
+      "passive": {
+        "id": "idealist",
+        "name": "Idealist",
+        "description": "Gain +$50 each time you pass GO (stacks with the salary)."
+      },
+      "color": "#f57f17"
+    },
+    {
+      "id": "tomyris",
+      "name": "Tomyris",
+      "title": "The Steppe Queen",
+      "stats": {
+        "capital": 5,
+        "luck": 4,
+        "negotiation": 6,
+        "charisma": 6,
+        "tech": 4,
+        "stamina": 9
+      },
+      "passive": {
+        "id": "enforcer",
+        "name": "Steppe Levy",
+        "description": "Designate one owned property as regulated; opponents pay +20% rent there."
+      },
+      "color": "#b71c1c"
+    }
+  ],
+  "lore": {
+    "zhang-qian": {
+      "nameZh": "Zhang Qian",
+      "titleZh": "The Trailblazer",
+      "identity": "The Trailblazer",
+      "alignment": "Strategy",
+      "background": "Zhang Qian, The Trailblazer, contends for control of the board.",
+      "joining": "On the board, Zhang Qian plays to their strengths.",
+      "styleIntro": "Zhang Qian plays by one rule:",
+      "style": [
+        "Press every advantage."
+      ],
+      "styleOutro": "They adapt to the board as it turns.",
+      "relationships": [
+        {
+          "target": "Marco Polo",
+          "description": "A rival contesting the board."
+        }
+      ],
+      "themeSummary": "Zhang Qian\nplays to win."
+    },
+    "marco-polo": {
+      "nameZh": "Marco Polo",
+      "titleZh": "The Traveler",
+      "identity": "The Traveler",
+      "alignment": "Strategy",
+      "background": "Marco Polo, The Traveler, contends for control of the board.",
+      "joining": "On the board, Marco Polo plays to their strengths.",
+      "styleIntro": "Marco Polo plays by one rule:",
+      "style": [
+        "Press every advantage."
+      ],
+      "styleOutro": "They adapt to the board as it turns.",
+      "relationships": [
+        {
+          "target": "Zhang Qian",
+          "description": "A rival contesting the board."
+        }
+      ],
+      "themeSummary": "Marco Polo\nplays to win."
+    },
+    "ibn-battuta": {
+      "nameZh": "Ibn Battuta",
+      "titleZh": "The Wanderer",
+      "identity": "The Wanderer",
+      "alignment": "Strategy",
+      "background": "Ibn Battuta, The Wanderer, contends for control of the board.",
+      "joining": "On the board, Ibn Battuta plays to their strengths.",
+      "styleIntro": "Ibn Battuta plays by one rule:",
+      "style": [
+        "Press every advantage."
+      ],
+      "styleOutro": "They adapt to the board as it turns.",
+      "relationships": [
+        {
+          "target": "Zhang Qian",
+          "description": "A rival contesting the board."
+        }
+      ],
+      "themeSummary": "Ibn Battuta\nplays to win."
+    },
+    "tomyris": {
+      "nameZh": "Tomyris",
+      "titleZh": "The Steppe Queen",
+      "identity": "The Steppe Queen",
+      "alignment": "Strategy",
+      "background": "Tomyris, The Steppe Queen, contends for control of the board.",
+      "joining": "On the board, Tomyris plays to their strengths.",
+      "styleIntro": "Tomyris plays by one rule:",
+      "style": [
+        "Press every advantage."
+      ],
+      "styleOutro": "They adapt to the board as it turns.",
+      "relationships": [
+        {
+          "target": "Zhang Qian",
+          "description": "A rival contesting the board."
+        }
+      ],
+      "themeSummary": "Tomyris\nplays to win."
+    }
+  },
+  "world": {
+    "id": "silk-road",
+    "name": "Silk Road",
+    "movementMode": "atlas",
+    "renderMode": "globe",
+    "places": [
+      {
+        "id": "xian",
+        "realName": "Xi'an",
+        "archetypes": [
+          "downtown"
+        ],
+        "geo": {
+          "lat": 34.34,
+          "lng": 108.94
+        },
+        "data": {
+          "population": 12000000,
+          "gdp": 150,
+          "fame": 85
+        },
+        "connectors": {
+          "nw": "venice"
+        },
+        "pos": {
+          "x": 80.2611111111111,
+          "y": 30.922222222222217
+        }
+      },
+      {
+        "id": "dunhuang",
+        "realName": "Dunhuang",
+        "archetypes": [
+          "wilderness"
+        ],
+        "geo": {
+          "lat": 40.14,
+          "lng": 94.66
+        },
+        "data": {
+          "population": 190000,
+          "gdp": 5,
+          "fame": 70
+        },
+        "connectors": {
+          "se": "xian"
+        },
+        "pos": {
+          "x": 76.29444444444444,
+          "y": 27.700000000000003
+        }
+      },
+      {
+        "id": "kashgar",
+        "realName": "Kashgar",
+        "archetypes": [
+          "market"
+        ],
+        "geo": {
+          "lat": 39.47,
+          "lng": 75.99
+        },
+        "data": {
+          "population": 700000,
+          "gdp": 12,
+          "fame": 68
+        },
+        "connectors": {
+          "e": "dunhuang"
+        },
+        "pos": {
+          "x": 71.10833333333333,
+          "y": 28.07222222222222
+        }
+      },
+      {
+        "id": "samarkand",
+        "realName": "Samarkand",
+        "archetypes": [
+          "landmark"
+        ],
+        "geo": {
+          "lat": 39.65,
+          "lng": 66.96
+        },
+        "data": {
+          "population": 550000,
+          "gdp": 10,
+          "fame": 82
+        },
+        "connectors": {
+          "e": "kashgar"
+        },
+        "pos": {
+          "x": 68.6,
+          "y": 27.97222222222222
+        }
+      },
+      {
+        "id": "bukhara",
+        "realName": "Bukhara",
+        "archetypes": [
+          "market"
+        ],
+        "geo": {
+          "lat": 39.77,
+          "lng": 64.42
+        },
+        "data": {
+          "population": 280000,
+          "gdp": 6,
+          "fame": 74
+        },
+        "connectors": {
+          "e": "samarkand"
+        },
+        "pos": {
+          "x": 67.89444444444445,
+          "y": 27.905555555555555
+        }
+      },
+      {
+        "id": "merv",
+        "realName": "Merv",
+        "archetypes": [
+          "frontier"
+        ],
+        "geo": {
+          "lat": 37.66,
+          "lng": 62.19
+        },
+        "data": {
+          "population": 120000,
+          "gdp": 3,
+          "fame": 60
+        },
+        "connectors": {
+          "ne": "bukhara"
+        },
+        "pos": {
+          "x": 67.27499999999999,
+          "y": 29.07777777777778
+        }
+      },
+      {
+        "id": "baghdad",
+        "realName": "Baghdad",
+        "archetypes": [
+          "capital-hub"
+        ],
+        "geo": {
+          "lat": 33.31,
+          "lng": 44.36
+        },
+        "data": {
+          "population": 8000000,
+          "gdp": 100,
+          "fame": 88
+        },
+        "connectors": {
+          "e": "merv"
+        },
+        "pos": {
+          "x": 62.32222222222222,
+          "y": 31.49444444444444
+        }
+      },
+      {
+        "id": "palmyra",
+        "realName": "Palmyra",
+        "archetypes": [
+          "wilderness"
+        ],
+        "geo": {
+          "lat": 34.55,
+          "lng": 38.28
+        },
+        "data": {
+          "population": 50000,
+          "gdp": 2,
+          "fame": 72
+        },
+        "connectors": {
+          "e": "baghdad"
+        },
+        "pos": {
+          "x": 60.63333333333334,
+          "y": 30.805555555555557
+        }
+      },
+      {
+        "id": "constantinople",
+        "realName": "Constantinople",
+        "archetypes": [
+          "port"
+        ],
+        "geo": {
+          "lat": 41.01,
+          "lng": 28.98
+        },
+        "data": {
+          "population": 15000000,
+          "gdp": 240,
+          "fame": 95
+        },
+        "connectors": {
+          "se": "palmyra",
+          "e": "merv"
+        },
+        "pos": {
+          "x": 58.050000000000004,
+          "y": 27.21666666666667
+        }
+      },
+      {
+        "id": "venice",
+        "realName": "Venice",
+        "archetypes": [
+          "port"
+        ],
+        "geo": {
+          "lat": 45.44,
+          "lng": 12.32
+        },
+        "data": {
+          "population": 260000,
+          "gdp": 25,
+          "fame": 90
+        },
+        "connectors": {
+          "e": "constantinople"
+        },
+        "pos": {
+          "x": 53.42222222222222,
+          "y": 24.755555555555556
+        }
+      }
+    ],
+    "hubs": [
+      "constantinople",
+      "palmyra",
+      "baghdad",
+      "merv",
+      "bukhara",
+      "samarkand"
+    ],
+    "winPaths": [
+      "dominion",
+      "wealth",
+      "survival"
+    ],
+    "victory": {
+      "maxTurns": 200,
+      "params": {
+        "groupsToWin": 3
+      }
+    },
+    "size": {
+      "maxPlaces": 10,
+      "maxSpaces": 30
+    }
+  }
+}

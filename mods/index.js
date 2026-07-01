@@ -10,7 +10,11 @@ import { terraTitansData } from './terra-titans/bundle.data';
 // Tier-A data bundles, keyed by mod id.
 import { ancientEmpiresData } from './ancient-empires/bundle.data';
 import { steamBaronsData } from './steam-barons/bundle.data';
+import { silkRoadData } from './silk-road/bundle.data';
+import { gildedRailsData } from './gilded-rails/bundle.data';
 export const MODS = {
+  'gilded-rails': gildedRailsData,
+  'silk-road': silkRoadData,
   'steam-barons': steamBaronsData,
   'ancient-empires': ancientEmpiresData,
   dominion: dominionData,

@@ -22,7 +22,9 @@ import dominionMod from '../mods/dominion/bundle.client';
 import terraTitansMod from '../mods/terra-titans/bundle.client';
 import ancientEmpiresMod from '../mods/ancient-empires/bundle.client';
 import steamBaronsMod from '../mods/steam-barons/bundle.client';
-const MODS = [dominionMod, terraTitansMod, ancientEmpiresMod, steamBaronsMod];
+import silkRoadMod from '../mods/silk-road/bundle.client';
+import gildedRailsMod from '../mods/gilded-rails/bundle.client';
+const MODS = [dominionMod, terraTitansMod, ancientEmpiresMod, steamBaronsMod, silkRoadMod, gildedRailsMod];
 
 // True if a (lat,lng) on the globe faces the camera (cos-distance vs the POV center).
 // Overlays on the far hemisphere are hidden. > a small positive epsilon hides points
