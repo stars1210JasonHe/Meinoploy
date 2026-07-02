@@ -31,6 +31,15 @@ major tasks below are to **discuss + design before building** — each is a larg
 > example mods (`ancient-empires` atlas + `steam-barons` classic), both build + selectable in-game. 536 unit
 > tests + a create-mod E2E. This is the no-LLM vertical slice; SP2–SP4 below layer on its input contract.
 
+> **SP4 — Smart-builder: DONE 2026-07-02 (main `5ce299a`).** `npm run create-mod -- <facts.json> --smart
+> [--seed s]` relaxes SP1's input from "near-final" to FACTS: per-city geo/data/archetypes, character
+> concepts, property groupings. `expandFacts` (pure, seeded, deterministic — `src/createmod/smart/`) derives
+> atlas connectors+hubs (nearest-neighbor tour + hub greedy measured against the loader's own expandWorld +
+> reversed-BFS), sum-34 rosters (concept or rough-stats mode), and a validateMap-legal classic ring board,
+> then feeds SP1's pipeline. `--dry-run` prints the derived JSON as an inspect/tweak escape hatch. Ships two
+> smart-built mods (`silk-road` atlas + `gilded-rails` classic). 587 unit tests + a mod-select E2E. The
+> facts schema is the contract SP2's LLM extraction will target.
+
 
 - **Map module** — a builder for atlas worlds (places, geo lat/lng, connectors, archetypes, hubs)
   that auto-satisfies the loader contract (no dead ends, every tile reaches a hub ≤N steps,
