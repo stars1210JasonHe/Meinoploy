@@ -62,7 +62,8 @@ export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, forc
     try {
       input = expandFacts(facts, { ARCHETYPES, seed: seed !== null ? seed : undefined });
     } catch (e) {
-      return { ok: false, errors: ['smart-build failed: ' + e.message], warnings: [], id: facts.id, written: [] };
+      // facts may be null/scalar (expandFacts throws before reading it) and e may be a non-Error.
+      return { ok: false, errors: ['smart-build failed: ' + String((e && e.message) || e)], warnings: [], id: facts && facts.id, written: [] };
     }
   } else {
     input = JSON.parse(fs.readFileSync(inputPath, 'utf8'));

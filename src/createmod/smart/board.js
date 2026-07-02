@@ -26,6 +26,9 @@ const DEFAULT_CARDS = {
   ],
 };
 
+// opts.rng is accepted for signature symmetry with the other derive* modules but is
+// intentionally UNUSED: board derivation is fully order-determined. Do NOT wire rng in —
+// consuming draws here would shift the shared stream and break same-seed reproducibility.
 export function deriveClassicBoard(boardFacts, opts) { // eslint-disable-line no-unused-vars
   const groups = (boardFacts && boardFacts.groups) || [];
   if (groups.length < 2) {

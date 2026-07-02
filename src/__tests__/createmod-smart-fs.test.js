@@ -62,6 +62,16 @@ describe('createMod smart mode (fs round-trip)', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  test('null facts file returns clean {ok:false}, no raw TypeError', () => {
+    const root = makeRoot();
+    const nullPath = path.join(root, 'null.facts.json');
+    fs.writeFileSync(nullPath, 'null');
+    const r = createMod({ inputPath: nullPath, rootDir: root, smart: true });
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/smart-build failed/);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   test('non-smart path is untouched (near-final json still works)', () => {
     const root = makeRoot();
     const r = createMod({

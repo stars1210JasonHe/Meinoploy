@@ -62,6 +62,16 @@ describe('deriveTopology', () => {
     expect(a).toEqual(b);
   });
 
+  test('hubReachSteps defaults from ATLAS_DEFAULTS (explicit same value reproduces default; tighter value never yields fewer hubs)', () => {
+    const { ATLAS_DEFAULTS } = require('../world-loader');
+    const places = mkPlaces(12);
+    const byDefault = deriveTopology(places, { ARCHETYPES, rng: makeRng('pin') });
+    const byExplicit = deriveTopology(places, { ARCHETYPES, hubReachSteps: ATLAS_DEFAULTS.hubReachSteps, rng: makeRng('pin') });
+    expect(byExplicit).toEqual(byDefault);
+    const byTighter = deriveTopology(places, { ARCHETYPES, hubReachSteps: 6, rng: makeRng('pin') });
+    expect(byTighter.hubs.length).toBeGreaterThanOrEqual(byDefault.hubs.length);
+  });
+
   test('does not mutate the input places', () => {
     const places = mkPlaces(6);
     deriveTopology(places, { ARCHETYPES, rng: makeRng('mut') });
