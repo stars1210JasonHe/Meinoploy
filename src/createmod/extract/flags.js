@@ -1,0 +1,85 @@
+// SP2 shared flag spec — consumed by BOTH scripts/extract-facts.js and scripts/create-mod.js
+// (--from-book). Validation REJECTS with clear errors, never silently coerces (spec rule).
+import { DEFAULT_PALETTE } from '../smart/roster';
+
+export const EXTRACT_VALUE_FLAGS = [
+  '--out', '--id', '--chars', '--places', '--lang', '--map-type', '--map-image',
+  '--chunk-size', '--overlap', '--max-chunks', '--extract-model', '--synth-model',
+];
+export const EXTRACT_BOOL_FLAGS = ['--recache'];
+
+export function resolveMapType(opts) {
+  // --map-image implies atlas; explicit classic + image is a conflict (checked in parse).
+  return opts.mapImage ? 'atlas' : (opts.mapType || 'atlas');
+}
+
+function intFlag(errors, name, raw, { min, max }) {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min || (max !== undefined && n > max)) {
+    errors.push(`${name} must be an integer in [${min}, ${max !== undefined ? max : '∞'}] (got "${raw}")`);
+    return null;
+  }
+  return n;
+}
+
+export function parseExtractArgs(argv) {
+  const out = {
+    book: null, out: null, id: null, chars: 10, places: 12, lang: 'auto',
+    mapType: 'atlas', mapImage: null, chunkSize: 12000, overlap: 400, maxChunks: 200,
+    extractModel: null, synthModel: null, recache: false, errors: [],
+  };
+  const errors = out.errors;
+  const raw = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--recache') out.recache = true;
+    else if (EXTRACT_VALUE_FLAGS.includes(a)) raw[a] = argv[++i];
+    else if (!a.startsWith('--') && !out.book) out.book = a;
+  }
+  if (raw['--out']) out.out = raw['--out'];
+  if (raw['--extract-model']) out.extractModel = raw['--extract-model'];
+  if (raw['--synth-model']) out.synthModel = raw['--synth-model'];
+  if (raw['--map-image']) out.mapImage = raw['--map-image'];
+  if (raw['--map-type']) {
+    if (raw['--map-type'] !== 'atlas' && raw['--map-type'] !== 'classic') {
+      errors.push(`--map-type must be atlas|classic (got "${raw['--map-type']}")`);
+    } else out.mapType = raw['--map-type'];
+  }
+  if (out.mapImage && raw['--map-type'] === 'classic') {
+    errors.push('--map-image conflicts with --map-type classic (the image chain is flat-atlas only)');
+  }
+  if (raw['--lang']) {
+    if (!['auto', 'en', 'zh'].includes(raw['--lang'])) errors.push(`--lang must be auto|en|zh (got "${raw['--lang']}")`);
+    else out.lang = raw['--lang'];
+  }
+  if (raw['--id']) {
+    if (!/^[a-z0-9-]+$/.test(raw['--id'])) errors.push(`--id must be kebab-ASCII [a-z0-9-]+ (got "${raw['--id']}")`);
+    else out.id = raw['--id'];
+  }
+  if (raw['--chunk-size'] !== undefined) {
+    const v = intFlag(errors, '--chunk-size', raw['--chunk-size'], { min: 1000 });
+    if (v !== null) out.chunkSize = v;
+  }
+  if (raw['--overlap'] !== undefined) {
+    const v = intFlag(errors, '--overlap', raw['--overlap'], { min: 0 });
+    if (v !== null) out.overlap = v;
+  }
+  if (out.overlap > out.chunkSize / 2) {
+    errors.push(`--overlap must be <= chunkSize/2 (${out.chunkSize / 2}), got ${out.overlap}`);
+  }
+  if (raw['--max-chunks'] !== undefined) {
+    const v = intFlag(errors, '--max-chunks', raw['--max-chunks'], { min: 1 });
+    if (v !== null) out.maxChunks = v;
+  }
+  if (raw['--chars'] !== undefined) {
+    const v = intFlag(errors, '--chars', raw['--chars'], { min: 2, max: DEFAULT_PALETTE.length });
+    if (v !== null) out.chars = v;
+  }
+  const resolved = resolveMapType(out);
+  const placesMin = resolved === 'classic' ? 4 : 3;
+  if (raw['--places'] !== undefined) {
+    const v = intFlag(errors, '--places', raw['--places'], { min: placesMin });
+    if (v !== null) out.places = v;
+  }
+  return out;
+}
