@@ -46,6 +46,21 @@ describe('mergeCandidates — union-find', () => {
     ]);
     expect(m.themes[0]).toBe('loyalty');
   });
+  test('relationships dedupe by (target, nature) content across chunks', () => {
+    const m = mergeCandidates([
+      chunk([{ canonicalName: 'A', mentions: 1, relationships: [{ target: 'B', nature: 'brother' }] }]),
+      chunk([{ canonicalName: 'A', mentions: 1, relationships: [{ target: 'b', nature: 'Brother' }, { target: 'C', nature: 'rival' }] }]),
+    ]);
+    expect(m.characters[0].relationships).toHaveLength(2);
+  });
+  test('canonicalName mention-tie breaks on first appearance, even via a late bridge', () => {
+    const m = mergeCandidates([
+      chunk([{ canonicalName: 'Lord Guan', mentions: 5 }]),
+      chunk([{ canonicalName: 'Guan Yu', mentions: 5 }]),
+      chunk([{ canonicalName: 'Bridge', mentions: 1, aliases: ['Guan Yu', 'Lord Guan'] }]),
+    ]);
+    expect(m.characters[0].canonicalName).toBe('Lord Guan'); // first seen wins the tie
+  });
 });
 
 describe('cutToTargets', () => {

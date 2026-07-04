@@ -6,6 +6,17 @@ export function fold(s) {
   return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+// Relationships are objects — dedupe by folded (target, nature) content, not reference.
+function dedupeRelationships(rels) {
+  const seen = new Set();
+  const out = [];
+  for (const r of rels) {
+    const k = fold(r.target) + '|' + fold(r.nature);
+    if (!seen.has(k)) { seen.add(k); out.push(r); }
+  }
+  return out;
+}
+
 function mergeKind(items) {
   const seen = new Map();
   const out = [];
@@ -20,7 +31,7 @@ function mergeKind(items) {
       roleHints: cand.roleHints ? [cand.roleHints] : [],
       kind: cand.kind,
       regionHints: cand.regionHints ? [cand.regionHints] : [],
-      _bestName: { name: cand.canonicalName, mentions: cand.mentions || 1 },
+      _bestName: { name: cand.canonicalName, mentions: cand.mentions || 1, firstChunk: ci },
     };
     // Keys this candidate answers to; merging via a shared key map gives transitive unions.
     const keys = [fold(entry.canonicalName), ...entry.aliases.map(fold)].filter(Boolean);
@@ -44,15 +55,13 @@ function mergeKind(items) {
   return out
     .filter(Boolean)
     .map(e => {
-      const aliasSet = new Set([e.canonicalName, ...e.aliases].map(fold));
-      aliasSet.delete(fold(e._bestName.name));
       return {
         canonicalName: e._bestName.name,
         aliases: [...new Set([e.canonicalName, ...e.aliases])].filter(a => fold(a) !== fold(e._bestName.name)),
         mentions: e.mentions,
         firstChunk: e.firstChunk,
         traits: [...new Set(e.traits)],
-        relationships: e.relationships,
+        relationships: dedupeRelationships(e.relationships),
         roleHints: [...new Set(e.roleHints)],
         kind: e.kind,
         regionHints: [...new Set(e.regionHints)],
@@ -70,8 +79,10 @@ function absorb(target, src) {
   target.roleHints.push(...src.roleHints);
   target.regionHints.push(...src.regionHints);
   if (src.kind && !target.kind) target.kind = src.kind;
-  if ((src._bestName ? src._bestName.mentions : src.mentions) > target._bestName.mentions) {
-    target._bestName = src._bestName || { name: src.canonicalName, mentions: src.mentions };
+  const srcBest = src._bestName || { name: src.canonicalName, mentions: src.mentions, firstChunk: src.firstChunk };
+  if (srcBest.mentions > target._bestName.mentions
+      || (srcBest.mentions === target._bestName.mentions && srcBest.firstChunk < target._bestName.firstChunk)) {
+    target._bestName = srcBest;
   }
 }
 
