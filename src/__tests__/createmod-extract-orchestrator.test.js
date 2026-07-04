@@ -149,3 +149,51 @@ describe('kebabAscii', () => {
     expect(kebabAscii('三国演义')).toBe(''); // pure CJK -> empty -> caller falls to modId
   });
 });
+
+describe('extractFacts — repair round', () => {
+  test('dup roster ids: gate repairs BEFORE lore; lore sees only repaired ids', async () => {
+    let rosterCall = 0;
+    const llm = mockLlm({
+      roster: () => {
+        rosterCall++;
+        if (rosterCall === 1) {
+          const bad = rosterData();
+          bad.roster[1].id = bad.roster[0].id; // duplicate
+          return bad;
+        }
+        return rosterData();
+      },
+    });
+    const { facts, report } = await extractFacts(BOOK, baseOpts(), llm);
+    expect(rosterCall).toBe(2); // gate consumed one repair
+    expect(new Set(facts.roster.map(r => r.id)).size).toBe(4);
+    expect(llm.calls.lore).toHaveLength(4); // lore ran once, against clean roster
+    expect(report.validationErrors).toEqual([]);
+  });
+  test('world repair: bad archetype output is repaired via the default bucket', async () => {
+    let worldCall = 0;
+    const llm = mockLlm({
+      world: () => {
+        worldCall++;
+        const w = worldData();
+        if (worldCall === 1) w.places[0].archetypes = ['not-a-real-archetype'];
+        return w;
+      },
+    });
+    const { report } = await extractFacts(BOOK, baseOpts(), llm);
+    expect(worldCall).toBe(2);
+    expect(report.validationErrors).toEqual([]);
+  });
+  test('repair still failing: facts written with validationErrors non-empty', async () => {
+    const llm = mockLlm({
+      world: () => {
+        const w = worldData();
+        w.places[0].archetypes = ['still-bad'];
+        return w;
+      },
+    });
+    const { facts, report } = await extractFacts(BOOK, baseOpts(), llm);
+    expect(facts).toBeTruthy();
+    expect(report.validationErrors.length).toBeGreaterThan(0);
+  });
+});

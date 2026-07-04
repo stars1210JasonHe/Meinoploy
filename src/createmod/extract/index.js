@@ -207,10 +207,117 @@ function evidenceFor(member, cutCharacters) {
     + `relationships: ${hit.relationships.map(r => `${r.target} (${r.nature})`).join('; ')}`;
 }
 
-// Offline check runner. Task 7 replaces the body's "collect only" behavior with the full
-// section-scoped repair + reconciliation; in this task it runs the checks and returns the
-// error list (repairs not yet wired).
+// Explicit routing table (spec step 6). Real error strings don't share one prefix scheme:
+//  - lore CONTENT errors  -> that character's lore call  (capture [^)]+ — the id may be malformed)
+//  - lore KEY charset / orphan-key errors -> ROSTER call (keys derive from roster ids)
+//  - "missing a non-degraded lore entry"  -> that character's LORE call (only route that can fix it)
+//  - roster-family -> roster call
+//  - EVERYTHING ELSE -> world|board call (default bucket; never dropped)
+export function routeErrors(errors, rosterIds) {
+  const out = { world: [], roster: [], loreByChar: {}, unroutable: [] };
+  for (const e of errors) {
+    const lore = e.match(/^lore \(([^)]+)\):/);
+    if (lore) {
+      const id = lore[1];
+      if (/key must match|orphan key/.test(e)) out.roster.push(e);
+      else (out.loreByChar[id] = out.loreByChar[id] || []).push(e);
+      continue;
+    }
+    if (/^(roster|facts\.roster)/.test(e)) { out.roster.push(e); continue; }
+    out.world.push(e);
+  }
+  return out;
+}
+
 export async function validateAndRepair(facts, ctx) {
+  let errors = runOfflineChecks(facts, ctx);
+  if (errors.length === 0) return [];
+
+  const { llm, addUsage, lang, cut, opts, warnings } = ctx;
+  const synth = async (prompt, o) => { const r = await llm.synth(prompt, o); addUsage(r.usage); return r.data; };
+  const routed = routeErrors(errors, facts.roster.map(r => r.id));
+
+  // world|board section
+  if (routed.world.length > 0) {
+    try {
+      if (facts.board) {
+        const rep = await synth(buildRepairPrompt(buildBoardPrompt(cut, cut.themes, lang), routed.world));
+        facts.board = { groups: rep.groups };
+        facts.name = facts.name || rep.modTitle;
+      } else {
+        const base = buildWorldPrompt(cut, cut.themes, lang, { mapImage: !!opts.mapImageDataUrl });
+        const rep = await synth(buildRepairPrompt(base, routed.world),
+          opts.mapImageDataUrl ? { imageDataUrl: opts.mapImageDataUrl } : undefined);
+        const places = rep.places.map(p => {
+          const o = { ...p };
+          if (o.pos && !o.geo) o.geo = { lat: 90 - o.pos.y / 100 * 180, lng: o.pos.x / 100 * 360 - 180 };
+          return o;
+        });
+        facts.world = { ...facts.world, renderMode: opts.mapImageDataUrl ? 'flat' : rep.renderMode, victory: rep.victory, places };
+      }
+    } catch (e) {
+      warnings.push('world/board repair failed: ' + e.message);
+    }
+  }
+
+  // roster section — the spec's budget is "at most TWICE per run: once at the step-4 gate,
+  // once HERE" — so this repair runs regardless of whether the gate fired (each has its own
+  // single-use budget).
+  if (routed.roster.length > 0) {
+    try {
+      const oldRoster = facts.roster;
+      const rep = await synth(buildRepairPrompt(buildRosterPrompt(cut.characters, lang, cut.characters.length), routed.roster));
+      const newRoster = rep.roster || [];
+      // reconciliation: name-first diff (position fallback); re-key lore + degraded set;
+      // re-run lore for genuinely new ids; drop orphans. Never silently stub.
+      const oldByName = new Map(oldRoster.map((r, i) => [fold(r.name), { r, i }]));
+      const newLore = {};
+      const newDegraded = [];
+      for (let i = 0; i < newRoster.length; i++) {
+        const nr = newRoster[i];
+        const hit = oldByName.get(fold(nr.name)) || (oldRoster[i] ? { r: oldRoster[i], i } : null);
+        const oldId = hit ? hit.r.id : null;
+        if (oldId && ctx.lore[oldId]) newLore[nr.id] = ctx.lore[oldId];
+        else if (oldId && ctx.degradedLore.includes(oldId)) {
+          newDegraded.push(nr.id);
+          warnings.push(`lore for ${nr.id} (renamed from ${oldId}) remains degraded; SP1 will stub it`);
+        } else {
+          // genuinely new character: run its lore call now (degrade on failure)
+          try {
+            const data = await synth(buildLorePrompt(nr, evidenceFor(nr, cut.characters), newRoster.map(x => x.name).filter(n => n !== nr.name), lang));
+            newLore[nr.id] = data;
+          } catch (e) {
+            newDegraded.push(nr.id);
+            warnings.push(`lore for ${nr.id} failed after retries; SP1 will stub it — hand-edit facts.json for real lore: ${e.message}`);
+          }
+        }
+      }
+      facts.roster = newRoster;
+      // replace lore map contents in place (facts.lore === ctx.lore reference)
+      Object.keys(ctx.lore).forEach(k => delete ctx.lore[k]);
+      Object.assign(ctx.lore, newLore);
+      ctx.degradedLore.length = 0;
+      ctx.degradedLore.push(...newDegraded);
+    } catch (e) {
+      warnings.push('roster repair failed: ' + e.message);
+    }
+  }
+
+  // per-character lore sections (degrade on failure)
+  for (const [id, errs] of Object.entries(routed.loreByChar)) {
+    const member = facts.roster.find(r => r.id === id);
+    if (!member) continue; // orphan handled via roster route
+    try {
+      const data = await synth(buildLorePrompt(member, evidenceFor(member, cut.characters), facts.roster.map(x => x.name).filter(n => n !== member.name), lang));
+      ctx.lore[member.id] = data;
+    } catch (e) {
+      if (!ctx.degradedLore.includes(member.id)) ctx.degradedLore.push(member.id);
+      delete ctx.lore[member.id];
+      warnings.push(`lore repair for ${member.id} failed; SP1 will stub it: ${e.message}`);
+    }
+  }
+
+  // re-validate once; remaining errors go to the report (facts still written; exit 1 at CLI)
   return runOfflineChecks(facts, ctx);
 }
 
