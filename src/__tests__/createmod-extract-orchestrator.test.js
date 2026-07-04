@@ -239,4 +239,40 @@ describe('extractFacts — repair round', () => {
     expect(facts.lore[kebabAscii(CHARS[2])].background).toContain(CHARS[2]);
     expect(report.validationErrors).toEqual([]);
   });
+  test('roster rename x pending lore repair intersect: idMap remap re-keys the pending fix', async () => {
+    let rosterCall = 0;
+    let loreCallsFor = {};
+    const llm = mockLlm({
+      roster: () => {
+        rosterCall++;
+        const d = rosterData();
+        if (rosterCall === 1) d.roster[1].passive = 'not-a-passive'; // gate-clean, fails validateModInput
+        else d.roster[1].id = d.roster[1].id + '-renamed';           // repair also renames the id
+        return d;
+      },
+    });
+    const origSynth = llm.synth.bind(llm);
+    llm.synth = async function (prompt, o) {
+      if (prompt.name.startsWith('synthesize_lore')) {
+        const m = prompt.user.match(/CHARACTER: ([^(\n]+)/);
+        const name = m[1].trim();
+        loreCallsFor[name] = (loreCallsFor[name] || 0) + 1;
+        if (name === CHARS[1] && loreCallsFor[name] === 1) {
+          const bad = await origSynth(prompt, o);
+          bad.data.background = ''; // fails validateModInput's non-empty check
+          return bad;
+        }
+      }
+      return origSynth(prompt, o);
+    };
+    const { facts, report } = await extractFacts(BOOK, baseOpts(), llm);
+    expect(rosterCall).toBe(2); // step-6 roster repair ran, and also renamed the id
+    const renamed = kebabAscii(CHARS[1]) + '-renamed';
+    expect(facts.roster[1].id).toBe(renamed);
+    expect(facts.lore[renamed]).toBeDefined();
+    expect(facts.lore[renamed].background).toContain(CHARS[1]); // repaired REAL lore, under the new id
+    expect(facts.lore[kebabAscii(CHARS[1])]).toBeUndefined();    // no stale key
+    expect(report.validationErrors).toEqual([]);
+    expect(loreCallsFor[CHARS[1]]).toBe(2); // initial bad + one repair
+  });
 });
