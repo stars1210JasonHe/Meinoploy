@@ -22,6 +22,18 @@ function intFlag(errors, name, raw, { min, max }) {
   return n;
 }
 
+// A value flag is only "usable" when it was actually passed AND carried a
+// non-empty value. Missing (argv ran out) or empty-string values REJECT with
+// a clear error instead of silently falling back to the default (spec rule).
+function valuePresent(errors, flag, raw) {
+  if (!(flag in raw)) return false;
+  if (raw[flag] === undefined || raw[flag] === '') {
+    errors.push(`${flag} requires a value`);
+    return false;
+  }
+  return true;
+}
+
 export function parseExtractArgs(argv) {
   const out = {
     book: null, out: null, id: null, chars: 10, places: 12, lang: 'auto',
@@ -32,15 +44,16 @@ export function parseExtractArgs(argv) {
   const raw = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--recache') out.recache = true;
+    if (EXTRACT_BOOL_FLAGS.includes(a)) out.recache = true;
     else if (EXTRACT_VALUE_FLAGS.includes(a)) raw[a] = argv[++i];
-    else if (!a.startsWith('--') && !out.book) out.book = a;
+    else if (a.startsWith('--')) errors.push(`unrecognized flag: ${a}`);
+    else out.book = a;
   }
-  if (raw['--out']) out.out = raw['--out'];
-  if (raw['--extract-model']) out.extractModel = raw['--extract-model'];
-  if (raw['--synth-model']) out.synthModel = raw['--synth-model'];
-  if (raw['--map-image']) out.mapImage = raw['--map-image'];
-  if (raw['--map-type']) {
+  if (valuePresent(errors, '--out', raw)) out.out = raw['--out'];
+  if (valuePresent(errors, '--extract-model', raw)) out.extractModel = raw['--extract-model'];
+  if (valuePresent(errors, '--synth-model', raw)) out.synthModel = raw['--synth-model'];
+  if (valuePresent(errors, '--map-image', raw)) out.mapImage = raw['--map-image'];
+  if (valuePresent(errors, '--map-type', raw)) {
     if (raw['--map-type'] !== 'atlas' && raw['--map-type'] !== 'classic') {
       errors.push(`--map-type must be atlas|classic (got "${raw['--map-type']}")`);
     } else out.mapType = raw['--map-type'];
@@ -48,36 +61,36 @@ export function parseExtractArgs(argv) {
   if (out.mapImage && raw['--map-type'] === 'classic') {
     errors.push('--map-image conflicts with --map-type classic (the image chain is flat-atlas only)');
   }
-  if (raw['--lang']) {
+  if (valuePresent(errors, '--lang', raw)) {
     if (!['auto', 'en', 'zh'].includes(raw['--lang'])) errors.push(`--lang must be auto|en|zh (got "${raw['--lang']}")`);
     else out.lang = raw['--lang'];
   }
-  if (raw['--id']) {
+  if (valuePresent(errors, '--id', raw)) {
     if (!/^[a-z0-9-]+$/.test(raw['--id'])) errors.push(`--id must be kebab-ASCII [a-z0-9-]+ (got "${raw['--id']}")`);
     else out.id = raw['--id'];
   }
-  if (raw['--chunk-size'] !== undefined) {
+  if (valuePresent(errors, '--chunk-size', raw)) {
     const v = intFlag(errors, '--chunk-size', raw['--chunk-size'], { min: 1000 });
     if (v !== null) out.chunkSize = v;
   }
-  if (raw['--overlap'] !== undefined) {
+  if (valuePresent(errors, '--overlap', raw)) {
     const v = intFlag(errors, '--overlap', raw['--overlap'], { min: 0 });
     if (v !== null) out.overlap = v;
   }
   if (out.overlap > out.chunkSize / 2) {
     errors.push(`--overlap must be <= chunkSize/2 (${out.chunkSize / 2}), got ${out.overlap}`);
   }
-  if (raw['--max-chunks'] !== undefined) {
+  if (valuePresent(errors, '--max-chunks', raw)) {
     const v = intFlag(errors, '--max-chunks', raw['--max-chunks'], { min: 1 });
     if (v !== null) out.maxChunks = v;
   }
-  if (raw['--chars'] !== undefined) {
+  if (valuePresent(errors, '--chars', raw)) {
     const v = intFlag(errors, '--chars', raw['--chars'], { min: 2, max: DEFAULT_PALETTE.length });
     if (v !== null) out.chars = v;
   }
   const resolved = resolveMapType(out);
   const placesMin = resolved === 'classic' ? 4 : 3;
-  if (raw['--places'] !== undefined) {
+  if (valuePresent(errors, '--places', raw)) {
     const v = intFlag(errors, '--places', raw['--places'], { min: placesMin });
     if (v !== null) out.places = v;
   }

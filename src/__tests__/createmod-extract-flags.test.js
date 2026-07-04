@@ -46,4 +46,14 @@ describe('parseExtractArgs — REJECT semantics (never coerce)', () => {
   test('--lang accepts only auto|en|zh', () => {
     expect(P(['b.txt', '--lang', 'fr']).errors.join(' ')).toMatch(/--lang/);
   });
+  test('unknown flags error and never consume the positional', () => {
+    const o = P(['--typo', '5', 'book.txt']);
+    expect(o.errors.join(' ')).toMatch(/unrecognized flag: --typo/);
+    expect(o.book).toBe('book.txt');
+  });
+  test('value flags with missing or empty values error', () => {
+    expect(P(['b.txt', '--id']).errors.join(' ')).toMatch(/--id requires a value/);
+    expect(P(['b.txt', '--id', '']).errors.join(' ')).toMatch(/--id requires a value/);
+    expect(P(['b.txt', '--chars']).errors.join(' ')).toMatch(/--chars requires a value/);
+  });
 });
