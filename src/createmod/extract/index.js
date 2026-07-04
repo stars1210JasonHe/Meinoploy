@@ -230,7 +230,7 @@ export function routeErrors(errors, rosterIds) {
 }
 
 export async function validateAndRepair(facts, ctx) {
-  let errors = runOfflineChecks(facts, ctx);
+  const errors = runOfflineChecks(facts, ctx);
   if (errors.length === 0) return [];
 
   const { llm, addUsage, lang, cut, opts, warnings } = ctx;
@@ -263,6 +263,7 @@ export async function validateAndRepair(facts, ctx) {
   // roster section — the spec's budget is "at most TWICE per run: once at the step-4 gate,
   // once HERE" — so this repair runs regardless of whether the gate fired (each has its own
   // single-use budget).
+  const idMap = {}; // oldId -> newId, populated below when the roster repair renames ids
   if (routed.roster.length > 0) {
     try {
       const oldRoster = facts.roster;
@@ -277,6 +278,7 @@ export async function validateAndRepair(facts, ctx) {
         const nr = newRoster[i];
         const hit = oldByName.get(fold(nr.name)) || (oldRoster[i] ? { r: oldRoster[i], i } : null);
         const oldId = hit ? hit.r.id : null;
+        if (oldId) idMap[oldId] = nr.id;
         if (oldId && ctx.lore[oldId]) newLore[nr.id] = ctx.lore[oldId];
         else if (oldId && ctx.degradedLore.includes(oldId)) {
           newDegraded.push(nr.id);
@@ -300,6 +302,17 @@ export async function validateAndRepair(facts, ctx) {
       ctx.degradedLore.push(...newDegraded);
     } catch (e) {
       warnings.push('roster repair failed: ' + e.message);
+    }
+  }
+
+  // Roster repair may have renamed ids; follow the same mapping for pending lore repairs.
+  if (Object.keys(idMap).length > 0) {
+    for (const [oldId, errs] of Object.entries(routed.loreByChar)) {
+      const newId = idMap[oldId];
+      if (newId && newId !== oldId) {
+        routed.loreByChar[newId] = (routed.loreByChar[newId] || []).concat(errs);
+        delete routed.loreByChar[oldId];
+      }
     }
   }
 

@@ -196,4 +196,47 @@ describe('extractFacts — repair round', () => {
     expect(facts).toBeTruthy();
     expect(report.validationErrors.length).toBeGreaterThan(0);
   });
+  test('step-6 roster repair: renamed id -> surviving lore RE-KEYED (not stubbed), orphans dropped', async () => {
+    let rosterCall = 0;
+    const llm = mockLlm({
+      roster: () => {
+        rosterCall++;
+        const d = rosterData();
+        if (rosterCall === 1) d.roster[1].passive = 'not-a-passive'; // gate-clean, fails validateModInput
+        else d.roster[1].id = d.roster[1].id + '-renamed';           // repair also renames the id
+        return d;
+      },
+    });
+    const { facts, report } = await extractFacts(BOOK, baseOpts(), llm);
+    expect(rosterCall).toBe(2); // step-6 roster repair ran (gate saw clean ids)
+    const renamed = facts.roster[1].id;
+    expect(renamed).toMatch(/-renamed$/);
+    expect(facts.lore[renamed]).toBeDefined();                 // re-keyed, not stubbed
+    expect(facts.lore[renamed].background).toContain(CHARS[1]); // REAL extracted lore survived
+    expect(Object.keys(facts.lore)).toHaveLength(4);            // no orphan keys
+    expect(report.validationErrors).toEqual([]);
+  });
+  test('per-character lore repair: content error -> only that lore call re-runs and fixes it', async () => {
+    let loreCallsFor = {};
+    const llm = mockLlm();
+    const origSynth = llm.synth.bind(llm);
+    llm.synth = async function (prompt, o) {
+      if (prompt.name.startsWith('synthesize_lore')) {
+        const m = prompt.user.match(/CHARACTER: ([^(\n]+)/);
+        const name = m[1].trim();
+        loreCallsFor[name] = (loreCallsFor[name] || 0) + 1;
+        if (name === CHARS[2] && loreCallsFor[name] === 1) {
+          const bad = await origSynth(prompt, o);
+          bad.data.background = ''; // fails validateModInput's non-empty check
+          return bad;
+        }
+      }
+      return origSynth(prompt, o);
+    };
+    const { facts, report } = await extractFacts(BOOK, baseOpts(), llm);
+    expect(loreCallsFor[CHARS[2]]).toBe(2);  // repaired
+    expect(loreCallsFor[CHARS[0]]).toBe(1);  // others untouched
+    expect(facts.lore[kebabAscii(CHARS[2])].background).toContain(CHARS[2]);
+    expect(report.validationErrors).toEqual([]);
+  });
 });

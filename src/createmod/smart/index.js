@@ -53,6 +53,11 @@ export function expandFacts(facts, opts) {
     mapType: facts.mapType,
     reuse: facts.reuse,
     roster,
+    // Carry the authored/synthesized lore through untouched — validateModInput's own
+    // per-character checks (and SP1's stubLore fallback for genuinely-missing entries) need
+    // the REAL content here. Without this, facts.lore was silently discarded and every
+    // character's lore was replaced by the generic stub, even when synthesis succeeded.
+    lore: facts.lore,
   };
   if (facts.mapType === 'atlas') {
     const { connectorsByPlace, hubs } = deriveTopology(facts.world.places, { ARCHETYPES, rng });
