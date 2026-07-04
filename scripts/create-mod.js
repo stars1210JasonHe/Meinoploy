@@ -190,11 +190,16 @@ export function removeMod({ id, rootDir = REPO_ROOT }) {
 // extract/flags), createMod (above). Runs an early duplicate-id check BEFORE extraction so a
 // mod that's already registered fails fast without spending any API money.
 export async function runFromBook({ argv, rootDir = REPO_ROOT, llm }) {
+  // Reuse create-mod's own parser for the create-mod-only flags instead of re-parsing argv by
+  // hand — this is the same parseArgs() call the --smart path uses, so --seed/--force/--dry-run/
+  // --balance are captured under the same option names with the same undefined-when-absent
+  // default (seed: null), and forwarded to createMod() exactly like --smart does below.
+  const args = parseArgs(argv);
   const ex = parseExtractArgs(stripCreateModFlags(argv));
   if (ex.errors.length) return { ok: false, errors: ex.errors };
   if (!ex.book) return { ok: false, errors: ['--from-book requires a book file'] };
   // Early dup-check: when the id is determinable BEFORE extraction, fail fast without --force.
-  const force = argv.includes('--force');
+  const force = args.force;
   const basename = path.basename(ex.book).replace(/\.[^.]*$/, ''); // path already imported at top
   const preId = ex.id || (basename.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || null);
   if (preId && !force) {
@@ -207,7 +212,7 @@ export async function runFromBook({ argv, rootDir = REPO_ROOT, llm }) {
   if (!r.ok) {
     return { ok: false, errors: ['extraction produced invalid facts (see report); hand-edit ' + r.factsPath + ' then run: create-mod -- <facts> --smart' + (force ? ' --force' : '')] };
   }
-  return createMod({ inputPath: r.factsPath, rootDir, smart: true, force, dryRun: argv.includes('--dry-run'), balance: argv.includes('--balance') });
+  return createMod({ inputPath: r.factsPath, rootDir, smart: true, force, dryRun: args.dryRun, balance: args.balance, seed: args.seed });
 }
 
 function main(argv) {
@@ -224,7 +229,7 @@ function main(argv) {
   }
   if (!args.input) {
     console.error('Usage: npm run create-mod -- <input.json> [--smart] [--seed <s>] [--dry-run] [--force] [--balance]'
-      + ' | npm run create-mod -- <book.txt> --from-book [extract flags] [--dry-run] [--force] [--balance]'
+      + ' | npm run create-mod -- <book.txt> --from-book [extract flags] [--seed <s>] [--dry-run] [--force] [--balance]'
       + ' | --remove <id>');
     process.exit(1);
   }

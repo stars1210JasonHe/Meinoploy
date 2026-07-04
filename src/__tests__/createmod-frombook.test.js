@@ -72,4 +72,49 @@ describe('--from-book', () => {
     expect(mapCalled).toBe(0); // zero API spend
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  // Task 10 review finding: --from-book combined create-mod-only flags (--seed, --force) with
+  // extract flags (--chunk-size) in the same argv. stripCreateModFlags() must strip the former
+  // before parseExtractArgs sees them (which REJECTS unrecognized "--" flags), while --seed must
+  // still reach expandFacts() via createMod() instead of being silently dropped.
+  test('combo: --from-book + --seed + extract value flag parse together, and --seed reaches the smart derivation', async () => {
+    const rootA = makeRoot();
+    const rootB = makeRoot();
+    const rA = await runFromBook({
+      argv: [path.join(rootA, 'book.txt'), '--from-book', '--seed', 'seed-alpha', '--chunk-size', '9000'],
+      rootDir: rootA, llm: makeLlm(),
+    });
+    const rB = await runFromBook({
+      argv: [path.join(rootB, 'book.txt'), '--from-book', '--seed', 'seed-beta', '--chunk-size', '9000'],
+      rootDir: rootB, llm: makeLlm(),
+    });
+    // Assertion 1: no "unrecognized flag" parse error from either run — the strip/skip lists
+    // are correct in both directions (create-mod-only flags stripped, extract value swallowed).
+    expect(rA.ok).toBe(true);
+    expect(rB.ok).toBe(true);
+    // Assertion 2: the seed value demonstrably reaches the smart chain. deriveRoster()
+    // (src/createmod/smart/roster.js) seeds its RNG from the --seed value and uses it for
+    // per-character stat jitter + color-offset — two different seeds over the same mock-LLM
+    // facts must diverge in the emitted roster.
+    const dataA = JSON.parse(fs.readFileSync(path.join(rootA, 'mods', 'book', 'book.data.json'), 'utf8'));
+    const dataB = JSON.parse(fs.readFileSync(path.join(rootB, 'mods', 'book', 'book.data.json'), 'utf8'));
+    expect(dataA.roster).not.toEqual(dataB.roster);
+    fs.rmSync(rootA, { recursive: true, force: true });
+    fs.rmSync(rootB, { recursive: true, force: true });
+  });
+
+  // Assertion 3: --force semantics mirror plain createMod --force — a pre-registered colliding
+  // id does not block the run, even with --seed/--chunk-size also present in the same argv.
+  test('combo: --force lets --from-book proceed past a pre-registered colliding id', async () => {
+    const root = makeRoot();
+    fs.writeFileSync(path.join(root, 'mods', 'index.js'),
+      `import { bookData } from './book/bundle.data';\nexport const MODS = {\n  'book': bookData,\n};\n`);
+    const r = await runFromBook({
+      argv: [path.join(root, 'book.txt'), '--from-book', '--seed', 'custom-seed', '--force', '--chunk-size', '9000'],
+      rootDir: root, llm: makeLlm(),
+    });
+    expect(r.ok).toBe(true);
+    expect(fs.existsSync(path.join(root, 'mods', 'book', 'bundle.data.js'))).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });
