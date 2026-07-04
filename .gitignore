@@ -13,3 +13,4 @@ test-results/
 mods/dominion/portraits/ChatGPT Image*.png
 .claude/
 .gstack/
+.extract-cache/
