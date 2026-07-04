@@ -1,0 +1,75 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { parseArgs, runFromBook } from '../../scripts/create-mod';
+
+function makeRoot() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'frombook-'));
+  fs.mkdirSync(path.join(root, 'mods'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'mods', 'index.js'),
+    `import { dominionData } from './dominion/bundle.data';\nexport const MODS = {\n  dominion: dominionData,\n};\n`);
+  fs.writeFileSync(path.join(root, 'src', 'App.js'),
+    `import dominionMod from '../mods/dominion/bundle.client';\nconst MODS = [dominionMod];\n`);
+  fs.writeFileSync(path.join(root, 'book.txt'), ('Ch\n\n' + 'w '.repeat(600)).repeat(3));
+  return root;
+}
+
+// Same mock llm as the extract-cli test (3 chars / 3 places, modId 'cli-book').
+const U = { prompt_tokens: 1, completion_tokens: 1 };
+const NAMES = ['Ada Stone', 'Ben Cole', 'Cyrus Vale'];
+const PLACES = ['Northport', 'Eastmoor', 'Southgate'];
+const keb = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+const makeLlm = () => ({
+  async map() {
+    return { data: {
+      characters: NAMES.map((n, k) => ({ canonicalName: n, aliases: [], roleHints: '', traits: [], relationships: [], mentions: 4 - k })),
+      places: PLACES.map((n, k) => ({ canonicalName: n, aliases: [], kind: 'city', regionHints: '', mentions: 4 - k })),
+      themes: [],
+    }, usage: U };
+  },
+  async synth(prompt) {
+    if (prompt.name.startsWith('synthesize_world')) return { data: {
+      modId: 'book-mod', modTitle: 'Book Mod', tagline: 't', renderMode: 'globe',
+      victory: { maxTurns: 150, params: { groupsToWin: 2 } },
+      places: PLACES.map((n, k) => ({ id: keb(n), realName: n, archetypes: ['market'], geo: { lat: 5 + 15 * k, lng: 30 * k }, data: { population: 1e6, gdp: 40, fame: 55 } })),
+    }, usage: U };
+    if (prompt.name.startsWith('synthesize_roster')) return { data: { roster: NAMES.map(n => ({ id: keb(n), name: n, title: 't', passive: 'financier', emphasis: 'capital' })) }, usage: U };
+    if (prompt.name.startsWith('synthesize_lore')) return { data: {
+      nameZh: 'n', titleZh: 't', identity: 'i', alignment: 'a', background: 'b', joining: 'j',
+      styleIntro: 's', style: ['s'], styleOutro: 'o', relationships: [{ target: NAMES[0], description: 'd' }], themeSummary: 'x',
+    }, usage: U };
+    throw new Error('unexpected ' + prompt.name);
+  },
+});
+
+describe('--from-book', () => {
+  test('parseArgs recognizes --from-book and does not eat extraction flag values as positionals', () => {
+    const a = parseArgs(['book.txt', '--from-book', '--chars', '3']);
+    expect(a.fromBook).toBe(true);
+    expect(a.input).toBe('book.txt');
+  });
+  test('end-to-end: extraction -> facts.json checkpoint -> smart pipeline writes the mod', async () => {
+    const root = makeRoot();
+    const r = await runFromBook({ argv: [path.join(root, 'book.txt'), '--from-book', '--chars', '3', '--places', '3'], rootDir: root, llm: makeLlm() });
+    expect(r.ok).toBe(true);
+    expect(fs.existsSync(path.join(root, 'book.facts.json'))).toBe(true); // durable checkpoint
+    expect(fs.existsSync(path.join(root, 'mods', 'book', 'bundle.data.js'))).toBe(true); // id = kebab(basename)
+    expect(fs.readFileSync(path.join(root, 'mods', 'index.js'), 'utf8')).toContain("'book': bookData,");
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  test('early dup-check: pre-registered determinable id fails fast BEFORE extraction', async () => {
+    const root = makeRoot();
+    fs.writeFileSync(path.join(root, 'mods', 'index.js'),
+      `import { bookData } from './book/bundle.data';\nexport const MODS = {\n  'book': bookData,\n};\n`);
+    const llm = makeLlm();
+    let mapCalled = 0;
+    const origMap = llm.map.bind(llm);
+    llm.map = async p => { mapCalled++; return origMap(p); };
+    const r = await runFromBook({ argv: [path.join(root, 'book.txt'), '--from-book'], rootDir: root, llm });
+    expect(r.ok).toBe(false);
+    expect(r.errors.join(' ')).toMatch(/already registered/);
+    expect(mapCalled).toBe(0); // zero API spend
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});

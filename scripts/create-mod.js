@@ -14,12 +14,14 @@ import { patchRegistries, unpatchRegistries } from '../src/createmod/registry-pa
 import { expandFacts } from '../src/createmod/smart/index';
 import { ARCHETYPES } from '../mods/dominion/atlas/archetypes';
 import { CHANCE_CARDS, COMMUNITY_CARDS } from '../mods/dominion/cards';
+import { runExtract } from './extract-facts';
+import { parseExtractArgs, EXTRACT_VALUE_FLAGS } from '../src/createmod/extract/flags';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const OPTS = { ARCHETYPES, reusedCards: { chance: CHANCE_CARDS, community: COMMUNITY_CARDS } };
 
 export function parseArgs(argv) {
-  const out = { input: null, remove: null, dryRun: false, force: false, balance: false, smart: false, seed: null };
+  const out = { input: null, remove: null, dryRun: false, force: false, balance: false, smart: false, seed: null, fromBook: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--remove') { out.remove = argv[++i]; }
@@ -28,7 +30,27 @@ export function parseArgs(argv) {
     else if (a === '--balance') { out.balance = true; }
     else if (a === '--smart') { out.smart = true; }
     else if (a === '--seed') { out.seed = argv[++i]; }
+    else if (a === '--from-book') { out.fromBook = true; }
+    else if (EXTRACT_VALUE_FLAGS.includes(a)) { i++; } // extraction flag values are not positionals
     else if (!a.startsWith('--') && !out.input) { out.input = a; }
+  }
+  return out;
+}
+
+// --from-book flags that belong to create-mod's own dispatch (not the SP2 extraction flag
+// set) must be stripped before delegating to parseExtractArgs, which REJECTS any unrecognized
+// "--" flag (spec rule, see src/createmod/extract/flags.js) — so combining e.g.
+// `--from-book --chars 3 --force` would otherwise misfire as "unrecognized flag: --force".
+const CREATE_MOD_ONLY_BOOL_FLAGS = ['--from-book', '--dry-run', '--force', '--balance', '--smart'];
+const CREATE_MOD_ONLY_VALUE_FLAGS = ['--seed'];
+
+function stripCreateModFlags(argv) {
+  const out = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (CREATE_MOD_ONLY_BOOL_FLAGS.includes(a)) continue;
+    if (CREATE_MOD_ONLY_VALUE_FLAGS.includes(a)) { i++; continue; }
+    out.push(a);
   }
   return out;
 }
@@ -163,8 +185,37 @@ export function removeMod({ id, rootDir = REPO_ROOT }) {
   return { ok: true, errors: [] };
 }
 
+// --from-book sugar path: extract facts from a book, then feed them into the existing
+// --smart chain. Consumes: runExtract (./extract-facts), parseExtractArgs (../src/createmod/
+// extract/flags), createMod (above). Runs an early duplicate-id check BEFORE extraction so a
+// mod that's already registered fails fast without spending any API money.
+export async function runFromBook({ argv, rootDir = REPO_ROOT, llm }) {
+  const ex = parseExtractArgs(stripCreateModFlags(argv));
+  if (ex.errors.length) return { ok: false, errors: ex.errors };
+  if (!ex.book) return { ok: false, errors: ['--from-book requires a book file'] };
+  // Early dup-check: when the id is determinable BEFORE extraction, fail fast without --force.
+  const force = argv.includes('--force');
+  const basename = path.basename(ex.book).replace(/\.[^.]*$/, ''); // path already imported at top
+  const preId = ex.id || (basename.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || null);
+  if (preId && !force) {
+    const indexSrc = fs.readFileSync(path.join(rootDir, 'mods', 'index.js'), 'utf8');
+    if (new RegExp(`['"]${preId}['"]\\s*:`).test(indexSrc)) {
+      return { ok: false, errors: [`mod "${preId}" already registered (use --force)`] };
+    }
+  }
+  const r = await runExtract({ ...ex, rootDir }, llm);
+  if (!r.ok) {
+    return { ok: false, errors: ['extraction produced invalid facts (see report); hand-edit ' + r.factsPath + ' then run: create-mod -- <facts> --smart' + (force ? ' --force' : '')] };
+  }
+  return createMod({ inputPath: r.factsPath, rootDir, smart: true, force, dryRun: argv.includes('--dry-run'), balance: argv.includes('--balance') });
+}
+
 function main(argv) {
   const args = parseArgs(argv);
+  if (args.fromBook) {
+    loadFromBookEnvAndRun(args, argv);
+    return;
+  }
   if (args.remove) {
     const r = removeMod({ id: args.remove });
     if (!r.ok) { r.errors.forEach(e => console.error('ERROR: ' + e)); process.exit(1); }
@@ -172,7 +223,9 @@ function main(argv) {
     return;
   }
   if (!args.input) {
-    console.error('Usage: npm run create-mod -- <input.json> [--smart] [--seed <s>] [--dry-run] [--force] [--balance] | --remove <id>');
+    console.error('Usage: npm run create-mod -- <input.json> [--smart] [--seed <s>] [--dry-run] [--force] [--balance]'
+      + ' | npm run create-mod -- <book.txt> --from-book [extract flags] [--dry-run] [--force] [--balance]'
+      + ' | --remove <id>');
     process.exit(1);
   }
   const r = createMod({ inputPath: args.input, dryRun: args.dryRun, force: args.force, balance: args.balance, smart: args.smart, seed: args.seed });
@@ -182,6 +235,25 @@ function main(argv) {
   (r.warnings || []).forEach(w => console.warn('WARN: ' + w));
   if (!r.ok) { r.errors.forEach(e => console.error('ERROR: ' + e)); process.exit(1); }
   if (!args.dryRun) console.log(`Created mod ${r.id} (${r.written.length} files). Run \`npm run build\` to play it.`);
+}
+
+// Loads .env + validates the API key, builds the real OpenAI client, then runs --from-book.
+// Kept out of main()'s body (and using require() for the OpenAI-client import) so tests that
+// exercise main()/parseArgs never pull in network-capable code paths.
+function loadFromBookEnvAndRun(args, argv) {
+  const { loadDotEnv } = require('./extract-facts');
+  loadDotEnv(REPO_ROOT);
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('ERROR: OPENAI_API_KEY is not set (env var or repo-root .env)');
+    process.exit(1);
+  }
+  const { createOpenAiClient } = require('../src/createmod/extract/client');
+  const llm = createOpenAiClient({ apiKey: process.env.OPENAI_API_KEY });
+  runFromBook({ argv, llm }).then(r => {
+    (r.warnings || []).forEach(w => console.warn('WARN: ' + w));
+    if (!r.ok) { r.errors.forEach(e => console.error('ERROR: ' + e)); process.exit(1); }
+    console.log(`Created mod ${r.id} from book (${(r.written || []).length} files). Run \`npm run build\` to play it.`);
+  }).catch(e => { console.error('ERROR: ' + e.message); process.exit(1); });
 }
 
 if (require.main === module) main(process.argv.slice(2));
