@@ -38,13 +38,13 @@ export function createOpenAiClient(opts) {
         });
       } catch (e) {
         lastErr = new Error('network error calling OpenAI: ' + e.message);
-        await sleepImpl(RETRY_DELAYS[attempt]);
+        if (attempt < RETRY_DELAYS.length - 1) await sleepImpl(RETRY_DELAYS[attempt]);
         continue;
       }
       if (!res.ok) {
         if (res.status === 429 || res.status >= 500) {
           lastErr = new Error(`OpenAI API ${res.status}`);
-          await sleepImpl(RETRY_DELAYS[attempt]);
+          if (attempt < RETRY_DELAYS.length - 1) await sleepImpl(RETRY_DELAYS[attempt]);
           continue;
         }
         const text = await res.text();

@@ -62,4 +62,33 @@ describe('createOpenAiClient', () => {
       { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAA', detail: 'high' } },
     ]);
   });
+  test('retries on 500 and network error, recording backoff delays', async () => {
+    const delays = [];
+    let n = 0;
+    const client = createOpenAiClient({
+      apiKey: 'k',
+      fetchImpl: async () => {
+        n++;
+        if (n === 1) throw new Error('socket hangup');
+        if (n === 2) return { ok: false, status: 500, text: async () => 'oops' };
+        return okResponse({ a: 'z' });
+      },
+      sleepImpl: async ms => { delays.push(ms); },
+    });
+    const r = await client.map(PROMPT);
+    expect(r.data.a).toBe('z');
+    expect(delays).toEqual([1000, 4000]); // slept only between attempts
+  });
+  test('terminal exhaustion: exactly 3 fetches, throws, and never sleeps after the last attempt', async () => {
+    const delays = [];
+    let n = 0;
+    const client = createOpenAiClient({
+      apiKey: 'k',
+      fetchImpl: async () => { n++; return { ok: false, status: 429, text: async () => 'rate' }; },
+      sleepImpl: async ms => { delays.push(ms); },
+    });
+    await expect(client.map(PROMPT)).rejects.toThrow(/429/);
+    expect(n).toBe(3);
+    expect(delays).toEqual([1000, 4000]); // no 9000 tail sleep
+  });
 });
