@@ -83,6 +83,50 @@ describe('runExtract', () => {
   });
 });
 
+describe('--map-image preflight', () => {
+  const PNG_1x1 = Buffer.from('89504e470d0a1a0a0000000d494844520000000100000001080600000037' + '6ef9240000000a49444154789c6360000002000154a24f710000000049454e44ae426082', 'hex');
+  test('valid png: data URL threaded, world.mapImage POSIX-relative to the facts file', async () => {
+    const root = makeRoot();
+    fs.writeFileSync(path.join(root, 'map.png'), PNG_1x1);
+    const llm = makeLlm();
+    let sawImage = null;
+    const orig = llm.synth.bind(llm);
+    llm.synth = async (p, o) => { if (p.name.startsWith('synthesize_world')) sawImage = o && o.imageDataUrl; return orig(p, o); };
+    const r = await runExtract({ ...baseOpts(root), mapImage: path.join(root, 'map.png') }, llm);
+    expect(sawImage).toMatch(/^data:image\/png;base64,/);
+    const facts = JSON.parse(fs.readFileSync(r.factsPath, 'utf8'));
+    expect(facts.world.mapImage).toBe('map.png'); // POSIX, relative to facts.json's dir
+    expect(facts.world.mapImage).not.toMatch(/\\\\/);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  test('bad extension and missing file reject before any API call', async () => {
+    const root = makeRoot();
+    fs.writeFileSync(path.join(root, 'map.gif'), 'x');
+    const llm = makeLlm();
+    let mapCalls = 0;
+    const orig = llm.map.bind(llm);
+    llm.map = async p => { mapCalls++; return orig(p); };
+    await expect(runExtract({ ...baseOpts(root), mapImage: path.join(root, 'map.gif') }, llm)).rejects.toThrow(/extension/);
+    await expect(runExtract({ ...baseOpts(root), mapImage: path.join(root, 'nope.png') }, llm)).rejects.toThrow(/not found/);
+    expect(mapCalls).toBe(0);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  test('corrupt cache file is ignored as a cache miss (no crash)', async () => {
+    const root = makeRoot();
+    const llm1 = makeLlm();
+    await runExtract(baseOpts(root), llm1);
+    // corrupt one cache file
+    const cacheRoot = path.join(root, '.extract-cache');
+    const dir = path.join(cacheRoot, fs.readdirSync(cacheRoot)[0]);
+    const files = fs.readdirSync(dir).filter(f => f.startsWith('chunk-'));
+    fs.writeFileSync(path.join(dir, files[0]), '{truncated');
+    const llm2 = makeLlm();
+    await runExtract(baseOpts(root), llm2);
+    expect(llm2.mapCalls).toBe(1); // only the corrupted chunk re-mapped
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
 describe('loadDotEnv', () => {
   test('parses KEY=value lines, skips comments, never overwrites set vars', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dotenv-'));

@@ -71,7 +71,14 @@ export async function runExtract(opts, llm) {
   if (!opts.recache) {
     for (const f of fs.readdirSync(cacheDir)) {
       const m = f.match(/^chunk-(\d+)\.json$/);
-      if (m) cachedChunks[Number(m[1])] = JSON.parse(fs.readFileSync(path.join(cacheDir, f), 'utf8'));
+      if (!m) continue;
+      try {
+        cachedChunks[Number(m[1])] = JSON.parse(fs.readFileSync(path.join(cacheDir, f), 'utf8'));
+      } catch (e) {
+        // corrupt/truncated cache file (e.g. process killed mid-write) — treat as a cache miss.
+        // Do not delete: the next successful map for this chunk overwrites it.
+        console.warn('WARN: corrupt cache file ignored: ' + f);
+      }
     }
   }
 
