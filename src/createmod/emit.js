@@ -16,5 +16,10 @@ export function emitMod(normalized) {
     const ext = p.path.slice(p.path.lastIndexOf('.'));
     return { from: p.path, to: `${base}/portraits/${p.id}${ext}` };
   });
+  if (normalized.world && typeof normalized.world.mapImage === 'string') {
+    const mi = normalized.world.mapImage;
+    const ext = mi.slice(mi.lastIndexOf('.'));
+    copies.push({ from: mi, to: `mods/${id}/worldbg${ext}` });
+  }
   return { files, copies };
 }
