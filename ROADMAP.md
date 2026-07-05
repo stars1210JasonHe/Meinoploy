@@ -1,6 +1,6 @@
 # Meinopoly Roadmap
 
-_Last updated: 2026-06-26. This records direction agreed with the project owner; the two
+_Last updated: 2026-07-05. This records direction agreed with the project owner; the two
 major tasks below are to **discuss + design before building** — each is a large initiative._
 
 ## Where we are
@@ -39,6 +39,18 @@ major tasks below are to **discuss + design before building** — each is a larg
 > then feeds SP1's pipeline. `--dry-run` prints the derived JSON as an inspect/tweak escape hatch. Ships two
 > smart-built mods (`silk-road` atlas + `gilded-rails` classic). 587 unit tests + a mod-select E2E. The
 > facts schema is the contract SP2's LLM extraction will target.
+
+> **SP2 — Book→facts extractor: DONE 2026-07-05 (main `f6c3314`).** `npm run extract-facts -- <book.txt>`
+> turns a whole book (chunked map-reduce, success-only chunk cache, `--lang auto|en|zh`) into an SP4 facts.json
+> via OpenAI strict structured outputs: per-chunk candidate extraction → code-side union-find merge/rank/cut →
+> focused synthesis (world/board, roster with id-integrity gate, per-character lore with degrade-on-failure) →
+> offline validation → ONE section-scoped repair round (roster reconciliation re-keys surviving lore). Real
+> places get real geo; fictional worlds get LLM layouts; `--map-image westeros.jpg` aligns places to a
+> user-supplied map via vision and ships it as the board background (`worldbg` asset chain through emit →
+> atlasAssets). `create-mod -- book.txt --from-book` chains extraction into the --smart build with an early
+> dup-check before any API spend. Key hygiene throughout (.env only, never logged/cached). Pure core in
+> `src/createmod/extract/` + `scripts/extract-facts.js`; 679 unit tests. Manual live-API acceptance checklist
+> in `.superpowers/sdd/progress.md`, pending user run (needs real OPENAI_API_KEY).
 
 
 - **Map module** — a builder for atlas worlds (places, geo lat/lng, connectors, archetypes, hubs)
