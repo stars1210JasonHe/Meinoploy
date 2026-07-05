@@ -35,6 +35,60 @@ describe('normalizeAtlasWorld', () => {
     normalizeAtlasWorld(input, ARCH);
     expect(input.places[0].pos).toBeUndefined();
   });
+
+  describe('fit-bounds for geo-derived layouts', () => {
+    const CHINA = [
+      { id: 'luoyang', archetypes: ['downtown'], geo: { lat: 34.6197, lng: 112.454 } },
+      { id: 'youzhou', archetypes: ['downtown'], geo: { lat: 40, lng: 116 } },
+      { id: 'qingzhou', archetypes: ['port'], geo: { lat: 36.5, lng: 118.5 } },
+    ];
+    test('regional cluster is refit to span the board with padding', () => {
+      const w = normalizeAtlasWorld({ renderMode: 'flat', places: CHINA }, ARCH);
+      const xs = w.places.map(p => p.pos.x), ys = w.places.map(p => p.pos.y);
+      const spanX = Math.max(...xs) - Math.min(...xs);
+      const spanY = Math.max(...ys) - Math.min(...ys);
+      expect(Math.max(spanX, spanY)).toBeCloseTo(100 - 2 * 12, 5); // FIT_PADDING default
+      for (const p of w.places) {
+        expect(p.pos.x).toBeGreaterThanOrEqual(12);
+        expect(p.pos.x).toBeLessThanOrEqual(88);
+        expect(p.pos.y).toBeGreaterThanOrEqual(12);
+        expect(p.pos.y).toBeLessThanOrEqual(88);
+      }
+    });
+    test('aspect ratio and relative order are preserved (uniform scale)', () => {
+      const w = normalizeAtlasWorld({ renderMode: 'flat', places: CHINA }, ARCH);
+      const raw = CHINA.map(p => ({ x: (p.geo.lng + 180) / 360 * 100, y: (90 - p.geo.lat) / 180 * 100 }));
+      const rawSpanX = Math.max(...raw.map(r => r.x)) - Math.min(...raw.map(r => r.x));
+      const rawSpanY = Math.max(...raw.map(r => r.y)) - Math.min(...raw.map(r => r.y));
+      const xs = w.places.map(p => p.pos.x), ys = w.places.map(p => p.pos.y);
+      const spanX = Math.max(...xs) - Math.min(...xs);
+      const spanY = Math.max(...ys) - Math.min(...ys);
+      expect(spanX / spanY).toBeCloseTo(rawSpanX / rawSpanY, 5);
+      // luoyang is west of youzhou which is west of qingzhou — order survives
+      expect(w.places[0].pos.x).toBeLessThan(w.places[1].pos.x);
+      expect(w.places[1].pos.x).toBeLessThan(w.places[2].pos.x);
+    });
+    test('any explicit pos disables the refit entirely', () => {
+      const places = [CHINA[0], CHINA[1], { id: 'aligned', archetypes: ['port'], pos: { x: 33, y: 44 } }];
+      const w = normalizeAtlasWorld({ renderMode: 'flat', places }, ARCH);
+      expect(w.places[2].pos).toEqual({ x: 33, y: 44 });
+      expect(w.places[0].pos.x).toBeCloseTo((112.454 + 180) / 360 * 100, 5); // raw projection kept
+    });
+    test('fitPadding is configurable per world', () => {
+      const w = normalizeAtlasWorld({ renderMode: 'flat', fitPadding: 30, places: CHINA }, ARCH);
+      const xs = w.places.map(p => p.pos.x), ys = w.places.map(p => p.pos.y);
+      const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+      expect(span).toBeCloseTo(100 - 2 * 30, 5);
+    });
+    test('identical points stay centered (degenerate bbox)', () => {
+      const w = normalizeAtlasWorld({ renderMode: 'flat', places: [
+        { id: 'a', archetypes: ['downtown'], geo: { lat: 34.72, lng: 113.66 } },
+        { id: 'b', archetypes: ['port'], geo: { lat: 34.72, lng: 113.66 } },
+      ] }, ARCH);
+      expect(w.places[0].pos).toEqual({ x: 50, y: 50 });
+      expect(w.places[1].pos).toEqual({ x: 50, y: 50 });
+    });
+  });
 });
 
 const REUSED = {

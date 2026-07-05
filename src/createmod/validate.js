@@ -15,8 +15,34 @@ function deriveGeoPos(place, renderMode) {
   return p;
 }
 
+export const FIT_PADDING = 12; // default board margin (%) for geo-derived layouts
+
+// Regional worlds (e.g. all-China cities) collapse to a few percent of the board
+// under the global equirectangular projection. When EVERY position was derived
+// from geo (no author/vision-aligned pos anywhere), refit the layout to the
+// board: uniform scale (aspect preserved) + center. Explicit pos is never
+// touched — map-image alignment depends on it.
+function fitDerivedPositions(originals, places, fitPadding) {
+  if (!places.length) return places;
+  if (originals.some(p => p && p.pos)) return places;
+  if (places.some(p => !p.pos)) return places;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of places) {
+    minX = Math.min(minX, p.pos.x); maxX = Math.max(maxX, p.pos.x);
+    minY = Math.min(minY, p.pos.y); maxY = Math.max(maxY, p.pos.y);
+  }
+  const pad = typeof fitPadding === 'number' ? fitPadding : FIT_PADDING;
+  const span = Math.max(maxX - minX, maxY - minY);
+  const scale = span > 1e-9 ? (100 - 2 * pad) / span : 0;
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  return places.map(p => Object.assign({}, p, {
+    pos: { x: 50 + (p.pos.x - cx) * scale, y: 50 + (p.pos.y - cy) * scale },
+  }));
+}
+
 export function normalizeAtlasWorld(world, archetypes) {
-  const places = (world.places || []).map(p => deriveGeoPos(p, world.renderMode));
+  const derived = (world.places || []).map(p => deriveGeoPos(p, world.renderMode));
+  const places = fitDerivedPositions(world.places || [], derived, world.fitPadding);
   let size = world.size;
   if (!size) {
     let maxSpaces = 0;
