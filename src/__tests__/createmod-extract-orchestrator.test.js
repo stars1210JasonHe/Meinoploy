@@ -131,6 +131,31 @@ describe('extractFacts — happy paths', () => {
     await expect(extractFacts(BOOK, baseOpts(), llm)).rejects.toThrow(/yields only 1/);
     expect(llm.calls.world + llm.calls.roster).toBe(0);
   });
+  // Review finding: a 401/403/404 from OpenAI was caught by this same per-chunk try/catch and
+  // silently degraded to skip+warn — every chunk fails identically for a non-retryable 4xx, so
+  // the run burns the rest of its chunk budget before dying with a misleading "book yields only
+  // 0 character(s)" shortfall instead of the real auth/permissions error.
+  test('non-retryable 4xx (e.g. 401) rethrows immediately instead of degrading into a misleading shortfall', async () => {
+    const llm = mockLlm();
+    llm.map = async () => { const e = new Error('OpenAI API error 401: invalid api key'); e.status = 401; throw e; };
+    await expect(extractFacts(BOOK, baseOpts(), llm)).rejects.toThrow(/401/);
+    await expect(extractFacts(BOOK, baseOpts(), llm)).rejects.not.toThrow(/yields only/);
+  });
+  test('mixed failures (5xx-after-retries status + no-status network error) still degrade; shortfall message names a first-chunk failure reason', async () => {
+    let call = 0;
+    const llm = mockLlm();
+    llm.map = async () => {
+      call++;
+      // Alternate failure shapes across chunks: a retry-exhausted 5xx (carries .status) and a
+      // plain network error (no .status at all) — neither is a non-retryable 4xx, so BOTH must
+      // still degrade to skip+warn rather than rethrow.
+      if (call % 2 === 1) { const e = new Error('OpenAI API 500'); e.status = 500; throw e; }
+      throw new Error('network error calling OpenAI: socket hangup');
+    };
+    const err = await extractFacts(BOOK, baseOpts(), llm).catch(e => e);
+    expect(err.message).toMatch(/book yields only 0 character/);
+    expect(err.message).toMatch(/first chunk failure: (OpenAI API 500|network error calling OpenAI: socket hangup)/);
+  });
   test('lore degrade: one failing lore call -> key omitted, warning, still valid offline', async () => {
     const llm = mockLlm({ loreFail: CHARS[2] });
     const { facts, report } = await extractFacts(BOOK, baseOpts(), llm);

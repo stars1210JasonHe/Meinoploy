@@ -44,6 +44,35 @@ describe('createOpenAiClient', () => {
     await expect(client.map(PROMPT)).rejects.toThrow(/400/);
     await expect(client.map(PROMPT)).rejects.not.toThrow(/sk-SECRET/);
   });
+  test('non-retryable 4xx error carries err.status so callers can distinguish it from a content shortfall', async () => {
+    const client = createOpenAiClient({
+      apiKey: 'k', fetchImpl: async () => ({ ok: false, status: 401, text: async () => 'invalid api key' }), sleepImpl: noSleep,
+    });
+    await expect(client.map(PROMPT)).rejects.toMatchObject({ status: 401 });
+  });
+  test('retryable 5xx that exhausts retries also carries err.status', async () => {
+    const client = createOpenAiClient({
+      apiKey: 'k', fetchImpl: async () => ({ ok: false, status: 503, text: async () => 'unavailable' }), sleepImpl: noSleep,
+    });
+    await expect(client.map(PROMPT)).rejects.toMatchObject({ status: 503 });
+  });
+  test('null message.content with finish_reason=stop throws a clear "empty content" error (JSON.parse(null) would otherwise silently succeed as null data)', async () => {
+    const nullContent = {
+      ok: true, status: 200,
+      json: async () => ({ choices: [{ finish_reason: 'stop', message: { content: null } }], usage: {} }),
+    };
+    const client = createOpenAiClient({ apiKey: 'k', fetchImpl: async () => nullContent, sleepImpl: noSleep });
+    await expect(client.map(PROMPT)).rejects.toThrow(/content/i);
+  });
+  test('undefined message.content with finish_reason=stop throws the same clear error, not a cryptic JSON.parse crash', async () => {
+    const undefinedContent = {
+      ok: true, status: 200,
+      json: async () => ({ choices: [{ finish_reason: 'stop', message: {} }], usage: {} }),
+    };
+    const client = createOpenAiClient({ apiKey: 'k', fetchImpl: async () => undefinedContent, sleepImpl: noSleep });
+    await expect(client.map(PROMPT)).rejects.toThrow(/content/i);
+    await expect(client.map(PROMPT)).rejects.not.toThrow(/Unexpected token/i);
+  });
   test('refusal and truncation throw', async () => {
     const refuse = { ok: true, status: 200, json: async () => ({ choices: [{ finish_reason: 'stop', message: { refusal: 'no', content: null } }], usage: {} }) };
     const trunc = { ok: true, status: 200, json: async () => ({ choices: [{ finish_reason: 'length', message: { content: '{' } }], usage: {} }) };

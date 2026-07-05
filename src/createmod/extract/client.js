@@ -44,11 +44,14 @@ export function createOpenAiClient(opts) {
       if (!res.ok) {
         if (res.status === 429 || res.status >= 500) {
           lastErr = new Error(`OpenAI API ${res.status}`);
+          lastErr.status = res.status;
           if (attempt < RETRY_DELAYS.length - 1) await sleepImpl(RETRY_DELAYS[attempt]);
           continue;
         }
         const text = await res.text();
-        throw new Error(`OpenAI API error ${res.status}: ${text}`);
+        const err = new Error(`OpenAI API error ${res.status}: ${text}`);
+        err.status = res.status;
+        throw err;
       }
       const json = await res.json();
       const choice = json.choices && json.choices[0];
@@ -58,6 +61,9 @@ export function createOpenAiClient(opts) {
       }
       if (choice.finish_reason !== 'stop') {
         throw new Error(`OpenAI output truncated or filtered (finish_reason=${choice.finish_reason})`);
+      }
+      if (choice.message.content === null || choice.message.content === undefined) {
+        throw new Error('OpenAI returned finish_reason=stop but message.content is empty (no JSON to parse)');
       }
       const usage = json.usage || {};
       return {

@@ -47,6 +47,7 @@ export async function extractFacts(bookText, opts, llm) {
   const chunks = chunkBook(bookText, { chunkSize: opts.chunkSize, overlap: opts.overlap, maxChunks: opts.maxChunks });
   const cached = opts.cachedChunks || {};
   const chunksSkipped = [];
+  const skipReasonByChunk = {};
   const chunkResults = await pool(chunks, 4, async (chunk, i) => {
     if (cached[i]) return cached[i];
     try {
@@ -55,7 +56,15 @@ export async function extractFacts(bookText, opts, llm) {
       if (opts.onChunkResult) opts.onChunkResult(i, data);
       return data;
     } catch (e) {
+      // Non-retryable 4xx (auth/permissions/not-found/etc) fails EVERY chunk identically — the
+      // client already exhausted its own retries for 429/5xx, so a 4xx here means the request
+      // itself is rejected, not transient. Degrading to skip+warn just burns the rest of the run
+      // (API spend + wall time) before dying anyway with a misleading "shortfall" error; surface
+      // the real cause immediately instead. All other errors (5xx-after-retries, network, etc.)
+      // keep the existing degrade behavior.
+      if (e && e.status >= 400 && e.status < 500 && e.status !== 429) throw e;
       chunksSkipped.push(i);
+      skipReasonByChunk[i] = e.message;
       warnings.push(`chunk ${i} skipped after retries: ${e.message}`);
       return null;
     }
@@ -65,11 +74,16 @@ export async function extractFacts(bookText, opts, llm) {
   const merged = mergeCandidates(chunkResults);
   const minChars = 2;
   const minPlaces = opts.mapType === 'classic' ? 4 : 3;
+  // Defense for the remaining (still-legitimate) degrade paths: name the first skip reason so a
+  // shortfall error doesn't read as "the book is just too short" when it was actually every
+  // chunk failing for the same (possibly diagnosable) reason.
+  const firstSkipChunk = chunksSkipped.length ? Math.min(...chunksSkipped) : null;
+  const shortfallSuffix = firstSkipChunk !== null ? ` (first chunk failure: ${skipReasonByChunk[firstSkipChunk]})` : '';
   if (merged.characters.length < minChars) {
-    throw new Error(`book yields only ${merged.characters.length} character(s); need >= ${minChars} — try a longer excerpt or lower targets`);
+    throw new Error(`book yields only ${merged.characters.length} character(s); need >= ${minChars} — try a longer excerpt or lower targets${shortfallSuffix}`);
   }
   if (merged.places.length < minPlaces) {
-    throw new Error(`book yields only ${merged.places.length} place(s); need >= ${minPlaces} — try a longer excerpt or lower targets`);
+    throw new Error(`book yields only ${merged.places.length} place(s); need >= ${minPlaces} — try a longer excerpt or lower targets${shortfallSuffix}`);
   }
   const cut = cutToTargets(merged, { chars: opts.chars, places: opts.places });
 
