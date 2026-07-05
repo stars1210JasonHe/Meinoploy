@@ -80,13 +80,87 @@ describe('normalizeAtlasWorld', () => {
       const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
       expect(span).toBeCloseTo(100 - 2 * 30, 5);
     });
-    test('identical points stay centered (degenerate bbox)', () => {
+    test('identical points are split apart around the center (degenerate bbox)', () => {
       const w = normalizeAtlasWorld({ renderMode: 'flat', places: [
         { id: 'a', archetypes: ['downtown'], geo: { lat: 34.72, lng: 113.66 } },
         { id: 'b', archetypes: ['port'], geo: { lat: 34.72, lng: 113.66 } },
       ] }, ARCH);
-      expect(w.places[0].pos).toEqual({ x: 50, y: 50 });
-      expect(w.places[1].pos).toEqual({ x: 50, y: 50 });
+      const [a, b] = w.places.map(p => p.pos);
+      expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(8 - 0.01); // MIN_SEPARATION
+      expect((a.x + b.x) / 2).toBeCloseTo(50, 0);
+      expect((a.y + b.y) / 2).toBeCloseTo(50, 0);
+    });
+  });
+
+  describe('de-overlap for geo-derived layouts', () => {
+    // Real failure shape: a capital with stacked landmarks + one far outlier
+    // squeezing the main cluster (三国演义 acceptance run, 2026-07-05).
+    const CROWDED = [
+      { id: 'capital', archetypes: ['downtown'], geo: { lat: 34.62, lng: 112.45 } },
+      { id: 'gate', archetypes: ['port'], geo: { lat: 34.62, lng: 112.45 } },
+      { id: 'hill', archetypes: ['port'], geo: { lat: 34.63, lng: 112.47 } },
+      { id: 'pass', archetypes: ['port'], geo: { lat: 34.72, lng: 113.66 } },
+      { id: 'north', archetypes: ['downtown'], geo: { lat: 40, lng: 116 } },
+      { id: 'outlier-south', archetypes: ['downtown'], geo: { lat: 25, lng: 102.7 } },
+    ];
+    const allPairDistances = places => {
+      const out = [];
+      for (let i = 0; i < places.length; i++)
+        for (let j = i + 1; j < places.length; j++)
+          out.push(Math.hypot(places[i].pos.x - places[j].pos.x, places[i].pos.y - places[j].pos.y));
+      return out;
+    };
+    test('every pair ends at least MIN_SEPARATION apart, inside the margin', () => {
+      const w = normalizeAtlasWorld({ renderMode: 'flat', places: CROWDED }, ARCH);
+      for (const d of allPairDistances(w.places)) expect(d).toBeGreaterThanOrEqual(8 - 0.01);
+      for (const p of w.places) {
+        expect(p.pos.x).toBeGreaterThanOrEqual(12 - 1e-9);
+        expect(p.pos.x).toBeLessThanOrEqual(88 + 1e-9);
+        expect(p.pos.y).toBeGreaterThanOrEqual(12 - 1e-9);
+        expect(p.pos.y).toBeLessThanOrEqual(88 + 1e-9);
+      }
+    });
+    test('is deterministic', () => {
+      const a = normalizeAtlasWorld({ renderMode: 'flat', places: CROWDED }, ARCH);
+      const b = normalizeAtlasWorld({ renderMode: 'flat', places: CROWDED }, ARCH);
+      expect(a.places.map(p => p.pos)).toEqual(b.places.map(p => p.pos));
+    });
+    test('already well-separated layouts are untouched by the relax pass', () => {
+      const SPREAD = [
+        { id: 'a', archetypes: ['downtown'], geo: { lat: 0, lng: -120 } },
+        { id: 'b', archetypes: ['port'], geo: { lat: 40, lng: 0 } },
+        { id: 'c', archetypes: ['port'], geo: { lat: -40, lng: 120 } },
+      ];
+      const w = normalizeAtlasWorld({ renderMode: 'flat', places: SPREAD }, ARCH);
+      // fit ran (bbox → margin) but no pair is under MIN_SEPARATION, so the
+      // relax loop must exit on iteration 1 with the fitted positions intact
+      const spans = allPairDistances(w.places);
+      for (const d of spans) expect(d).toBeGreaterThan(8);
+      const again = normalizeAtlasWorld({ renderMode: 'flat', places: SPREAD }, ARCH);
+      expect(again.places.map(p => p.pos)).toEqual(w.places.map(p => p.pos));
+    });
+    test('minSeparation is configurable and 0 disables the pass', () => {
+      const w = normalizeAtlasWorld({ renderMode: 'flat', minSeparation: 0, places: [
+        { id: 'a', archetypes: ['downtown'], geo: { lat: 34.62, lng: 112.45 } },
+        { id: 'b', archetypes: ['port'], geo: { lat: 34.62, lng: 112.45 } },
+        { id: 'c', archetypes: ['port'], geo: { lat: 40, lng: 116 } },
+      ] }, ARCH);
+      expect(w.places[0].pos).toEqual(w.places[1].pos); // stack allowed when disabled
+      const wide = normalizeAtlasWorld({ renderMode: 'flat', minSeparation: 20, places: [
+        { id: 'a', archetypes: ['downtown'], geo: { lat: 34.62, lng: 112.45 } },
+        { id: 'b', archetypes: ['port'], geo: { lat: 34.62, lng: 112.45 } },
+        { id: 'c', archetypes: ['port'], geo: { lat: 40, lng: 116 } },
+      ] }, ARCH);
+      for (const d of allPairDistances(wide.places)) expect(d).toBeGreaterThanOrEqual(20 - 0.01);
+    });
+    test('explicit pos anywhere disables both refit and de-overlap', () => {
+      const w = normalizeAtlasWorld({ renderMode: 'flat', places: [
+        { id: 'a', archetypes: ['downtown'], geo: { lat: 34.62, lng: 112.45 } },
+        { id: 'b', archetypes: ['port'], geo: { lat: 34.62, lng: 112.45 } },
+        { id: 'aligned', archetypes: ['port'], pos: { x: 33, y: 44 } },
+      ] }, ARCH);
+      expect(w.places[0].pos).toEqual(w.places[1].pos); // raw projection, still stacked
+      expect(w.places[2].pos).toEqual({ x: 33, y: 44 });
     });
   });
 });

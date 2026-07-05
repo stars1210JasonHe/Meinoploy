@@ -40,9 +40,51 @@ function fitDerivedPositions(originals, places, fitPadding) {
   }));
 }
 
+export const MIN_SEPARATION = 8; // default minimum distance (%) between geo-derived places
+
+// Books centered on one region stack many places at near-identical geo
+// (a capital's gates/hills, twin names for one pass). After the refit,
+// iteratively push pairs closer than minSep apart — deterministic, damped,
+// clamped to the fit margin. Pairs already far enough never move.
+function deOverlap(places, fitPadding, minSeparation) {
+  const minSep = typeof minSeparation === 'number' ? minSeparation : MIN_SEPARATION;
+  if (minSep <= 0 || places.length < 2) return places;
+  const pad = typeof fitPadding === 'number' ? fitPadding : FIT_PADDING;
+  const pts = places.map(p => ({ x: p.pos.x, y: p.pos.y }));
+  for (let iter = 0; iter < 200; iter++) {
+    let moved = false;
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        let dx = pts[j].x - pts[i].x, dy = pts[j].y - pts[i].y;
+        let dist = Math.hypot(dx, dy);
+        if (dist >= minSep) continue;
+        if (dist < 1e-6) { // identical points: split along a deterministic angle
+          const a = ((i * 137.508 + j * 61) % 360) * Math.PI / 180;
+          dx = Math.cos(a); dy = Math.sin(a); dist = 1;
+        }
+        const push = (minSep - Math.min(dist, minSep)) / 2 * 0.5; // damped half-step each
+        const ux = dx / dist, uy = dy / dist;
+        pts[i].x -= ux * push; pts[i].y -= uy * push;
+        pts[j].x += ux * push; pts[j].y += uy * push;
+        moved = true;
+      }
+    }
+    for (const pt of pts) {
+      pt.x = Math.min(100 - pad, Math.max(pad, pt.x));
+      pt.y = Math.min(100 - pad, Math.max(pad, pt.y));
+    }
+    if (!moved) break;
+  }
+  return places.map((p, i) => Object.assign({}, p, { pos: { x: pts[i].x, y: pts[i].y } }));
+}
+
 export function normalizeAtlasWorld(world, archetypes) {
   const derived = (world.places || []).map(p => deriveGeoPos(p, world.renderMode));
-  const places = fitDerivedPositions(world.places || [], derived, world.fitPadding);
+  const original = world.places || [];
+  let places = fitDerivedPositions(original, derived, world.fitPadding);
+  if (places !== derived) { // refit ran → layout is fully geo-derived and ours to relax
+    places = deOverlap(places, world.fitPadding, world.minSeparation);
+  }
   let size = world.size;
   if (!size) {
     let maxSpaces = 0;
