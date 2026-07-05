@@ -65,4 +65,25 @@ describe('templates', () => {
       expect(() => parse(fn(ATLAS_NORM))).not.toThrow();
     });
   });
+
+  // Review finding: `normalized.name` is an LLM-derived mod title (--from-book synthesis over
+  // untrusted book text) interpolated RAW into every generator's `// ${normalized.name} — ...`
+  // comment header. A newline in the name terminates the `//` comment early, turning the rest
+  // of the string into executable JS spliced into a generated mods/<id>/*.js file that runs in
+  // the game client. headerSafe() must collapse it to one line so the payload stays inert text.
+  test('an LLM-derived name with an embedded newline cannot break out of the generated comment header', () => {
+    const evil = { ...ATLAS_NORM, name: 'Evil\n});alert(1);//' };
+    const parse = s => require('@babel/core').parseSync(s, { sourceType: 'module' });
+    [charactersDataJs, loreJs, bundleDataJs, charactersJs, bundleClientJs].forEach(fn => {
+      const src = fn(evil);
+      const firstLine = src.split('\n')[0];
+      expect(firstLine.startsWith('//')).toBe(true);
+      expect(firstLine).toContain('Evil });alert(1);//'); // newline collapsed to a space, one line
+      // the injected payload must never surface as its own top-level statement
+      expect(src).not.toMatch(/^\}\);alert\(1\);/m);
+      // and the generated file must still parse cleanly as a JS module (pre-fix, this throws:
+      // the injected `});alert(1);` line is a syntax error on its own)
+      expect(() => parse(src)).not.toThrow();
+    });
+  });
 });

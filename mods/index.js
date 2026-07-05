@@ -17,7 +17,7 @@ export const MODS = {
   'silk-road': silkRoadData,
   'steam-barons': steamBaronsData,
   'ancient-empires': ancientEmpiresData,
-  dominion: dominionData,
+  'dominion': dominionData,
   'terra-titans': terraTitansData,
 };
 
