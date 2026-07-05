@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { runExtract, loadDotEnv } from '../../scripts/extract-facts';
+import { runExtract, loadDotEnv, resolveExtractModel, resolveSynthModel } from '../../scripts/extract-facts';
 
 // Reuse the orchestrator mock shape (minimal inline version).
 const U = { prompt_tokens: 1, completion_tokens: 1 };
@@ -124,6 +124,33 @@ describe('--map-image preflight', () => {
     await runExtract(baseOpts(root), llm2);
     expect(llm2.mapCalls).toBe(1); // only the corrupted chunk re-mapped
     fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('resolveExtractModel / resolveSynthModel (centralized fallback chain)', () => {
+  const savedExtract = process.env.EXTRACT_MODEL;
+  const savedSynth = process.env.SYNTH_MODEL;
+  afterEach(() => {
+    if (savedExtract === undefined) delete process.env.EXTRACT_MODEL; else process.env.EXTRACT_MODEL = savedExtract;
+    if (savedSynth === undefined) delete process.env.SYNTH_MODEL; else process.env.SYNTH_MODEL = savedSynth;
+  });
+  test('explicit opts flag wins over env and default', () => {
+    delete process.env.EXTRACT_MODEL;
+    delete process.env.SYNTH_MODEL;
+    expect(resolveExtractModel({ extractModel: 'flag-model' })).toBe('flag-model');
+    expect(resolveSynthModel({ synthModel: 'flag-model' })).toBe('flag-model');
+  });
+  test('falls back to env var when opts flag absent', () => {
+    process.env.EXTRACT_MODEL = 'env-extract';
+    process.env.SYNTH_MODEL = 'env-synth';
+    expect(resolveExtractModel({})).toBe('env-extract');
+    expect(resolveSynthModel({})).toBe('env-synth');
+  });
+  test('falls back to hardcoded default when neither flag nor env is set', () => {
+    delete process.env.EXTRACT_MODEL;
+    delete process.env.SYNTH_MODEL;
+    expect(resolveExtractModel({})).toBe('gpt-4o-mini');
+    expect(resolveSynthModel({})).toBe('gpt-4o');
   });
 });
 

@@ -3,17 +3,27 @@
 // loads .env, encodes --map-image, owns the success-only chunk cache, writes facts + report,
 // and exports runExtract(opts, llm) so tests inject a mock client.
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { createHash } from 'crypto';
 import { parseExtractArgs } from '../src/createmod/extract/flags';
-import { extractFacts, kebabAscii } from '../src/createmod/extract/index';
+import { extractFacts } from '../src/createmod/extract/index';
 import { createOpenAiClient } from '../src/createmod/extract/client';
 import { MAP_CACHE_KEY } from '../src/createmod/extract/prompts';
 import { detectLang } from '../src/createmod/extract/language';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+
+// Single source of truth for the extract/synth model fallback chain: explicit opts flag ->
+// env var -> hardcoded default. Used by BOTH the chunk-cache key (cacheDirFor) and the real
+// OpenAI client construction (main(), and create-mod.js's --from-book entry point) so the two
+// can never disagree about which model a given cache entry/run actually used.
+export function resolveExtractModel(opts) {
+  return (opts && opts.extractModel) || process.env.EXTRACT_MODEL || 'gpt-4o-mini';
+}
+export function resolveSynthModel(opts) {
+  return (opts && opts.synthModel) || process.env.SYNTH_MODEL || 'gpt-4o';
+}
 
 export function loadDotEnv(rootDir) {
   const p = path.join(rootDir, '.env');
@@ -50,7 +60,7 @@ function cacheDirFor(rootDir, bookText, opts, resolvedLang) {
   const params = createHash('sha256')
     .update(JSON.stringify({
       chunkSize: opts.chunkSize, overlap: opts.overlap, lang: resolvedLang,
-      extractModel: opts.extractModel || process.env.EXTRACT_MODEL || 'gpt-4o-mini',
+      extractModel: resolveExtractModel(opts),
       mapKey: MAP_CACHE_KEY,
     }))
     .digest('hex').slice(0, 16);
@@ -154,8 +164,8 @@ async function main(argv) {
   }
   const llm = createOpenAiClient({
     apiKey: process.env.OPENAI_API_KEY,
-    extractModel: opts.extractModel || process.env.EXTRACT_MODEL || 'gpt-4o-mini',
-    synthModel: opts.synthModel || process.env.SYNTH_MODEL || 'gpt-4o',
+    extractModel: resolveExtractModel(opts),
+    synthModel: resolveSynthModel(opts),
   });
   try {
     const r = await runExtract(opts, llm);

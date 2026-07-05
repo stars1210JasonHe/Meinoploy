@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { parseArgs, runFromBook } from '../../scripts/create-mod';
+import { parseArgs, runFromBook, buildFromBookClientOptions } from '../../scripts/create-mod';
 
 function makeRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'frombook-'));
@@ -116,5 +116,45 @@ describe('--from-book', () => {
     expect(r.ok).toBe(true);
     expect(fs.existsSync(path.join(root, 'mods', 'book', 'bundle.data.js'))).toBe(true);
     fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+// Review finding: loadFromBookEnvAndRun built the real OpenAI client with `{ apiKey }` only,
+// so --extract-model/--synth-model never reached the client (it silently fell back to
+// EXTRACT_MODEL/SYNTH_MODEL env or the hardcoded default) — while runExtract's chunk-cache key
+// DID key on the requested --extract-model, mislabeling default-model results under the
+// requested model's cache key. buildFromBookClientOptions() is the pure extraction of that
+// resolution so the network-touching entry point (loadFromBookEnvAndRun, untestable without
+// hitting the real API) can be proven correct via a pure unit test.
+describe('buildFromBookClientOptions (fixes --extract-model/--synth-model ignored by --from-book)', () => {
+  test('--extract-model foo --synth-model bar resolve into client options', () => {
+    const argv = ['book.txt', '--from-book', '--extract-model', 'foo', '--synth-model', 'bar'];
+    expect(buildFromBookClientOptions(argv)).toEqual({ extractModel: 'foo', synthModel: 'bar' });
+  });
+  test('falls back to the same defaults the client itself uses when the flags are absent', () => {
+    expect(buildFromBookClientOptions(['book.txt', '--from-book'])).toEqual({ extractModel: 'gpt-4o-mini', synthModel: 'gpt-4o' });
+  });
+  test('create-mod-only flags (--seed, --force) mixed in do not confuse the resolution', () => {
+    const argv = ['book.txt', '--from-book', '--seed', 's1', '--extract-model', 'foo', '--force'];
+    expect(buildFromBookClientOptions(argv).extractModel).toBe('foo');
+  });
+  // Ties the client-options resolution to the SAME opts.extractModel that reaches runExtract's
+  // chunk-cache key (cacheDirFor), so client and cache key can never disagree. Both derive from
+  // parseExtractArgs(stripCreateModFlags(argv)) applied to the identical argv, so two distinct
+  // --extract-model values must produce two distinct cache directories for the identical book —
+  // the only externally observable trace of opts.extractModel inside runExtract.
+  test('the resolved --extract-model demonstrably reaches the opts handed to runExtract (distinct cache dirs)', async () => {
+    const rootA = makeRoot();
+    const rootB = makeRoot();
+    const argvA = [path.join(rootA, 'book.txt'), '--from-book', '--extract-model', 'foo'];
+    const argvB = [path.join(rootB, 'book.txt'), '--from-book', '--extract-model', 'zzz-different'];
+    expect(buildFromBookClientOptions(argvA).extractModel).toBe('foo');
+    expect(buildFromBookClientOptions(argvB).extractModel).toBe('zzz-different');
+    await runFromBook({ argv: argvA, rootDir: rootA, llm: makeLlm() });
+    await runFromBook({ argv: argvB, rootDir: rootB, llm: makeLlm() });
+    const cacheDirName = root => fs.readdirSync(path.join(root, '.extract-cache'))[0];
+    expect(cacheDirName(rootA)).not.toBe(cacheDirName(rootB));
+    fs.rmSync(rootA, { recursive: true, force: true });
+    fs.rmSync(rootB, { recursive: true, force: true });
   });
 });

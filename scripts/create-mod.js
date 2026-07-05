@@ -14,7 +14,7 @@ import { patchRegistries, unpatchRegistries } from '../src/createmod/registry-pa
 import { expandFacts } from '../src/createmod/smart/index';
 import { ARCHETYPES } from '../mods/dominion/atlas/archetypes';
 import { CHANCE_CARDS, COMMUNITY_CARDS } from '../mods/dominion/cards';
-import { runExtract } from './extract-facts';
+import { runExtract, resolveExtractModel, resolveSynthModel } from './extract-facts';
 import { parseExtractArgs, EXTRACT_VALUE_FLAGS } from '../src/createmod/extract/flags';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -53,6 +53,18 @@ function stripCreateModFlags(argv) {
     out.push(a);
   }
   return out;
+}
+
+// Pure: derives the OpenAI client's {extractModel, synthModel} from --from-book argv using the
+// EXACT same flag-parsing path runFromBook uses internally (stripCreateModFlags + parseExtractArgs
+// + resolveExtractModel/resolveSynthModel). Previously loadFromBookEnvAndRun built the client
+// with apiKey only, silently ignoring --extract-model/--synth-model while runExtract's cache key
+// still keyed on the (unused) requested model — mislabeling default-model results under the
+// requested model's cache key. Routing both the client and the cache key through this same
+// resolver call means they can never disagree. No fs/network — safe to unit test directly.
+export function buildFromBookClientOptions(argv) {
+  const ex = parseExtractArgs(stripCreateModFlags(argv));
+  return { extractModel: resolveExtractModel(ex), synthModel: resolveSynthModel(ex) };
 }
 
 function runBalance(normalized) {
@@ -253,7 +265,8 @@ function loadFromBookEnvAndRun(args, argv) {
     process.exit(1);
   }
   const { createOpenAiClient } = require('../src/createmod/extract/client');
-  const llm = createOpenAiClient({ apiKey: process.env.OPENAI_API_KEY });
+  const { extractModel, synthModel } = buildFromBookClientOptions(argv);
+  const llm = createOpenAiClient({ apiKey: process.env.OPENAI_API_KEY, extractModel, synthModel });
   runFromBook({ argv, llm }).then(r => {
     (r.warnings || []).forEach(w => console.warn('WARN: ' + w));
     if (!r.ok) { r.errors.forEach(e => console.error('ERROR: ' + e)); process.exit(1); }
