@@ -86,4 +86,9 @@ describe('templates', () => {
       expect(() => parse(src)).not.toThrow();
     });
   });
+
+  test('dataJson carries the mod display name (SP3 name-resolution chain)', () => {
+    const out = JSON.parse(dataJson({ name: '三国志', roster: [], lore: {}, map: { id: 'classic-map' } }));
+    expect(out.name).toBe('三国志');
+  });
 });

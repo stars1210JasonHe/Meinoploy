@@ -21,7 +21,7 @@ function headerSafe(s) {
 }
 
 export function dataJson(normalized) {
-  const obj = { roster: normalized.roster, lore: normalized.lore };
+  const obj = { name: normalized.name, roster: normalized.roster, lore: normalized.lore };
   if (normalized.mapType === 'atlas') obj.world = normalized.world;
   else obj.map = normalized.map;
   return JSON.stringify(obj, null, 2) + '\n';
