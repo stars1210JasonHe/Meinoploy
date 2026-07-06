@@ -1,4 +1,4 @@
-import { sliceCell, centerCropSquare, downscaleNearest, upscaleNearest } from '../createmod/portraits/pixel';
+import { sliceCell, centerCropSquare, downscaleNearest, upscaleNearest, quantizeMedianCut, pixelizeCell } from '../createmod/portraits/pixel';
 
 // Build a solid-color RGBA image with optional per-pixel painter fn
 function makeImage(width, height, painter) {
@@ -74,5 +74,53 @@ describe('nearest scaling', () => {
     const u = upscaleNearest(img, 341, 341);
     expect([u.width, u.height]).toEqual([341, 341]);
     expect(u.data.length).toBe(341 * 341 * 4);
+  });
+});
+
+const uniqueColors = img => {
+  const s = new Set();
+  for (let i = 0; i < img.data.length; i += 4) s.add(`${img.data[i]},${img.data[i + 1]},${img.data[i + 2]}`);
+  return s;
+};
+
+describe('quantizeMedianCut', () => {
+  test('reduces a gradient to at most 24 colors, alpha 255, deterministic', () => {
+    const img = makeImage(52, 52, (x, y) => [x * 4, y * 4, (x + y) * 2]);
+    const q1 = quantizeMedianCut(img, 24);
+    const q2 = quantizeMedianCut(img, 24);
+    expect(uniqueColors(q1).size).toBeLessThanOrEqual(24);
+    expect(uniqueColors(q1).size).toBeGreaterThan(8); // gradient really uses the budget
+    for (let i = 3; i < q1.data.length; i += 4) expect(q1.data[i]).toBe(255);
+    expect(Array.from(q1.data)).toEqual(Array.from(q2.data)); // byte-identical
+  });
+  test('fewer unique colors than budget → preserved exactly', () => {
+    const img = makeImage(8, 8, (x, y) => (x < 4 ? [10, 20, 30] : [200, 100, 0]));
+    const q = quantizeMedianCut(img, 24);
+    expect(uniqueColors(q).size).toBe(2);
+    expect(px(q, 0, 0)).toEqual([10, 20, 30, 255]);
+    expect(px(q, 7, 0)).toEqual([200, 100, 0, 255]);
+  });
+  test('single-color image survives', () => {
+    const img = makeImage(4, 4, () => [7, 7, 7]);
+    const q = quantizeMedianCut(img, 24);
+    expect(uniqueColors(q).size).toBe(1);
+    expect(px(q, 3, 3)).toEqual([7, 7, 7, 255]);
+  });
+  test('non-opaque source alpha is forced to 255', () => {
+    const img = makeImage(2, 2, () => [1, 2, 3]);
+    img.data[3] = 40; // corrupt one alpha
+    const q = quantizeMedianCut(img, 24);
+    expect(q.data[3]).toBe(255);
+  });
+});
+
+describe('pixelizeCell', () => {
+  test('full chain: non-square cell → 341x341, ≤24 colors, deterministic', () => {
+    const cell = makeImage(384, 512, (x, y) => [x % 256, y % 256, (x * y) % 256]);
+    const a = pixelizeCell(cell);
+    const b = pixelizeCell(cell);
+    expect([a.width, a.height]).toEqual([341, 341]);
+    expect(uniqueColors(a).size).toBeLessThanOrEqual(24);
+    expect(Array.from(a.data)).toEqual(Array.from(b.data));
   });
 });
