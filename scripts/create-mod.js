@@ -208,7 +208,7 @@ export function removeMod({ id, rootDir = REPO_ROOT }) {
 // gen-portraits + the images client (network-capable code a unit test must never load). Never
 // throws: any preflight/network/write failure is reported and swallowed to `false` so the
 // caller can exit 1 while leaving the already-built mod tree intact.
-export async function chainPortraits({ modId, style, imageModel, rootDir, runner }) {
+export async function chainPortraits({ modId, style, imageModel, rootDir, force, runner }) {
   try {
     const run = runner || (async o => {
       const gp = require('./gen-portraits');
@@ -216,7 +216,10 @@ export async function chainPortraits({ modId, style, imageModel, rootDir, runner
         .createImagesClient({ apiKey: process.env.OPENAI_API_KEY, imageModel: gp.resolveImageModel(o) });
       return gp.runGenPortraits(o, client, gp.pngCodec);
     });
-    const r = await run({ modId, style: style || undefined, imageModel: imageModel || undefined, rootDir });
+    // force must reach runGenPortraits's opts.force: create-mod --force re-emits characters.js
+    // with an empty PORTRAIT_MAP (see gen-portraits.js's rewireCharactersJs), so a chained
+    // --portraits --force needs the SAME force semantics the standalone CLI has.
+    const r = await run({ modId, style: style || undefined, imageModel: imageModel || undefined, rootDir, force: !!force });
     if (!r.ok) {
       console.error('portraits generation failed — the mod itself was built and is playable with placeholders.');
       console.error(`retry standalone: npm run gen-portraits -- ${modId}`);
@@ -224,7 +227,8 @@ export async function chainPortraits({ modId, style, imageModel, rootDir, runner
     }
     return true;
   } catch (e) {
-    console.error(`portraits generation failed: ${e.message}`);
+    const { redactSecrets } = require('./gen-portraits');
+    console.error(`portraits generation failed: ${redactSecrets(e.message)}`);
     console.error(`the mod itself was built; retry standalone: npm run gen-portraits -- ${modId}`);
     return false;
   }
@@ -300,14 +304,17 @@ function main(argv) {
 // Fires the optional --portraits chain after the plain/smart build path succeeds. This path
 // (unlike --from-book) never needed OPENAI_API_KEY before, so the .env load is lazy and only
 // happens here, gated on --portraits actually being requested on a real (non-dry-run) build.
-export function runPortraitsChain(args, modId) {
+// async: a synchronous throw from loadDotEnv/require (e.g. a broken .env parse or a missing
+// module) must land in the caller's `.catch(...)`, not escape as a raw, unhandled stack trace.
+// Wrapping the body in `async` turns any synchronous throw into a rejected promise automatically.
+export async function runPortraitsChain(args, modId) {
   const { loadDotEnv } = require('./extract-facts');
   loadDotEnv(REPO_ROOT);
   if (!process.env.OPENAI_API_KEY) {
     console.error('ERROR: OPENAI_API_KEY is not set (env var or repo-root .env)');
     process.exit(1);
   }
-  return chainPortraits({ modId, style: args.style, imageModel: args.imageModel, rootDir: REPO_ROOT }).then(ok => {
+  return chainPortraits({ modId, style: args.style, imageModel: args.imageModel, rootDir: REPO_ROOT, force: !!args.force }).then(ok => {
     if (!ok) process.exit(1);
   });
 }

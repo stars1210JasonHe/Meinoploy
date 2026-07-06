@@ -36,10 +36,24 @@ function resolveName(dataJson, modDir, modId) {
   return modId;
 }
 
+// Shared by both the success path (step 6c) and the all-present no-op path: re-renders
+// characters.js's PORTRAIT_MAP + imports from `roster`. Zero API cost — this is pure fs +
+// string templating, so it is safe to run even when nothing was regenerated. This exists
+// because `create-mod --force` re-emits characters.js with an EMPTY PORTRAIT_MAP (it has no
+// portraits to wire yet) while leaving the actual portraits/*.png files on disk untouched; a
+// following gen-portraits run must not treat "all PNGs present" as "nothing to do" — the wiring
+// itself needs redoing even though no image needs regenerating.
+function rewireCharactersJs(dataJson, modDir, modId, roster) {
+  const name = resolveName(dataJson, modDir, modId);
+  const portraits = roster.map(c => ({ id: c.id, path: `portraits/${c.id}.png` }));
+  fs.writeFileSync(path.join(modDir, 'characters.js'), charactersJs({ name, portraits }));
+}
+
 // The OPENAI_API_KEY (or any bearer-token-shaped string an upstream error might echo back,
 // e.g. a provider error message that includes the request's Authorization header) must never
-// land in a written report. Defense in depth: redact anything key-shaped before it is persisted.
-function redactSecrets(s) {
+// land in a written report (or a console.error — see main()'s catch below, and create-mod.js's
+// chainPortraits catch, which imports this same helper rather than re-redacting ad hoc).
+export function redactSecrets(s) {
   return String(s).replace(/sk-[A-Za-z0-9_-]+/g, '[redacted]');
 }
 
@@ -88,7 +102,11 @@ export async function runGenPortraits(opts, imagesClient, codec) {
   const existing = fs.existsSync(portraitsDir) ? fs.readdirSync(portraitsDir) : [];
   const allPresent = wanted.every(f => existing.includes(f));
   if (allPresent && !opts.force) {
-    log(`portraits already exist for all ${roster.length} character(s); use --force to regenerate`);
+    // All PNGs already exist, but characters.js may not (e.g. `create-mod --force` re-emitted
+    // it with an empty PORTRAIT_MAP while these portraits/*.png files survived on disk). Re-wire
+    // it from the existing files at zero API cost instead of silently leaving it un-wired.
+    rewireCharactersJs(dataJson, modDir, modId, roster);
+    log('portraits exist; re-wired characters.js; use --force to regenerate images');
     return { ok: true, written: [], pruned: [], reportPath: null, warnings: [] };
   }
   const stale = existing.filter(f => /^[a-z0-9-]+\.png$/.test(f) && !wanted.includes(f));
@@ -129,9 +147,7 @@ export async function runGenPortraits(opts, imagesClient, codec) {
   for (const f of stale) { fs.rmSync(path.join(portraitsDir, f)); pruned.push(f); }
 
   // step 6c: re-render characters.js (name chain: data.json.name -> bundle.data.js -> id)
-  const name = resolveName(dataJson, modDir, modId);
-  const portraits = roster.map(c => ({ id: c.id, path: `portraits/${c.id}.png` }));
-  fs.writeFileSync(path.join(modDir, 'characters.js'), charactersJs({ name, portraits }));
+  rewireCharactersJs(dataJson, modDir, modId, roster);
 
   fs.writeFileSync(reportPath, renderReport({
     modId, rosterCount: roster.length, plan: result.plan, usage: result.usage,
@@ -172,7 +188,7 @@ async function main() {
     const r = await runGenPortraits({ modId: args.modId, rootDir: REPO_ROOT, style: args.style, imageModel: args.imageModel, force: args.force, dryRun: args.dryRun }, client, pngCodec);
     process.exit(r.ok ? 0 : 1);
   } catch (e) {
-    console.error(`ERROR: ${e.message}`);
+    console.error(`ERROR: ${redactSecrets(e.message)}`);
     process.exit(1);
   }
 }

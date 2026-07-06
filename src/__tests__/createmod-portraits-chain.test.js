@@ -42,6 +42,26 @@ describe('chainPortraits', () => {
     const bad = await chainPortraits({ modId: 'm', rootDir: '/r', runner: async () => { throw new Error('x'); } });
     expect(bad).toBe(false);
   });
+
+  // Fix 1b: `create-mod --force --portraits` must forward force all the way down to
+  // runGenPortraits's opts, otherwise the no-op-detection path (Fix 1a) never sees force:true
+  // and a genuine --force regeneration request silently degrades to a re-wire-only no-op.
+  test('forwards force:true through to the runner opts (runner-spy assertion)', async () => {
+    const { chainPortraits } = require('../../scripts/create-mod');
+    const calls = [];
+    const ok = await chainPortraits({
+      modId: 'm', style: 's', imageModel: 'im', rootDir: '/r', force: true,
+      runner: async o => { calls.push(o); return { ok: true }; },
+    });
+    expect(ok).toBe(true);
+    expect(calls[0]).toMatchObject({ modId: 'm', force: true });
+  });
+  test('force defaults to false (coerced, not undefined) when omitted', async () => {
+    const { chainPortraits } = require('../../scripts/create-mod');
+    const calls = [];
+    await chainPortraits({ modId: 'm', rootDir: '/r', runner: async o => { calls.push(o); return { ok: true }; } });
+    expect(calls[0].force).toBe(false);
+  });
 });
 
 describe('runPortraitsChain', () => {

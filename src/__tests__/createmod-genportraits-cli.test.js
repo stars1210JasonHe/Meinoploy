@@ -4,6 +4,7 @@ import path from 'path';
 import { PNG } from 'pngjs';
 import { runGenPortraits, resolveImageModel } from '../../scripts/gen-portraits';
 import { gridGeometry } from '../createmod/portraits/prompt';
+import { charactersJs } from '../createmod/templates';
 
 const codec = {
   decode: b64 => { const p = PNG.sync.read(Buffer.from(b64, 'base64')); return { width: p.width, height: p.height, data: new Uint8Array(p.data) }; },
@@ -22,6 +23,9 @@ function gridPngB64(n) {
 }
 const okClient = () => ({ calls: 0, generate: async function (prompt) { this.calls++; const n = Number((prompt.match(/grid of (\d+)/) || [, '1'])[1]); return { b64: gridPngB64(n), usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 } }; } });
 const failClient = () => ({ calls: 0, generate: async function () { this.calls++; const e = new Error('boom sk-NOPE'); e.status = 500; throw e; } });
+// A client whose generate() must NEVER be invoked — used to prove the no-op re-wire path spends
+// zero API calls (Fix 1a).
+const forbiddenClient = () => ({ calls: 0, generate: async function () { this.calls++; throw new Error('client must not be called'); } });
 
 function makeMod(rootDir, id, n = 2, extra = {}) {
   const dir = path.join(rootDir, 'mods', id);
@@ -77,6 +81,28 @@ describe('runGenPortraits', () => {
     const c4 = okClient();
     await runGenPortraits({ modId: 'm', rootDir: root, force: true }, c4, codec);
     expect(c4.calls).toBe(1);
+  });
+  // Fix 1: `create-mod --force` re-emits characters.js with an EMPTY PORTRAIT_MAP while leaving
+  // portraits/*.png on disk untouched. A following gen-portraits run (chained or standalone) must
+  // NOT treat "all PNGs present" as "nothing to do" — it must re-wire characters.js at zero API
+  // cost instead of leaving the app permanently un-wired.
+  test('--force rebuild scenario: no-op path still re-renders an un-wired characters.js, zero client calls', async () => {
+    const root = tmp(); makeMod(root, 'm', 2);
+    await runGenPortraits({ modId: 'm', rootDir: root }, okClient(), codec); // wires characters.js the first time
+    // Simulate create-mod --force having re-emitted characters.js with NO portraits wired in.
+    fs.writeFileSync(path.join(root, 'mods/m/characters.js'), charactersJs({ name: 'm', portraits: [] }));
+    const unwired = fs.readFileSync(path.join(root, 'mods/m/characters.js'), 'utf8');
+    expect(unwired).not.toContain("from './portraits/");
+    const client = forbiddenClient();
+    const logs = [];
+    const r = await runGenPortraits({ modId: 'm', rootDir: root, log: m => logs.push(m) }, client, codec);
+    expect(r.ok).toBe(true);
+    expect(client.calls).toBe(0); // MUST NOT call the client
+    const chars = fs.readFileSync(path.join(root, 'mods/m/characters.js'), 'utf8');
+    expect(chars).toContain("from './portraits/hero-0.png'");
+    expect(chars).toContain("from './portraits/hero-1.png'");
+    expect(chars).toContain('PORTRAIT_MAP');
+    expect(logs.join('\n')).toContain('re-wired characters.js');
   });
   test('failure preserves existing portraits byte-identical (force AND partial paths), report written key-free', async () => {
     const root = tmp(); makeMod(root, 'm', 2);
