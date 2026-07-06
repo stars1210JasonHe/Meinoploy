@@ -41,6 +41,33 @@ describe('validateRosterIds', () => {
     expect(KEBAB_ID.test('a b')).toBe(false);
     expect(KEBAB_ID.test('ok-id-9')).toBe(true);
   });
+
+  // Fix 2: duplicate/invalid-identifier roster ids used to sail through validateRosterIds
+  // (only the kebab pattern was checked), producing duplicate/illegal `import` bindings in the
+  // regenerated characters.js -> SyntaxError -> `npm run build` fails for the ENTIRE app.
+  test('exact duplicate raw ids rejected', () => {
+    const errs = validateRosterIds([{ id: 'liu-bei' }, { id: 'liu-bei' }]);
+    expect(errs.length).toBeGreaterThan(0);
+    expect(errs.join(' ')).toContain('liu-bei');
+  });
+  test('hero-1 / hero1 camelId collision rejected even though the raw kebab ids differ', () => {
+    const errs = validateRosterIds([{ id: 'hero-1' }, { id: 'hero1' }]);
+    expect(errs.length).toBeGreaterThan(0);
+    expect(errs.join(' ')).toMatch(/hero-1/);
+    expect(errs.join(' ')).toMatch(/hero1/);
+  });
+  test('digit-leading id ("2pac") rejected as an invalid JS import identifier', () => {
+    const errs = validateRosterIds([{ id: '2pac' }]);
+    expect(errs.length).toBeGreaterThan(0);
+    expect(errs.join(' ')).toContain('2pac');
+  });
+  test('generatePortraits rejects the hero-1/hero1 collision before any client call', async () => {
+    const client = mockClient();
+    await expect(generatePortraits(
+      { roster: [{ id: 'hero-1', name: 'A' }, { id: 'hero1', name: 'B' }], lore: {} }, {}, client, codec,
+    )).rejects.toThrow(/hero-1|hero1/);
+    expect(client.calls).toHaveLength(0);
+  });
 });
 
 describe('generatePortraits', () => {
