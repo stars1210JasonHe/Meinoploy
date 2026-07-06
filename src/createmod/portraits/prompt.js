@@ -40,10 +40,13 @@ function cellBrief(char, k, row, col, warnings) {
   const appearance = char.background ? `; ${firstSentence(char.background)}` : '';
   let line = floor + identity + appearance;
   if (line.length > BRIEF_MAX) {
+    const preTruncation = line.length;
     line = line.length > floor.length
       ? (floor.length >= BRIEF_MAX ? floor : line.slice(0, BRIEF_MAX))
       : floor; // the floor itself is never truncated
-    warnings.push(`brief truncated for ${char.id} (${BRIEF_MAX}-char cap)`);
+    if (line.length < preTruncation) {
+      warnings.push(`brief truncated for ${char.id} (${BRIEF_MAX}-char cap)`);
+    }
   }
   return line;
 }
@@ -56,6 +59,9 @@ export function buildGridPrompt(batch, opts) {
     const c = batch[0];
     const brief = cellBrief(c, 1, 1, 1, warnings).replace(/^Cell 1 \(1,1\): /, '');
     const prompt = `A single pixel-art character bust portrait, centered. ${style}\nCharacter: ${brief}`;
+    if (prompt.length > PROMPT_MAX) {
+      throw new Error(`prompt exceeds ${PROMPT_MAX} chars (${prompt.length}) — reduce --style or roster`);
+    }
     return { prompt, warnings };
   }
   const { cols, rows } = gridGeometry(n);

@@ -77,6 +77,26 @@ describe('buildGridPrompt', () => {
     expect(line).toContain('Name1 — Title1');
     expect(warnings.some(w => /truncated/.test(w))).toBe(true);
   });
+  test('no truncation: very long floor with no identity/background returns full floor, no warning', () => {
+    const longName = 'The ' + 'Extraordinarily '.repeat(15) + 'Long Character Name';
+    const char = mkChar(1, {
+      identity: '',
+      background: '',
+      name: longName,
+      title: 'Title1'
+    });
+    const { prompt, warnings } = buildGridPrompt([char, mkChar(2)], {});
+    const line = prompt.split('\n').find(l => l.startsWith('Cell 1'));
+    expect(line.length).toBeGreaterThan(BRIEF_MAX);
+    expect(line).toContain('Extraordinarily');
+    expect(warnings).toEqual([]);
+  });
+  test('n=1: prompt exceeds PROMPT_MAX throws with message mentioning 30000/PROMPT_MAX', () => {
+    const hugeStyle = 'y'.repeat(31000);
+    const char = mkChar(1);
+    expect(() => buildGridPrompt([char], { style: hugeStyle }))
+      .toThrow(/30000|PROMPT_MAX|exceeds/);
+  });
   test('exports the pinned caps', () => {
     expect(STYLE_MAX).toBe(600);
     expect(PROMPT_MAX).toBe(30000);
