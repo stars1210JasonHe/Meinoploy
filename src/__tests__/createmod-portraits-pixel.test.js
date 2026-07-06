@@ -112,6 +112,18 @@ describe('quantizeMedianCut', () => {
     const q = quantizeMedianCut(img, 24);
     expect(q.data[3]).toBe(255);
   });
+  test('box tie-break uses creation index (FIFO), not array position', () => {
+    // R values chosen so the 3rd split has a range tie between two boxes:
+    // box [0,5] (range 5) vs box [100,101,104,105] (range 5), with the
+    // wider-range box created earlier. Spec: lowest creation index wins the
+    // tie, so [100,101,104,105] must split, not [0,5].
+    const rValues = [0, 5, 6, 10, 100, 101, 104, 105];
+    const img = makeImage(8, 1, (x) => [rValues[x], 0, 0]);
+    const q = quantizeMedianCut(img, 4);
+    const rs = new Set();
+    for (let i = 0; i < q.data.length; i += 4) rs.add(q.data[i]);
+    expect(Array.from(rs).sort((a, b) => a - b)).toEqual([3, 8, 101, 105]);
+  });
 });
 
 describe('pixelizeCell', () => {

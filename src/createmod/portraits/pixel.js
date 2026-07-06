@@ -46,11 +46,14 @@ function resampleNearest(img, w, h) {
 export function downscaleNearest(img, w, h) { return resampleNearest(img, w, h); }
 export function upscaleNearest(img, w, h) { return resampleNearest(img, w, h); }
 
-// Deterministic median cut (spec §6): boxes split largest channel range
-// (range tie R>G>B, box tie lowest creation index / FIFO); split at
-// floor(count/2) into the lower box; palette = per-box rounded mean;
-// pixel -> nearest palette color by squared distance (tie lowest index).
-// Alpha excluded from ranges/distances and forced to 255 in the output.
+// Deterministic median cut (spec §6): for each box, find its own best
+// channel range (channel tie R>G>B, earlier channel wins); then pick the
+// box with the largest per-box best range to split (box tie -> lowest
+// creation index / FIFO, compared explicitly via `created`, not array
+// position). Split at floor(count/2) into the lower box; palette =
+// per-box rounded mean; pixel -> nearest palette color by squared
+// distance (tie lowest index). Alpha excluded from ranges/distances and
+// forced to 255 in the output.
 export function quantizeMedianCut(img, maxColors) {
   const n = img.width * img.height;
   const pixels = new Array(n);
@@ -62,13 +65,18 @@ export function quantizeMedianCut(img, maxColors) {
     let best = -1, bestRange = 0, bestCh = 0;
     for (let b = 0; b < boxes.length; b++) {
       if (boxes[b].pixels.length < 2) continue;
+      // per-box best channel first: channel tie -> R>G>B (earlier ch wins)
+      let boxBestRange = 0, boxBestCh = 0;
       for (let ch = 0; ch < 3; ch++) {
         let lo = 255, hi = 0;
         for (const p of boxes[b].pixels) { if (p[ch] < lo) lo = p[ch]; if (p[ch] > hi) hi = p[ch]; }
         const range = hi - lo;
-        // strictly-greater keeps: channel tie -> R>G>B (earlier ch wins),
-        // box tie -> lowest creation index (earlier b wins)
-        if (range > bestRange) { bestRange = range; best = b; bestCh = ch; }
+        if (range > boxBestRange) { boxBestRange = range; boxBestCh = ch; }
+      }
+      // box selection: largest per-box best range; box tie -> lowest
+      // creation index (explicit created comparison, not array position)
+      if (boxBestRange > bestRange || (boxBestRange === bestRange && best >= 0 && boxes[b].created < boxes[best].created)) {
+        bestRange = boxBestRange; best = b; bestCh = boxBestCh;
       }
     }
     if (best < 0 || bestRange === 0) break; // nothing splittable
