@@ -21,7 +21,10 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const OPTS = { ARCHETYPES, reusedCards: { chance: CHANCE_CARDS, community: COMMUNITY_CARDS } };
 
 export function parseArgs(argv) {
-  const out = { input: null, remove: null, dryRun: false, force: false, balance: false, smart: false, seed: null, fromBook: false };
+  const out = {
+    input: null, remove: null, dryRun: false, force: false, balance: false, smart: false, seed: null,
+    fromBook: false, portraits: false, style: null, imageModel: null,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--remove') { out.remove = argv[++i]; }
@@ -30,6 +33,9 @@ export function parseArgs(argv) {
     else if (a === '--balance') { out.balance = true; }
     else if (a === '--smart') { out.smart = true; }
     else if (a === '--seed') { out.seed = argv[++i]; }
+    else if (a === '--portraits') { out.portraits = true; }
+    else if (a === '--style') { out.style = argv[++i]; }
+    else if (a === '--image-model') { out.imageModel = argv[++i]; }
     else if (a === '--from-book') { out.fromBook = true; }
     else if (EXTRACT_VALUE_FLAGS.includes(a)) { i++; } // extraction flag values are not positionals
     else if (!a.startsWith('--') && !out.input) { out.input = a; }
@@ -41,10 +47,10 @@ export function parseArgs(argv) {
 // set) must be stripped before delegating to parseExtractArgs, which REJECTS any unrecognized
 // "--" flag (spec rule, see src/createmod/extract/flags.js) — so combining e.g.
 // `--from-book --chars 3 --force` would otherwise misfire as "unrecognized flag: --force".
-const CREATE_MOD_ONLY_BOOL_FLAGS = ['--from-book', '--dry-run', '--force', '--balance', '--smart'];
-const CREATE_MOD_ONLY_VALUE_FLAGS = ['--seed'];
+const CREATE_MOD_ONLY_BOOL_FLAGS = ['--from-book', '--dry-run', '--force', '--balance', '--smart', '--portraits'];
+const CREATE_MOD_ONLY_VALUE_FLAGS = ['--seed', '--style', '--image-model'];
 
-function stripCreateModFlags(argv) {
+export function stripCreateModFlags(argv) {
   const out = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -197,6 +203,33 @@ export function removeMod({ id, rootDir = REPO_ROOT }) {
   return { ok: true, errors: [] };
 }
 
+// Fires after a successful build (plain/smart AND --from-book) when --portraits was passed.
+// `runner` is the test seam — real callers omit it and get the default, which lazy-requires
+// gen-portraits + the images client (network-capable code a unit test must never load). Never
+// throws: any preflight/network/write failure is reported and swallowed to `false` so the
+// caller can exit 1 while leaving the already-built mod tree intact.
+export async function chainPortraits({ modId, style, imageModel, rootDir, runner }) {
+  try {
+    const run = runner || (async o => {
+      const gp = require('./gen-portraits');
+      const client = require('../src/createmod/portraits/client')
+        .createImagesClient({ apiKey: process.env.OPENAI_API_KEY, imageModel: gp.resolveImageModel(o) });
+      return gp.runGenPortraits(o, client, gp.pngCodec);
+    });
+    const r = await run({ modId, style: style || undefined, imageModel: imageModel || undefined, rootDir });
+    if (!r.ok) {
+      console.error('portraits generation failed — the mod itself was built and is playable with placeholders.');
+      console.error(`retry standalone: npm run gen-portraits -- ${modId}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error(`portraits generation failed: ${e.message}`);
+    console.error(`the mod itself was built; retry standalone: npm run gen-portraits -- ${modId}`);
+    return false;
+  }
+}
+
 // --from-book sugar path: extract facts from a book, then feed them into the existing
 // --smart chain. Consumes: runExtract (./extract-facts), parseExtractArgs (../src/createmod/
 // extract/flags), createMod (above). Runs an early duplicate-id check BEFORE extraction so a
@@ -234,24 +267,45 @@ function main(argv) {
     return;
   }
   if (args.remove) {
+    // --remove never builds anything, so --portraits has nothing to chain onto.
+    if (args.portraits) console.log('--portraits ignored: nothing was built');
     const r = removeMod({ id: args.remove });
     if (!r.ok) { r.errors.forEach(e => console.error('ERROR: ' + e)); process.exit(1); }
     console.log(`Removed mod ${args.remove}.`);
     return;
   }
   if (!args.input) {
-    console.error('Usage: npm run create-mod -- <input.json> [--smart] [--seed <s>] [--dry-run] [--force] [--balance]'
-      + ' | npm run create-mod -- <book.txt> --from-book [extract flags] [--seed <s>] [--dry-run] [--force] [--balance]'
+    console.error('Usage: npm run create-mod -- <input.json> [--smart] [--seed <s>] [--dry-run] [--force] [--balance] [--portraits] [--style <s>] [--image-model <m>]'
+      + ' | npm run create-mod -- <book.txt> --from-book [extract flags] [--seed <s>] [--dry-run] [--force] [--balance] [--portraits]'
       + ' | --remove <id>');
     process.exit(1);
   }
   const r = createMod({ inputPath: args.input, dryRun: args.dryRun, force: args.force, balance: args.balance, smart: args.smart, seed: args.seed });
   // Smart dry-run owns its own output (derived JSON + advisory) and exits 0 — but only
   // when a derived input exists; an impossible derivation falls through to ERROR + exit 1.
-  if (args.smart && args.dryRun && r.input) return;
+  if (args.smart && args.dryRun && r.input) {
+    if (args.portraits) console.log('--portraits ignored: nothing was built');
+    return;
+  }
   (r.warnings || []).forEach(w => console.warn('WARN: ' + w));
   if (!r.ok) { r.errors.forEach(e => console.error('ERROR: ' + e)); process.exit(1); }
-  if (!args.dryRun) console.log(`Created mod ${r.id} (${r.written.length} files). Run \`npm run build\` to play it.`);
+  if (args.dryRun) {
+    if (args.portraits) console.log('--portraits ignored: nothing was built');
+    return;
+  }
+  console.log(`Created mod ${r.id} (${r.written.length} files). Run \`npm run build\` to play it.`);
+  if (args.portraits) runPortraitsChain(args, r.id);
+}
+
+// Fires the optional --portraits chain after the plain/smart build path succeeds. This path
+// (unlike --from-book) never needed OPENAI_API_KEY before, so the .env load is lazy and only
+// happens here, gated on --portraits actually being requested on a real (non-dry-run) build.
+function runPortraitsChain(args, modId) {
+  const { loadDotEnv } = require('./extract-facts');
+  loadDotEnv(REPO_ROOT);
+  return chainPortraits({ modId, style: args.style, imageModel: args.imageModel, rootDir: REPO_ROOT }).then(ok => {
+    if (!ok) process.exit(1);
+  });
 }
 
 // Loads .env + validates the API key, builds the real OpenAI client, then runs --from-book.
@@ -271,6 +325,16 @@ function loadFromBookEnvAndRun(args, argv) {
     (r.warnings || []).forEach(w => console.warn('WARN: ' + w));
     if (!r.ok) { r.errors.forEach(e => console.error('ERROR: ' + e)); process.exit(1); }
     console.log(`Created mod ${r.id} from book (${(r.written || []).length} files). Run \`npm run build\` to play it.`);
+    if (args.dryRun) {
+      if (args.portraits) console.log('--portraits ignored: nothing was built');
+      return;
+    }
+    if (args.portraits) {
+      // OPENAI_API_KEY was already loaded above to build the extraction client; reuse it.
+      return chainPortraits({ modId: r.id, style: args.style, imageModel: args.imageModel, rootDir: REPO_ROOT }).then(ok => {
+        if (!ok) process.exit(1);
+      });
+    }
   }).catch(e => { console.error('ERROR: ' + e.message); process.exit(1); });
 }
 
