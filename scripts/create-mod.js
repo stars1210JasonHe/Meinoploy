@@ -294,15 +294,19 @@ function main(argv) {
     return;
   }
   console.log(`Created mod ${r.id} (${r.written.length} files). Run \`npm run build\` to play it.`);
-  if (args.portraits) runPortraitsChain(args, r.id);
+  if (args.portraits) runPortraitsChain(args, r.id).catch(e => { console.error('ERROR: ' + e.message); process.exit(1); });
 }
 
 // Fires the optional --portraits chain after the plain/smart build path succeeds. This path
 // (unlike --from-book) never needed OPENAI_API_KEY before, so the .env load is lazy and only
 // happens here, gated on --portraits actually being requested on a real (non-dry-run) build.
-function runPortraitsChain(args, modId) {
+export function runPortraitsChain(args, modId) {
   const { loadDotEnv } = require('./extract-facts');
   loadDotEnv(REPO_ROOT);
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('ERROR: OPENAI_API_KEY is not set (env var or repo-root .env)');
+    process.exit(1);
+  }
   return chainPortraits({ modId, style: args.style, imageModel: args.imageModel, rootDir: REPO_ROOT }).then(ok => {
     if (!ok) process.exit(1);
   });
