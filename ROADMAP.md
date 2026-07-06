@@ -1,6 +1,6 @@
 # Meinopoly Roadmap
 
-_Last updated: 2026-07-05. This records direction agreed with the project owner; the two
+_Last updated: 2026-07-06. This records direction agreed with the project owner; the two
 major tasks below are to **discuss + design before building** — each is a large initiative._
 
 ## Where we are
@@ -51,6 +51,19 @@ major tasks below are to **discuss + design before building** — each is a larg
 > dup-check before any API spend. Key hygiene throughout (.env only, never logged/cached). Pure core in
 > `src/createmod/extract/` + `scripts/extract-facts.js`; 679 unit tests. Manual live-API acceptance checklist
 > in `.superpowers/sdd/progress.md`, pending user run (needs real OPENAI_API_KEY).
+
+> **SP3 — Portrait generation: DONE 2026-07-06 (main `b901b77`).** `npm run gen-portraits -- <mod-id>`
+> gives a created mod real pixel-art portraits: ONE gpt-image-1 grid image per ≤16-char batch
+> (square-first packing, near-equal batches) → slice → center-crop → 52px nearest downscale →
+> deterministic 24-color median-cut quantize (spec-pinned tie-breaks) → 341×341 upscale →
+> `mods/<id>/portraits/<char-id>.png` + characters.js re-render (PORTRAIT_MAP auto-wired). Atomic
+> buffer-all-then-write (failures never destroy existing portraits), stale-PNG pruning with pre-call
+> preview, cost plan printed before any spend, `--dry-run`/`--force`/`--style`/`--image-model`,
+> roster-id injection/duplicate/identifier validation (a hostile data.json can no longer break the
+> app build), key redaction on all error paths to disk. `create-mod ... --portraits` chains it on
+> every create path. Pure core `src/createmod/portraits/` + `scripts/gen-portraits.js` (pngjs, no
+> Python/native deps); 766 unit tests. **Major Task 1 is now COMPLETE end-to-end: book → facts →
+> mod → portraits.** Manual live acceptance (sanguo 8 portraits) pending user key.
 
 
 - **Map module** — a builder for atlas worlds (places, geo lat/lng, connectors, archetypes, hubs)
