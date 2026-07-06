@@ -52,6 +52,9 @@ describe('runGenPortraits', () => {
     expect(chars.split('\n')[0]).toContain('My "Mod"');
     expect(fs.existsSync(r.reportPath)).toBe(true);
     expect(logs.join('\n')).toMatch(/2 character\(s\).*1 image call/);
+    expect(r.written).toHaveLength(2);
+    expect(r.written.map(p => path.basename(p))).toEqual(['hero-0.png', 'hero-1.png']);
+    expect(r.pruned).toEqual([]);
   });
   test('name fallback: bundle.data.js parse, then mod id', async () => {
     const root = tmp(); makeMod(root, 'old-mod', 1, { name: undefined, bundleName: 'Bundle "Named"' });
@@ -84,6 +87,8 @@ describe('runGenPortraits', () => {
     expect(fs.readFileSync(path.join(root, 'mods/m/portraits/hero-0.png')).equals(before)).toBe(true);
     const report = fs.readFileSync(rf.reportPath, 'utf8');
     expect(report).toContain('boom'); expect(report).not.toContain('sk-NOPE');
+    expect(rf.written).toEqual([]);
+    expect(rf.pruned).toEqual([]);
     fs.rmSync(path.join(root, 'mods/m/portraits/hero-1.png'));
     const rp = await runGenPortraits({ modId: 'm', rootDir: root }, failClient(), codec);
     expect(rp.ok).toBe(false);
@@ -95,10 +100,12 @@ describe('runGenPortraits', () => {
     fs.writeFileSync(path.join(pdir, 'gone-hero.png'), 'x');
     fs.writeFileSync(path.join(pdir, 'NOTES.txt'), 'keep');
     const logs = [];
-    await runGenPortraits({ modId: 'm', rootDir: root, log: m => logs.push(m) }, okClient(), codec);
+    const r = await runGenPortraits({ modId: 'm', rootDir: root, log: m => logs.push(m) }, okClient(), codec);
     expect(fs.existsSync(path.join(pdir, 'gone-hero.png'))).toBe(false);
     expect(fs.existsSync(path.join(pdir, 'NOTES.txt'))).toBe(true);
     expect(logs.join('\n')).toContain('gone-hero.png');
+    expect(r.pruned).toEqual(['gone-hero.png']);
+    expect(r.written).toHaveLength(1);
   });
   test('dry-run: zero calls, zero writes, prune preview printed', async () => {
     const root = tmp(); makeMod(root, 'm', 1);
