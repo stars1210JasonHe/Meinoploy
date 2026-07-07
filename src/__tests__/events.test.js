@@ -31,6 +31,14 @@ describe('logEvent', () => {
   test('unknown type throws (registry is closed)', () => {
     expect(() => logEvent(freshG(), 'nonsense_type', '0', {})).toThrow(/nonsense_type/);
   });
+
+  // Final-review Fix 3: a bracket read (ENGINE_EVENTS[type]) resolves
+  // prototype-name types like 'toString' to an inherited, truthy
+  // Object.prototype function, which would silently skip the throw. The
+  // registry check must use hasOwnProperty so these still throw.
+  test("'toString' throws (prototype-name types are not silently accepted)", () => {
+    expect(() => logEvent(freshG(), 'toString', '0', {})).toThrow(/toString/);
+  });
 });
 
 describe('resetMessages', () => {

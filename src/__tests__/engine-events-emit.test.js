@@ -345,21 +345,24 @@ describe('jail_fine_paid', () => {
     expect(G.messages).toEqual([`Player 1 paid $${RULES.core.jailFine} to get out of jail.`]);
   });
 
-  // This file drives moves directly (no boardgame.io Client/reducer in the
-  // loop), so — unlike real dispatched play — a mutation made before an
-  // INVALID_MOVE return is directly observable here; it is still migrated via
-  // logEvent (never bypassed) per the task mandate.
-  test('insufficient funds: still logs a failed attempt, player stays in jail', () => {
+  // Final-review Fix 4: INVALID_MOVE discards every mutation the move made,
+  // including any logEvent push — so the failed-attempt event was never
+  // actually observable through a real Client/reducer round-trip. The
+  // now-unreachable logEvent call was deleted from Game.js; this asserts NO
+  // event (and no message) is produced on the insufficient-funds path,
+  // matching what a real dispatch always did.
+  test('insufficient funds: no event, no message, player stays in jail', () => {
     const G = freshG();
     G.players[0].inJail = true;
     G.players[0].money = RULES.core.jailFine - 1;
+    const eventsBefore = G.events.length;
+    const messagesBefore = [...G.messages];
     const result = Monopoly.moves.payJailFine(G, makeCtx('0'));
     expect(result).toBe(INVALID_MOVE);
-    const paid = eventsOfType(G, 'jail_fine_paid');
-    expect(paid).toHaveLength(1);
-    expect(paid[0].data).toEqual({ fine: RULES.core.jailFine, failed: true });
+    expect(eventsOfType(G, 'jail_fine_paid')).toHaveLength(0);
+    expect(G.events.length).toBe(eventsBefore);
     expect(G.players[0].inJail).toBe(true);
-    expect(G.messages).toContain(`Not enough money to pay $${RULES.core.jailFine} fine!`);
+    expect(G.messages).toEqual(messagesBefore);
   });
 });
 
@@ -1266,10 +1269,24 @@ describe('loadGame backfill for old saves (Task 7)', () => {
   });
 });
 
-describe('guardrail: no raw G.messages mutation remains in Game.js', () => {
+describe('guardrail: no raw G.messages mutation remains in Game.js or App.js', () => {
   test('src/Game.js has zero matches for messages.push or G.messages assignment', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'Game.js'), 'utf8');
     expect(source).not.toMatch(/messages\s*\.push/);
+    expect(source).not.toMatch(/G\.messages\s*=/);
+  });
+
+  // Final-review Fix 5: App.js legitimately READS G.messages for rendering
+  // (G.messages.map, G.messages.length, G.messages[i]) — those are fine and
+  // must stay allowed, so this scan is tuned to WRITES only
+  // (G.messages.push / G.messages = ...), unlike Game.js's broader
+  // messages\s*\.push scan above (Game.js has no G.messages reads to
+  // distinguish from). Verified by hand first: App.js's only G.messages
+  // sites (as of this fix) are reads at G.messages.map(...) and
+  // G.messages.length/G.messages[G.messages.length - 1] — no writes.
+  test('src/App.js has zero matches for G.messages.push or G.messages assignment', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'App.js'), 'utf8');
+    expect(source).not.toMatch(/G\.messages\.push/);
     expect(source).not.toMatch(/G\.messages\s*=/);
   });
 });

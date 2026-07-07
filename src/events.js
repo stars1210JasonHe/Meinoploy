@@ -29,9 +29,20 @@ const TYPE_LIST = [
 export const ENGINE_EVENTS = Object.freeze(Object.fromEntries(TYPE_LIST.map(t => [t, t])));
 
 export function logEvent(G, type, actor, data) {
-  if (!ENGINE_EVENTS[type]) throw new Error(`unknown engine event type: ${type}`);
+  // hasOwnProperty, not a truthy bracket read (final-review Fix 3): ENGINE_EVENTS
+  // is a plain object, so a prototype-name type ('toString', 'constructor',
+  // 'hasOwnProperty', ...) would resolve to an inherited Object.prototype
+  // function via ENGINE_EVENTS[type] — truthy, so `!ENGINE_EVENTS[type]` would
+  // silently skip the throw for a type that was never actually registered.
+  if (!Object.prototype.hasOwnProperty.call(ENGINE_EVENTS, type)) throw new Error(`unknown engine event type: ${type}`);
   G.events.push({ seq: G.eventSeq++, turn: G.totalTurns, type, actor, data });
-  const cap = (RULES.core && RULES.core.eventLogCap) || EVENT_LOG_CAP_FALLBACK;
+  // 0 is not a valid cap (final-review Fix 6): `||` would treat eventLogCap:0
+  // as falsy and silently fall back to the default anyway, which happens to
+  // be the desired behavior — but only by accident of `||`'s semantics, not
+  // by an explicit validity check. Made explicit so any other invalid value
+  // (negative, NaN, non-finite) falls back the same documented way.
+  const rawCap = RULES.core && RULES.core.eventLogCap;
+  const cap = (Number.isFinite(rawCap) && rawCap > 0) ? rawCap : EVENT_LOG_CAP_FALLBACK;
   if (G.events.length > cap) G.events.splice(0, G.events.length - cap);
   const msg = formatEventMessage(type, actor, data, G);
   if (msg !== null) G.messages.push(msg);

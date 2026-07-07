@@ -1582,8 +1582,13 @@ export const Monopoly = {
       if (!player.inJail) return INVALID_MOVE;
       if (G.hasRolled) return INVALID_MOVE;
 
+      // No logEvent here (final-review Fix 4): INVALID_MOVE discards every
+      // mutation this move made, including a logEvent push onto G.events/
+      // G.messages — the pre-migration code never had a G.messages site on
+      // this branch either (bgio's INVALID_MOVE handling always dropped it),
+      // so the event was never actually observable. Emitting-then-discarding
+      // was dead weight, not parity.
       if (player.money < RULES.core.jailFine) {
-        logEvent(G, 'jail_fine_paid', ctx.currentPlayer, { fine: RULES.core.jailFine, failed: true });
         return INVALID_MOVE;
       }
 
