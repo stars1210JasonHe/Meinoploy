@@ -20,6 +20,7 @@ export const RULES = {
     diceSides: 6,
     maxTurns: 0,              // 0 = unlimited; positive integer = turn limit (highest assets wins)
     freeParkingPot: false,    // true = taxes/fines accumulate; landing on parking collects pot
+    eventLogCap: 200,
   },
 
   // ── Map Affinity (Atlas traits) ─────────────────────────
