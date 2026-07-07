@@ -1,0 +1,1052 @@
+{
+  "two-turn-roll-buy": {
+    "seed": 1,
+    "snapshots": [
+      [
+        "Select your characters!",
+        "Marcus Grayline joins the game! ($1800)"
+      ],
+      [
+        "All characters selected! Game begins! Marcus Grayline rolls first."
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Bought Reading Railroad for $186!"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Bought Reading Railroad for $186!"
+      ],
+      [
+        "Sophia Ember rolled 3 + 4 = 7",
+        "Landed on Chance.",
+        "CHANCE: Advance to Illinois Ave.",
+        "Illinois Ave available! Listed $240, your price $228. Buy or pass?"
+      ]
+    ]
+  },
+  "rent-and-tax": {
+    "seed": 96,
+    "snapshots": [
+      [
+        "Select your characters!",
+        "Marcus Grayline joins the game! ($1800)"
+      ],
+      [
+        "All characters selected! Game begins! Marcus Grayline rolls first."
+      ],
+      [
+        "Marcus Grayline rolled 1 + 5 = 6",
+        "Landed on Oriental Ave.",
+        "Oriental Ave available! Listed $100, your price $93. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 1 + 5 = 6",
+        "Landed on Oriental Ave.",
+        "Oriental Ave available! Listed $100, your price $93. Buy or pass?",
+        "Bought Oriental Ave for $93!"
+      ],
+      [
+        "Marcus Grayline rolled 1 + 5 = 6",
+        "Landed on Oriental Ave.",
+        "Oriental Ave available! Listed $100, your price $93. Buy or pass?",
+        "Bought Oriental Ave for $93!"
+      ],
+      [
+        "Sophia Ember rolled 1 + 5 = 6",
+        "Landed on Oriental Ave.",
+        "Paid $11 rent to Marcus Grayline for Oriental Ave."
+      ],
+      [
+        "Sophia Ember rolled 1 + 5 = 6",
+        "Landed on Oriental Ave.",
+        "Paid $11 rent to Marcus Grayline for Oriental Ave."
+      ],
+      [
+        "Sophia Ember rolled 1 + 5 = 6",
+        "Landed on Oriental Ave.",
+        "Paid $11 rent to Marcus Grayline for Oriental Ave."
+      ],
+      [
+        "Sophia Ember rolled 1 + 5 = 6",
+        "Landed on Oriental Ave.",
+        "Paid $11 rent to Marcus Grayline for Oriental Ave."
+      ],
+      [
+        "Marcus Grayline rolled 6 + 1 = 7",
+        "Landed on States Ave.",
+        "States Ave available! Listed $140, your price $130. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 6 + 1 = 7",
+        "Landed on States Ave.",
+        "States Ave available! Listed $140, your price $130. Buy or pass?",
+        "Bought States Ave for $130!"
+      ],
+      [
+        "Marcus Grayline rolled 6 + 1 = 7",
+        "Landed on States Ave.",
+        "States Ave available! Listed $140, your price $130. Buy or pass?",
+        "Bought States Ave for $130!"
+      ],
+      [
+        "Marcus Grayline rolled 6 + 1 = 7",
+        "Landed on States Ave.",
+        "States Ave available! Listed $140, your price $130. Buy or pass?",
+        "Bought States Ave for $130!"
+      ],
+      [
+        "Sophia Ember rolled 4 + 6 = 10",
+        "Landed on St. James Place.",
+        "St. James Place available! Listed $180, your price $171. Buy or pass?"
+      ],
+      [
+        "Sophia Ember rolled 4 + 6 = 10",
+        "Landed on St. James Place.",
+        "St. James Place available! Listed $180, your price $171. Buy or pass?",
+        "Bought St. James Place for $171!"
+      ],
+      [
+        "Sophia Ember rolled 4 + 6 = 10",
+        "Landed on St. James Place.",
+        "St. James Place available! Listed $180, your price $171. Buy or pass?",
+        "Bought St. James Place for $171!"
+      ],
+      [
+        "Sophia Ember rolled 4 + 6 = 10",
+        "Landed on St. James Place.",
+        "St. James Place available! Listed $180, your price $171. Buy or pass?",
+        "Bought St. James Place for $171!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 5 = 7",
+        "Landed on Free Parking.",
+        "Free Parking - relax!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 5 = 7",
+        "Landed on Free Parking.",
+        "Free Parking - relax!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 5 = 7",
+        "Landed on Free Parking.",
+        "Free Parking - relax!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 5 = 7",
+        "Landed on Free Parking.",
+        "Free Parking - relax!"
+      ],
+      [
+        "Sophia Ember rolled 6 + 5 = 11",
+        "Landed on Ventnor Ave.",
+        "Ventnor Ave available! Listed $260, your price $247. Buy or pass?"
+      ],
+      [
+        "Sophia Ember rolled 6 + 5 = 11",
+        "Landed on Ventnor Ave.",
+        "Ventnor Ave available! Listed $260, your price $247. Buy or pass?",
+        "Bought Ventnor Ave for $247!"
+      ],
+      [
+        "Sophia Ember rolled 6 + 5 = 11",
+        "Landed on Ventnor Ave.",
+        "Ventnor Ave available! Listed $260, your price $247. Buy or pass?",
+        "Bought Ventnor Ave for $247!"
+      ],
+      [
+        "Sophia Ember rolled 6 + 5 = 11",
+        "Landed on Ventnor Ave.",
+        "Ventnor Ave available! Listed $260, your price $247. Buy or pass?",
+        "Bought Ventnor Ave for $247!"
+      ],
+      [
+        "Marcus Grayline rolled 5 + 1 = 6",
+        "Landed on Atlantic Ave.",
+        "Atlantic Ave available! Listed $260, your price $241. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 5 + 1 = 6",
+        "Landed on Atlantic Ave.",
+        "Atlantic Ave available! Listed $260, your price $241. Buy or pass?",
+        "Bought Atlantic Ave for $241!"
+      ],
+      [
+        "Marcus Grayline rolled 5 + 1 = 6",
+        "Landed on Atlantic Ave.",
+        "Atlantic Ave available! Listed $260, your price $241. Buy or pass?",
+        "Bought Atlantic Ave for $241!"
+      ],
+      [
+        "Marcus Grayline rolled 5 + 1 = 6",
+        "Landed on Atlantic Ave.",
+        "Atlantic Ave available! Listed $260, your price $241. Buy or pass?",
+        "Bought Atlantic Ave for $241!"
+      ],
+      [
+        "Sophia Ember rolled 4 + 6 = 10",
+        "Landed on Park Place.",
+        "Park Place available! Listed $350, your price $332. Buy or pass?"
+      ],
+      [
+        "Sophia Ember rolled 4 + 6 = 10",
+        "Landed on Park Place.",
+        "Park Place available! Listed $350, your price $332. Buy or pass?",
+        "Bought Park Place for $332!"
+      ],
+      [
+        "Sophia Ember rolled 4 + 6 = 10",
+        "Landed on Park Place.",
+        "Park Place available! Listed $350, your price $332. Buy or pass?",
+        "Bought Park Place for $332!"
+      ],
+      [
+        "Sophia Ember rolled 4 + 6 = 10",
+        "Landed on Park Place.",
+        "Park Place available! Listed $350, your price $332. Buy or pass?",
+        "Bought Park Place for $332!"
+      ],
+      [
+        "Marcus Grayline rolled 6 + 6 = 12",
+        "Landed on Luxury Tax.",
+        "Paid $100 in Luxury Tax."
+      ]
+    ]
+  },
+  "card-draw-accept": {
+    "seed": 14,
+    "snapshots": [
+      [
+        "Select your characters!",
+        "Lia Startrace joins the game! ($1750)"
+      ],
+      [
+        "All characters selected! Game begins! Lia Startrace rolls first."
+      ],
+      [
+        "Lia Startrace rolled 1 + 6 = 7",
+        "Landed on Chance.",
+        "CHANCE: Black Swan Event! Pay 10% of your total assets.",
+        "You may accept or redraw this card."
+      ],
+      [
+        "Lia Startrace rolled 1 + 6 = 7",
+        "Landed on Chance.",
+        "CHANCE: Black Swan Event! Pay 10% of your total assets.",
+        "You may accept or redraw this card.",
+        "Total assets: $1750. Paid $175 (10%)."
+      ],
+      [
+        "Lia Startrace rolled 1 + 6 = 7",
+        "Landed on Chance.",
+        "CHANCE: Black Swan Event! Pay 10% of your total assets.",
+        "You may accept or redraw this card.",
+        "Total assets: $1750. Paid $175 (10%)."
+      ],
+      [
+        "Renn Chainbreaker rolled 6 + 4 = 10",
+        "Landed on Just Visiting.",
+        "Just visiting jail."
+      ]
+    ]
+  },
+  "card-redraw": {
+    "seed": 14,
+    "snapshots": [
+      [
+        "Select your characters!",
+        "Lia Startrace joins the game! ($1750)"
+      ],
+      [
+        "All characters selected! Game begins! Lia Startrace rolls first."
+      ],
+      [
+        "Lia Startrace rolled 1 + 6 = 7",
+        "Landed on Chance.",
+        "CHANCE: Black Swan Event! Pay 10% of your total assets.",
+        "You may accept or redraw this card."
+      ],
+      [
+        "Lia Startrace rolled 1 + 6 = 7",
+        "Landed on Chance.",
+        "CHANCE: Black Swan Event! Pay 10% of your total assets.",
+        "You may accept or redraw this card.",
+        "Redraw! CHANCE: Hostile Takeover! Force-buy an opponent's cheapest property at 150% price.",
+        "No opponents with properties for hostile takeover."
+      ],
+      [
+        "Lia Startrace rolled 1 + 6 = 7",
+        "Landed on Chance.",
+        "CHANCE: Black Swan Event! Pay 10% of your total assets.",
+        "You may accept or redraw this card.",
+        "Redraw! CHANCE: Hostile Takeover! Force-buy an opponent's cheapest property at 150% price.",
+        "No opponents with properties for hostile takeover."
+      ],
+      [
+        "Renn Chainbreaker rolled 4 + 3 = 7",
+        "Landed on Chance.",
+        "CHANCE: Hostile Takeover! Force-buy an opponent's cheapest property at 150% price.",
+        "No opponents with properties for hostile takeover."
+      ]
+    ]
+  },
+  "jail-cycle": {
+    "seed": 34,
+    "snapshots": [
+      [
+        "Select your characters!",
+        "Knox Ironlaw joins the game! ($1850)"
+      ],
+      [
+        "All characters selected! Game begins! Knox Ironlaw rolls first."
+      ],
+      [
+        "Knox Ironlaw rolled 3 + 4 = 7",
+        "Landed on Chance.",
+        "CHANCE: Go to Jail. Do not pass GO."
+      ],
+      [
+        "Knox Ironlaw rolled 3 + 4 = 7",
+        "Landed on Chance.",
+        "CHANCE: Go to Jail. Do not pass GO."
+      ],
+      [
+        "Sophia Ember rolled 1 + 3 = 4",
+        "Landed on Income Tax.",
+        "Paid $200 in Income Tax."
+      ],
+      [
+        "Sophia Ember rolled 1 + 3 = 4",
+        "Landed on Income Tax.",
+        "Paid $200 in Income Tax."
+      ],
+      [
+        "Sophia Ember rolled 1 + 3 = 4",
+        "Landed on Income Tax.",
+        "Paid $200 in Income Tax."
+      ],
+      [
+        "Sophia Ember rolled 1 + 3 = 4",
+        "Landed on Income Tax.",
+        "Paid $200 in Income Tax.",
+        "Knox Ironlaw is in jail. Pay $50 or try to roll doubles."
+      ],
+      [
+        "Knox Ironlaw paid $50 to get out of jail."
+      ],
+      [
+        "Knox Ironlaw rolled 1 + 1 = 2",
+        "Landed on Electric Company.",
+        "Electric Company available! Listed $150, your price $141. Buy or pass?"
+      ],
+      [
+        "Knox Ironlaw rolled 1 + 1 = 2",
+        "Landed on Electric Company.",
+        "Electric Company available! Listed $150, your price $141. Buy or pass?",
+        "Bought Electric Company for $141!"
+      ],
+      [
+        "Knox Ironlaw rolled 1 + 1 = 2",
+        "Landed on Electric Company.",
+        "Electric Company available! Listed $150, your price $141. Buy or pass?",
+        "Bought Electric Company for $141!"
+      ],
+      [
+        "Knox Ironlaw rolled 1 + 1 = 2",
+        "Landed on Electric Company.",
+        "Electric Company available! Listed $150, your price $141. Buy or pass?",
+        "Bought Electric Company for $141!"
+      ]
+    ]
+  },
+  "build-mortgage": {
+    "seed": 72,
+    "snapshots": [
+      [
+        "Select your characters!",
+        "Marcus Grayline joins the game! ($1800)"
+      ],
+      [
+        "Select your characters!",
+        "Marcus Grayline joins the game! ($1800)",
+        "Sophia Ember joins the game! ($1750)"
+      ],
+      [
+        "All characters selected! Game begins! Marcus Grayline rolls first."
+      ],
+      [
+        "Marcus Grayline rolled 4 + 4 = 8",
+        "Landed on Vermont Ave.",
+        "Vermont Ave available! Listed $100, your price $93. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 4 = 8",
+        "Landed on Vermont Ave.",
+        "Vermont Ave available! Listed $100, your price $93. Buy or pass?",
+        "Bought Vermont Ave for $93!"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 4 = 8",
+        "Landed on Vermont Ave.",
+        "Vermont Ave available! Listed $100, your price $93. Buy or pass?",
+        "Bought Vermont Ave for $93!"
+      ],
+      [
+        "Sophia Ember rolled 3 + 6 = 9",
+        "Landed on Connecticut Ave.",
+        "Connecticut Ave available! Listed $120, your price $114. Buy or pass?"
+      ],
+      [
+        "Sophia Ember rolled 3 + 6 = 9",
+        "Landed on Connecticut Ave.",
+        "Connecticut Ave available! Listed $120, your price $114. Buy or pass?",
+        "Bought Connecticut Ave for $114!"
+      ],
+      [
+        "Sophia Ember rolled 3 + 6 = 9",
+        "Landed on Connecticut Ave.",
+        "Connecticut Ave available! Listed $120, your price $114. Buy or pass?",
+        "Bought Connecticut Ave for $114!"
+      ],
+      [
+        "Knox Ironlaw rolled 4 + 2 = 6",
+        "Landed on Oriental Ave.",
+        "Oriental Ave available! Listed $100, your price $94. Buy or pass?"
+      ],
+      [
+        "Knox Ironlaw rolled 4 + 2 = 6",
+        "Landed on Oriental Ave.",
+        "Oriental Ave available! Listed $100, your price $94. Buy or pass?",
+        "Bought Oriental Ave for $94!"
+      ],
+      [
+        "Knox Ironlaw rolled 4 + 2 = 6",
+        "Landed on Oriental Ave.",
+        "Oriental Ave available! Listed $100, your price $94. Buy or pass?",
+        "Bought Oriental Ave for $94!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 4 = 6",
+        "Landed on Virginia Ave.",
+        "Virginia Ave available! Listed $160, your price $148. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 4 = 6",
+        "Landed on Virginia Ave.",
+        "Virginia Ave available! Listed $160, your price $148. Buy or pass?",
+        "Bought Virginia Ave for $148!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 4 = 6",
+        "Landed on Virginia Ave.",
+        "Virginia Ave available! Listed $160, your price $148. Buy or pass?",
+        "Bought Virginia Ave for $148!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 4 = 6",
+        "Landed on Virginia Ave.",
+        "Virginia Ave available! Listed $160, your price $148. Buy or pass?",
+        "Bought Virginia Ave for $148!",
+        "Marcus Grayline proposes a trade to Knox Ironlaw!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 4 = 6",
+        "Landed on Virginia Ave.",
+        "Virginia Ave available! Listed $160, your price $148. Buy or pass?",
+        "Bought Virginia Ave for $148!",
+        "Marcus Grayline proposes a trade to Knox Ironlaw!",
+        "Trade accepted! Marcus Grayline and Knox Ironlaw completed a trade."
+      ],
+      [
+        "Marcus Grayline rolled 2 + 4 = 6",
+        "Landed on Virginia Ave.",
+        "Virginia Ave available! Listed $160, your price $148. Buy or pass?",
+        "Bought Virginia Ave for $148!",
+        "Marcus Grayline proposes a trade to Knox Ironlaw!",
+        "Trade accepted! Marcus Grayline and Knox Ironlaw completed a trade."
+      ],
+      [
+        "Marcus Grayline rolled 2 + 4 = 6",
+        "Landed on Virginia Ave.",
+        "Virginia Ave available! Listed $160, your price $148. Buy or pass?",
+        "Bought Virginia Ave for $148!",
+        "Marcus Grayline proposes a trade to Knox Ironlaw!",
+        "Trade accepted! Marcus Grayline and Knox Ironlaw completed a trade."
+      ],
+      [
+        "Marcus Grayline rolled 2 + 4 = 6",
+        "Landed on Virginia Ave.",
+        "Virginia Ave available! Listed $160, your price $148. Buy or pass?",
+        "Bought Virginia Ave for $148!",
+        "Marcus Grayline proposes a trade to Knox Ironlaw!",
+        "Trade accepted! Marcus Grayline and Knox Ironlaw completed a trade.",
+        "Marcus Grayline proposes a trade to Sophia Ember!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 4 = 6",
+        "Landed on Virginia Ave.",
+        "Virginia Ave available! Listed $160, your price $148. Buy or pass?",
+        "Bought Virginia Ave for $148!",
+        "Marcus Grayline proposes a trade to Knox Ironlaw!",
+        "Trade accepted! Marcus Grayline and Knox Ironlaw completed a trade.",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Trade accepted! Marcus Grayline and Sophia Ember completed a trade."
+      ],
+      [
+        "Marcus Grayline rolled 2 + 4 = 6",
+        "Landed on Virginia Ave.",
+        "Virginia Ave available! Listed $160, your price $148. Buy or pass?",
+        "Bought Virginia Ave for $148!",
+        "Marcus Grayline proposes a trade to Knox Ironlaw!",
+        "Trade accepted! Marcus Grayline and Knox Ironlaw completed a trade.",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Trade accepted! Marcus Grayline and Sophia Ember completed a trade.",
+        "Mortgaged Connecticut Ave for $60."
+      ],
+      [
+        "Marcus Grayline rolled 2 + 4 = 6",
+        "Landed on Virginia Ave.",
+        "Virginia Ave available! Listed $160, your price $148. Buy or pass?",
+        "Bought Virginia Ave for $148!",
+        "Marcus Grayline proposes a trade to Knox Ironlaw!",
+        "Trade accepted! Marcus Grayline and Knox Ironlaw completed a trade.",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Trade accepted! Marcus Grayline and Sophia Ember completed a trade.",
+        "Mortgaged Connecticut Ave for $60.",
+        "Unmortgaged Connecticut Ave for $66."
+      ],
+      [
+        "Marcus Grayline rolled 2 + 4 = 6",
+        "Landed on Virginia Ave.",
+        "Virginia Ave available! Listed $160, your price $148. Buy or pass?",
+        "Bought Virginia Ave for $148!",
+        "Marcus Grayline proposes a trade to Knox Ironlaw!",
+        "Trade accepted! Marcus Grayline and Knox Ironlaw completed a trade.",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Trade accepted! Marcus Grayline and Sophia Ember completed a trade.",
+        "Mortgaged Connecticut Ave for $60.",
+        "Unmortgaged Connecticut Ave for $66.",
+        "Built House on Oriental Ave for $46!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 4 = 6",
+        "Landed on Virginia Ave.",
+        "Virginia Ave available! Listed $160, your price $148. Buy or pass?",
+        "Bought Virginia Ave for $148!",
+        "Marcus Grayline proposes a trade to Knox Ironlaw!",
+        "Trade accepted! Marcus Grayline and Knox Ironlaw completed a trade.",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Trade accepted! Marcus Grayline and Sophia Ember completed a trade.",
+        "Mortgaged Connecticut Ave for $60.",
+        "Unmortgaged Connecticut Ave for $66.",
+        "Built House on Oriental Ave for $46!",
+        "Sold House on Oriental Ave for $23. Now: Vacant."
+      ]
+    ]
+  },
+  "auction-lifecycle": {
+    "seed": 1,
+    "snapshots": [
+      [
+        "Select your characters!",
+        "Marcus Grayline joins the game! ($1800)"
+      ],
+      [
+        "All characters selected! Game begins! Marcus Grayline rolls first."
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Reading Railroad goes to auction! Bidding starts at $1.",
+        "Marcus Grayline's turn to bid."
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Reading Railroad goes to auction! Bidding starts at $1.",
+        "Marcus Grayline's turn to bid.",
+        "Marcus Grayline bids $2!",
+        "Sophia Ember's turn to bid."
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Reading Railroad goes to auction! Bidding starts at $1.",
+        "Marcus Grayline's turn to bid.",
+        "Marcus Grayline bids $2!",
+        "Sophia Ember's turn to bid.",
+        "Sophia Ember passes.",
+        "Marcus Grayline wins the auction for Reading Railroad at $2!"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Reading Railroad goes to auction! Bidding starts at $1.",
+        "Marcus Grayline's turn to bid.",
+        "Marcus Grayline bids $2!",
+        "Sophia Ember's turn to bid.",
+        "Sophia Ember passes.",
+        "Marcus Grayline wins the auction for Reading Railroad at $2!"
+      ],
+      [
+        "Sophia Ember rolled 3 + 4 = 7",
+        "Landed on Chance.",
+        "CHANCE: Advance to Illinois Ave.",
+        "Illinois Ave available! Listed $240, your price $228. Buy or pass?"
+      ],
+      [
+        "Sophia Ember rolled 3 + 4 = 7",
+        "Landed on Chance.",
+        "CHANCE: Advance to Illinois Ave.",
+        "Illinois Ave available! Listed $240, your price $228. Buy or pass?",
+        "Bought Illinois Ave for $228!"
+      ],
+      [
+        "Sophia Ember rolled 3 + 4 = 7",
+        "Landed on Chance.",
+        "CHANCE: Advance to Illinois Ave.",
+        "Illinois Ave available! Listed $240, your price $228. Buy or pass?",
+        "Bought Illinois Ave for $228!"
+      ],
+      [
+        "Sophia Ember rolled 3 + 4 = 7",
+        "Landed on Chance.",
+        "CHANCE: Advance to Illinois Ave.",
+        "Illinois Ave available! Listed $240, your price $228. Buy or pass?",
+        "Bought Illinois Ave for $228!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 1 = 3",
+        "Landed on Vermont Ave.",
+        "Vermont Ave available! Listed $100, your price $93. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 1 = 3",
+        "Landed on Vermont Ave.",
+        "Vermont Ave available! Listed $100, your price $93. Buy or pass?",
+        "Vermont Ave goes to auction! Bidding starts at $1.",
+        "Marcus Grayline's turn to bid."
+      ],
+      [
+        "Marcus Grayline rolled 2 + 1 = 3",
+        "Landed on Vermont Ave.",
+        "Vermont Ave available! Listed $100, your price $93. Buy or pass?",
+        "Vermont Ave goes to auction! Bidding starts at $1.",
+        "Marcus Grayline's turn to bid.",
+        "Marcus Grayline passes.",
+        "Sophia Ember's turn to bid."
+      ],
+      [
+        "Marcus Grayline rolled 2 + 1 = 3",
+        "Landed on Vermont Ave.",
+        "Vermont Ave available! Listed $100, your price $93. Buy or pass?",
+        "Vermont Ave goes to auction! Bidding starts at $1.",
+        "Marcus Grayline's turn to bid.",
+        "Marcus Grayline passes.",
+        "Sophia Ember's turn to bid.",
+        "Sophia Ember passes.",
+        "No bids. Vermont Ave remains unowned."
+      ]
+    ]
+  },
+  "bankruptcy": {
+    "seed": 25,
+    "snapshots": [
+      [
+        "Select your characters!",
+        "Marcus Grayline joins the game! ($1800)"
+      ],
+      [
+        "All characters selected! Game begins! Marcus Grayline rolls first."
+      ],
+      [
+        "Marcus Grayline rolled 1 + 1 = 2",
+        "Landed on Community Chest.",
+        "COMMUNITY CHEST: Bank error in your favor. Collect $200."
+      ],
+      [
+        "Marcus Grayline rolled 1 + 1 = 2",
+        "Landed on Community Chest.",
+        "COMMUNITY CHEST: Bank error in your favor. Collect $200."
+      ],
+      [
+        "Marcus Grayline rolled 1 + 1 = 2",
+        "Landed on Community Chest.",
+        "COMMUNITY CHEST: Bank error in your favor. Collect $200."
+      ],
+      [
+        "Marcus Grayline rolled 1 + 1 = 2",
+        "Landed on Community Chest.",
+        "COMMUNITY CHEST: Bank error in your favor. Collect $200.",
+        "Marcus Grayline proposes a trade to Sophia Ember!"
+      ],
+      [
+        "Marcus Grayline rolled 1 + 1 = 2",
+        "Landed on Community Chest.",
+        "COMMUNITY CHEST: Bank error in your favor. Collect $200.",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Trade accepted! Marcus Grayline and Sophia Ember completed a trade."
+      ],
+      [
+        "Marcus Grayline rolled 1 + 1 = 2",
+        "Landed on Community Chest.",
+        "COMMUNITY CHEST: Bank error in your favor. Collect $200.",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Trade accepted! Marcus Grayline and Sophia Ember completed a trade."
+      ],
+      [
+        "Sophia Ember rolled 1 + 4 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $190. Buy or pass?"
+      ],
+      [
+        "Sophia Ember rolled 1 + 4 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $190. Buy or pass?",
+        "Bought Reading Railroad for $190!"
+      ],
+      [
+        "Sophia Ember rolled 1 + 4 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $190. Buy or pass?",
+        "Bought Reading Railroad for $190!"
+      ],
+      [
+        "Sophia Ember rolled 1 + 4 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $190. Buy or pass?",
+        "Bought Reading Railroad for $190!"
+      ],
+      [
+        "Marcus Grayline rolled 1 + 2 = 3",
+        "Landed on Reading Railroad.",
+        "Paid $22 rent to Sophia Ember for Reading Railroad.",
+        "Marcus Grayline is BANKRUPT!",
+        "Sophia Ember gains $100 from crisis arbitrage!"
+      ]
+    ]
+  },
+  "season-change": {
+    "seed": 1,
+    "snapshots": [
+      [
+        "Select your characters!",
+        "Marcus Grayline joins the game! ($1800)"
+      ],
+      [
+        "All characters selected! Game begins! Marcus Grayline rolls first."
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Bought Reading Railroad for $186!"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Bought Reading Railroad for $186!"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Bought Reading Railroad for $186!"
+      ],
+      [
+        "Sophia Ember rolled 3 + 4 = 7",
+        "Landed on Chance.",
+        "CHANCE: Advance to Illinois Ave.",
+        "Illinois Ave available! Listed $240, your price $228. Buy or pass?"
+      ],
+      [
+        "Sophia Ember rolled 3 + 4 = 7",
+        "Landed on Chance.",
+        "CHANCE: Advance to Illinois Ave.",
+        "Illinois Ave available! Listed $240, your price $228. Buy or pass?",
+        "Bought Illinois Ave for $228!"
+      ],
+      [
+        "Sophia Ember rolled 3 + 4 = 7",
+        "Landed on Chance.",
+        "CHANCE: Advance to Illinois Ave.",
+        "Illinois Ave available! Listed $240, your price $228. Buy or pass?",
+        "Bought Illinois Ave for $228!"
+      ],
+      [
+        "Sophia Ember rolled 3 + 4 = 7",
+        "Landed on Chance.",
+        "CHANCE: Advance to Illinois Ave.",
+        "Illinois Ave available! Listed $240, your price $228. Buy or pass?",
+        "Bought Illinois Ave for $228!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 1 = 3",
+        "Landed on Vermont Ave.",
+        "Vermont Ave available! Listed $100, your price $93. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 1 = 3",
+        "Landed on Vermont Ave.",
+        "Vermont Ave available! Listed $100, your price $93. Buy or pass?",
+        "Bought Vermont Ave for $93!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 1 = 3",
+        "Landed on Vermont Ave.",
+        "Vermont Ave available! Listed $100, your price $93. Buy or pass?",
+        "Bought Vermont Ave for $93!"
+      ],
+      [
+        "Marcus Grayline rolled 2 + 1 = 3",
+        "Landed on Vermont Ave.",
+        "Vermont Ave available! Listed $100, your price $93. Buy or pass?",
+        "Bought Vermont Ave for $93!"
+      ],
+      [
+        "Sophia Ember rolled 2 + 3 = 5",
+        "Landed on Marvin Gardens.",
+        "Marvin Gardens available! Listed $280, your price $266. Buy or pass?"
+      ],
+      [
+        "Sophia Ember rolled 2 + 3 = 5",
+        "Landed on Marvin Gardens.",
+        "Marvin Gardens available! Listed $280, your price $266. Buy or pass?",
+        "Bought Marvin Gardens for $266!"
+      ],
+      [
+        "Sophia Ember rolled 2 + 3 = 5",
+        "Landed on Marvin Gardens.",
+        "Marvin Gardens available! Listed $280, your price $266. Buy or pass?",
+        "Bought Marvin Gardens for $266!"
+      ],
+      [
+        "Sophia Ember rolled 2 + 3 = 5",
+        "Landed on Marvin Gardens.",
+        "Marvin Gardens available! Listed $280, your price $266. Buy or pass?",
+        "Bought Marvin Gardens for $266!"
+      ],
+      [
+        "Marcus Grayline rolled 1 + 2 = 3",
+        "Landed on St. Charles Place.",
+        "St. Charles Place available! Listed $140, your price $130. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 1 + 2 = 3",
+        "Landed on St. Charles Place.",
+        "St. Charles Place available! Listed $140, your price $130. Buy or pass?",
+        "Bought St. Charles Place for $130!"
+      ],
+      [
+        "Marcus Grayline rolled 1 + 2 = 3",
+        "Landed on St. Charles Place.",
+        "St. Charles Place available! Listed $140, your price $130. Buy or pass?",
+        "Bought St. Charles Place for $130!"
+      ],
+      [
+        "Marcus Grayline rolled 1 + 2 = 3",
+        "Landed on St. Charles Place.",
+        "St. Charles Place available! Listed $140, your price $130. Buy or pass?",
+        "Bought St. Charles Place for $130!"
+      ],
+      [
+        "Sophia Ember rolled 5 + 6 = 11",
+        "Passed GO! Collect $200.",
+        "Landed on GO."
+      ],
+      [
+        "Sophia Ember rolled 5 + 6 = 11",
+        "Passed GO! Collect $200.",
+        "Landed on GO."
+      ],
+      [
+        "Sophia Ember rolled 5 + 6 = 11",
+        "Passed GO! Collect $200.",
+        "Landed on GO."
+      ],
+      [
+        "Sophia Ember rolled 5 + 6 = 11",
+        "Passed GO! Collect $200.",
+        "Landed on GO."
+      ],
+      [
+        "Marcus Grayline rolled 1 + 6 = 7",
+        "Landed on Tennessee Ave.",
+        "Tennessee Ave available! Listed $180, your price $167. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 1 + 6 = 7",
+        "Landed on Tennessee Ave.",
+        "Tennessee Ave available! Listed $180, your price $167. Buy or pass?",
+        "Bought Tennessee Ave for $167!"
+      ],
+      [
+        "Marcus Grayline rolled 1 + 6 = 7",
+        "Landed on Tennessee Ave.",
+        "Tennessee Ave available! Listed $180, your price $167. Buy or pass?",
+        "Bought Tennessee Ave for $167!"
+      ],
+      [
+        "Marcus Grayline rolled 1 + 6 = 7",
+        "Landed on Tennessee Ave.",
+        "Tennessee Ave available! Listed $180, your price $167. Buy or pass?",
+        "Bought Tennessee Ave for $167!"
+      ],
+      [
+        "Sophia Ember rolled 5 + 3 = 8",
+        "Landed on Vermont Ave.",
+        "Paid $11 rent to Marcus Grayline for Vermont Ave."
+      ],
+      [
+        "Sophia Ember rolled 5 + 3 = 8",
+        "Landed on Vermont Ave.",
+        "Paid $11 rent to Marcus Grayline for Vermont Ave."
+      ],
+      [
+        "Sophia Ember rolled 5 + 3 = 8",
+        "Landed on Vermont Ave.",
+        "Paid $11 rent to Marcus Grayline for Vermont Ave."
+      ],
+      [
+        "Sophia Ember rolled 5 + 3 = 8",
+        "Landed on Vermont Ave.",
+        "Paid $11 rent to Marcus Grayline for Vermont Ave."
+      ],
+      [
+        "Marcus Grayline rolled 3 + 2 = 5",
+        "Landed on Indiana Ave.",
+        "Indiana Ave available! Listed $220, your price $204. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 3 + 2 = 5",
+        "Landed on Indiana Ave.",
+        "Indiana Ave available! Listed $220, your price $204. Buy or pass?",
+        "Bought Indiana Ave for $204!"
+      ],
+      [
+        "Marcus Grayline rolled 3 + 2 = 5",
+        "Landed on Indiana Ave.",
+        "Indiana Ave available! Listed $220, your price $204. Buy or pass?",
+        "Bought Indiana Ave for $204!"
+      ],
+      [
+        "Marcus Grayline rolled 3 + 2 = 5",
+        "Landed on Indiana Ave.",
+        "Indiana Ave available! Listed $220, your price $204. Buy or pass?",
+        "Bought Indiana Ave for $204!",
+        "🍂 Season changed to Autumn!"
+      ]
+    ]
+  },
+  "trade-lifecycle": {
+    "seed": 1,
+    "snapshots": [
+      [
+        "Select your characters!",
+        "Marcus Grayline joins the game! ($1800)"
+      ],
+      [
+        "All characters selected! Game begins! Marcus Grayline rolls first."
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Bought Reading Railroad for $186!"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Bought Reading Railroad for $186!"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Bought Reading Railroad for $186!",
+        "Marcus Grayline proposes a trade to Sophia Ember!"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Bought Reading Railroad for $186!",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Sophia Ember rejected the trade."
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Bought Reading Railroad for $186!",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Sophia Ember rejected the trade.",
+        "Marcus Grayline proposes a trade to Sophia Ember!"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Bought Reading Railroad for $186!",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Sophia Ember rejected the trade.",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Trade accepted! Marcus Grayline and Sophia Ember completed a trade."
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Bought Reading Railroad for $186!",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Sophia Ember rejected the trade.",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Trade accepted! Marcus Grayline and Sophia Ember completed a trade.",
+        "Marcus Grayline proposes a trade to Sophia Ember!"
+      ],
+      [
+        "Marcus Grayline rolled 4 + 1 = 5",
+        "Landed on Reading Railroad.",
+        "Reading Railroad available! Listed $200, your price $186. Buy or pass?",
+        "Bought Reading Railroad for $186!",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Sophia Ember rejected the trade.",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Trade accepted! Marcus Grayline and Sophia Ember completed a trade.",
+        "Marcus Grayline proposes a trade to Sophia Ember!",
+        "Trade cancelled."
+      ]
+    ]
+  }
+}
