@@ -46,8 +46,8 @@ describe('resetMessages', () => {
 });
 
 describe('ENGINE_EVENTS registry', () => {
-  test('contains the 34 spec types and is frozen', () => {
-    expect(Object.keys(ENGINE_EVENTS)).toHaveLength(34);
+  test('contains the 36 spec types and is frozen', () => {
+    expect(Object.keys(ENGINE_EVENTS)).toHaveLength(36);
     expect(ENGINE_EVENTS.dice_rolled).toBe('dice_rolled');
     expect(Object.isFrozen(ENGINE_EVENTS)).toBe(true);
   });

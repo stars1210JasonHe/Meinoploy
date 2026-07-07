@@ -443,9 +443,9 @@ function handleLanding(G, ctx) {
         if (player.money >= effectivePrice) {
           G.canBuy = true;
           G.effectivePrice = effectivePrice;
-          logEvent(G, 'moved', ctx.currentPlayer, { note: 'available', propertyId: space.id, listPrice: space.price, effectivePrice });
+          logEvent(G, 'landing_notice', ctx.currentPlayer, { note: 'available', propertyId: space.id, listPrice: space.price, effectivePrice });
         } else {
-          logEvent(G, 'moved', ctx.currentPlayer, { note: 'unaffordable', propertyId: space.id, price: getEffectiveBuyPrice(G, player, space), playerMoney: player.money });
+          logEvent(G, 'landing_notice', ctx.currentPlayer, { note: 'unaffordable', propertyId: space.id, price: getEffectiveBuyPrice(G, player, space), playerMoney: player.money });
         }
       } else if (owner !== ctx.currentPlayer) {
         const rent = calculateRent(G, space, G.lastDice.total, player);
@@ -456,7 +456,7 @@ function handleLanding(G, ctx) {
           handleBankruptcy(G, ctx, player, owner);
         }
       } else {
-        logEvent(G, 'moved', ctx.currentPlayer, { note: 'owned', propertyId: space.id });
+        logEvent(G, 'landing_notice', ctx.currentPlayer, { note: 'owned', propertyId: space.id });
       }
       break;
     }
@@ -526,7 +526,7 @@ function handleLanding(G, ctx) {
       break;
 
     case 'jail':
-      logEvent(G, 'moved', ctx.currentPlayer, { note: 'visiting_jail' });
+      logEvent(G, 'landing_notice', ctx.currentPlayer, { note: 'visiting_jail' });
       break;
 
     case 'parking':
@@ -535,7 +535,7 @@ function handleLanding(G, ctx) {
         logEvent(G, 'salary_collected', ctx.currentPlayer, { source: 'parking', amount: G.freeParkingPot });
         G.freeParkingPot = 0;
       } else {
-        logEvent(G, 'moved', ctx.currentPlayer, { note: 'parking_relax' });
+        logEvent(G, 'landing_notice', ctx.currentPlayer, { note: 'parking_relax' });
       }
       break;
   }
@@ -883,7 +883,7 @@ function rollAndResolveJail(G, ctx) {
           return 'done';
         }
       } else {
-        logEvent(G, 'left_jail', ctx.currentPlayer, { how: 'waiting', maxTurns: RULES.core.jailMaxTurns });
+        logEvent(G, 'jail_wait', ctx.currentPlayer, { turn: player.jailTurns, maxTurns: RULES.core.jailMaxTurns });
         G.turnPhase = 'done';
         return 'done';
       }

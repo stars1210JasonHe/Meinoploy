@@ -16,14 +16,14 @@ export function playerName(player) {
 export const EVENT_LOG_CAP_FALLBACK = 200;
 
 const TYPE_LIST = [
-  'character_selected', 'dice_rolled', 'route_committed', 'moved', 'salary_collected',
-  'passive_triggered', 'property_bought', 'property_passed', 'rent_paid', 'tax_paid',
-  'card_drawn', 'card_applied', 'card_redrawn', 'went_to_jail', 'jail_fine_paid',
-  'left_jail', 'property_upgraded', 'building_sold', 'property_mortgaged',
-  'property_unmortgaged', 'property_regulated', 'reroll_used', 'trade_proposed',
-  'trade_accepted', 'trade_rejected', 'trade_cancelled', 'auction_started',
-  'auction_turn', 'bid_placed', 'auction_passed', 'auction_ended', 'bankruptcy',
-  'season_changed', 'game_over',
+  'character_selected', 'dice_rolled', 'route_committed', 'moved', 'landing_notice',
+  'salary_collected', 'passive_triggered', 'property_bought', 'property_passed',
+  'rent_paid', 'tax_paid', 'card_drawn', 'card_applied', 'card_redrawn',
+  'went_to_jail', 'jail_fine_paid', 'left_jail', 'jail_wait', 'property_upgraded',
+  'building_sold', 'property_mortgaged', 'property_unmortgaged', 'property_regulated',
+  'reroll_used', 'trade_proposed', 'trade_accepted', 'trade_rejected',
+  'trade_cancelled', 'auction_started', 'auction_turn', 'bid_placed',
+  'auction_passed', 'auction_ended', 'bankruptcy', 'season_changed', 'game_over',
 ];
 export const ENGINE_EVENTS = Object.freeze(Object.fromEntries(TYPE_LIST.map(t => [t, t])));
 
@@ -53,26 +53,42 @@ export function formatEventMessage(type, actor, data, G) {
       return data.reason === 'triples' ? 'Triple doubles! Go to Jail!' : 'Go to Jail!';
 
     // 'doubles'/'served' are the two ways a jailed player actually leaves jail
-    // this turn (Game.js rollAndResolveJail). 'waiting' (remains jailed, no
-    // dedicated type exists in the frozen 34-type registry for that outcome)
-    // is a deliberate closest-fit reuse of this same type — see task-3-report.md.
+    // this turn (Game.js rollAndResolveJail). The "remains jailed" outcome used
+    // to be shoehorned in here as how:'waiting' (see task-3-report.md); it now
+    // has its own dedicated 'jail_wait' type below.
     case 'left_jail': {
       if (data.how === 'doubles') return 'Doubles! You\'re free from jail!';
-      if (data.how === 'served') return `${data.maxTurns} turns in jail. Paid $${data.fine} fine.`;
-      return `Still in jail. Turn ${G.players[actor].jailTurns}/${data.maxTurns}.`;
+      return `${data.maxTurns} turns in jail. Paid $${data.fine} fine.`;
     }
+
+    // Player rolled, is still in jail, and didn't roll doubles or hit
+    // jailMaxTurns this turn (Game.js rollAndResolveJail). data.turn is the
+    // post-increment jailTurns counter captured at emit time (payload-
+    // sufficiency: no live G.players[actor].jailTurns read here).
+    case 'jail_wait':
+      return `Still in jail. Turn ${data.turn}/${data.maxTurns}.`;
 
     case 'jail_fine_paid': {
       if (data.failed) return `Not enough money to pay $${data.fine} fine!`;
       return `${playerName(G.players[actor])} paid $${data.fine} to get out of jail.`;
     }
 
-    // General landing-narration bucket: the unconditional "Landed on X" (every
-    // move), the atlas dead-end notice, and the property/jail/parking landing
-    // commentary that involves no separate financial or state-typed event —
-    // see task-3-report.md for why these share this type.
+    // Homogeneous movement events only: the unconditional "Landed on X" (every
+    // move) and the atlas dead-end notice. Both payload shapes carry
+    // {from,to,passedGo[,routeExhausted]} — position-tracking consumers can
+    // rely on numeric from/to always being present. The non-financial landing
+    // commentary that used to be multiplexed in here via a `note` field (see
+    // task-3-report.md) now has its own dedicated 'landing_notice' type below.
     case 'moved': {
       if (data.routeExhausted) return 'No path forward — the route ends here.';
+      return `Landed on ${G.board.spaces[data.to].name}.`;
+    }
+
+    // Non-financial landing narration: property available/unaffordable/owned,
+    // just-visiting-jail, and free-parking-relax. No separate financial or
+    // state-typed event accompanies these, and (unlike 'moved') there is no
+    // from/to — hence the split from 'moved' into its own type.
+    case 'landing_notice': {
       const space = data.propertyId !== undefined ? G.board.spaces[data.propertyId] : null;
       switch (data.note) {
         case 'available':
@@ -88,7 +104,7 @@ export function formatEventMessage(type, actor, data, G) {
         case 'parking_relax':
           return 'Free Parking - relax!';
         default:
-          return `Landed on ${G.board.spaces[data.to].name}.`;
+          return null;
       }
     }
 

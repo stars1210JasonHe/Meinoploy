@@ -101,49 +101,10 @@ describe('moved', () => {
   test('payload {from,to,passedGo:false} on a same-lap move; renders "Landed on X"', () => {
     const G = freshG();
     Monopoly.moves.rollDice(G, makeCtx('0', 1, 2)); // 0 -> 3 (Baltic Ave)
-    const moved = eventsOfType(G, 'moved').filter(e => !e.data.note && !e.data.routeExhausted);
+    const moved = eventsOfType(G, 'moved').filter(e => !e.data.routeExhausted);
     expect(moved).toHaveLength(1);
     expect(moved[0].data).toEqual({ from: 0, to: 3, passedGo: false });
     expect(G.messages).toContain('Landed on Baltic Ave.');
-  });
-
-  test('property landing notes: available / unaffordable / owned', () => {
-    let G = freshG();
-    Monopoly.moves.rollDice(G, makeCtx('0', 1, 2)); // -> Baltic Ave ($60), unowned, affordable
-    let note = eventsOfType(G, 'moved').find(e => e.data.note === 'available');
-    expect(note.data).toEqual({ note: 'available', propertyId: 3, listPrice: 60, effectivePrice: 60 });
-    expect(G.messages).toContain('Baltic Ave is available for $60. Buy or pass?');
-
-    G = freshG();
-    G.players[0].money = 10;
-    Monopoly.moves.rollDice(G, makeCtx('0', 4, 5)); // -> Connecticut Ave ($120)
-    note = eventsOfType(G, 'moved').find(e => e.data.note === 'unaffordable');
-    expect(note.data).toEqual({ note: 'unaffordable', propertyId: 9, price: 120, playerMoney: 10 });
-    expect(G.messages).toContain('Connecticut Ave costs $120 but you only have $10.');
-
-    G = freshG();
-    G.ownership[3] = '0'; // already owns Baltic Ave
-    Monopoly.moves.rollDice(G, makeCtx('0', 1, 2));
-    note = eventsOfType(G, 'moved').find(e => e.data.note === 'owned');
-    expect(note.data).toEqual({ note: 'owned', propertyId: 3 });
-    expect(G.messages).toContain('You own Baltic Ave.');
-  });
-
-  test("note 'visiting_jail' on the Just Visiting space", () => {
-    const G = freshG();
-    Monopoly.moves.rollDice(G, makeCtx('0', 4, 6)); // 0 -> 10 (Just Visiting)
-    const note = eventsOfType(G, 'moved').find(e => e.data.note === 'visiting_jail');
-    expect(note).toBeDefined();
-    expect(G.messages).toContain('Just visiting jail.');
-  });
-
-  test("note 'parking_relax' when the freeParkingPot rule is off (default)", () => {
-    const G = freshG();
-    G.players[0].position = 17;
-    Monopoly.moves.rollDice(G, makeCtx('0', 1, 2)); // 17 -> 20 (Free Parking)
-    const note = eventsOfType(G, 'moved').find(e => e.data.note === 'parking_relax');
-    expect(note).toBeDefined();
-    expect(G.messages).toContain('Free Parking - relax!');
   });
 
   test('salary_collected(go) + passive_triggered(idealist, go context) on wrapping past GO', () => {
@@ -161,7 +122,7 @@ describe('moved', () => {
     expect(salary.data).toEqual({ source: 'go', amount: expectedAmount });
     expect(G.players[0].money).toBe(before + expectedAmount);
 
-    const moved = eventsOfType(G, 'moved').find(e => !e.data.note && !e.data.routeExhausted);
+    const moved = eventsOfType(G, 'moved').find(e => !e.data.routeExhausted);
     expect(moved.data).toEqual({ from: 38, to: 1, passedGo: true });
   });
 
@@ -202,6 +163,47 @@ describe('moved', () => {
     expect(passive.data).toEqual({ passive: 'idealist', effect: 'go_bonus', amount: RULES.passives.idealist.goBonus, context: 'hub' });
     const salary = eventsOfType(G, 'salary_collected').find(e => e.data.source === 'hub');
     expect(salary.data.amount).toBe(RULES.core.goSalary + RULES.passives.idealist.goBonus);
+  });
+});
+
+describe('landing_notice', () => {
+  test('note available / unaffordable / owned', () => {
+    let G = freshG();
+    Monopoly.moves.rollDice(G, makeCtx('0', 1, 2)); // -> Baltic Ave ($60), unowned, affordable
+    let note = eventsOfType(G, 'landing_notice').find(e => e.data.note === 'available');
+    expect(note.data).toEqual({ note: 'available', propertyId: 3, listPrice: 60, effectivePrice: 60 });
+    expect(G.messages).toContain('Baltic Ave is available for $60. Buy or pass?');
+
+    G = freshG();
+    G.players[0].money = 10;
+    Monopoly.moves.rollDice(G, makeCtx('0', 4, 5)); // -> Connecticut Ave ($120)
+    note = eventsOfType(G, 'landing_notice').find(e => e.data.note === 'unaffordable');
+    expect(note.data).toEqual({ note: 'unaffordable', propertyId: 9, price: 120, playerMoney: 10 });
+    expect(G.messages).toContain('Connecticut Ave costs $120 but you only have $10.');
+
+    G = freshG();
+    G.ownership[3] = '0'; // already owns Baltic Ave
+    Monopoly.moves.rollDice(G, makeCtx('0', 1, 2));
+    note = eventsOfType(G, 'landing_notice').find(e => e.data.note === 'owned');
+    expect(note.data).toEqual({ note: 'owned', propertyId: 3 });
+    expect(G.messages).toContain('You own Baltic Ave.');
+  });
+
+  test("note 'visiting_jail' on the Just Visiting space", () => {
+    const G = freshG();
+    Monopoly.moves.rollDice(G, makeCtx('0', 4, 6)); // 0 -> 10 (Just Visiting)
+    const note = eventsOfType(G, 'landing_notice').find(e => e.data.note === 'visiting_jail');
+    expect(note).toBeDefined();
+    expect(G.messages).toContain('Just visiting jail.');
+  });
+
+  test("note 'parking_relax' when the freeParkingPot rule is off (default)", () => {
+    const G = freshG();
+    G.players[0].position = 17;
+    Monopoly.moves.rollDice(G, makeCtx('0', 1, 2)); // 17 -> 20 (Free Parking)
+    const note = eventsOfType(G, 'landing_notice').find(e => e.data.note === 'parking_relax');
+    expect(note).toBeDefined();
+    expect(G.messages).toContain('Free Parking - relax!');
   });
 });
 
@@ -300,14 +302,18 @@ describe('left_jail', () => {
     expect(G.messages).toContain(`${RULES.core.jailMaxTurns} turns in jail. Paid $${RULES.core.jailFine} fine.`);
   });
 
-  test("how 'waiting' when neither doubles nor jailMaxTurns are reached", () => {
+});
+
+describe('jail_wait', () => {
+  test('payload {turn,maxTurns} when neither doubles nor jailMaxTurns are reached', () => {
     const G = freshG();
     G.players[0].inJail = true;
     G.players[0].jailTurns = 0;
     Monopoly.moves.rollDice(G, makeCtx('0', 1, 2));
-    const left = eventsOfType(G, 'left_jail');
-    expect(left).toHaveLength(1);
-    expect(left[0].data).toEqual({ how: 'waiting', maxTurns: RULES.core.jailMaxTurns });
+    const waits = eventsOfType(G, 'jail_wait');
+    expect(waits).toHaveLength(1);
+    expect(waits[0].data).toEqual({ turn: 1, maxTurns: RULES.core.jailMaxTurns });
+    expect(eventsOfType(G, 'left_jail')).toHaveLength(0);
     expect(G.players[0].inJail).toBe(true);
     expect(G.turnPhase).toBe('done');
     expect(G.messages).toContain(`Still in jail. Turn 1/${RULES.core.jailMaxTurns}.`);
@@ -384,5 +390,30 @@ describe('G.events seq monotonicity (Task 2 harness integration)', () => {
     expect(G.eventSeq).toBe(G.events[G.events.length - 1].seq + 1);
     expect(eventsOfType(G, 'dice_rolled').length).toBeGreaterThanOrEqual(4);
     expect(eventsOfType(G, 'character_selected')).toHaveLength(1);
+  });
+
+  // Shape-homogeneity pin: 'moved' must carry only {from,to,passedGo[,
+  // routeExhausted]} — the non-financial landing commentary that used to be
+  // multiplexed onto 'moved' via a `note` field now lives in its own
+  // 'landing_notice' type, so every 'moved' event a position-tracking
+  // consumer sees must have numeric from/to and never a `note` field.
+  test("every 'moved' event has numeric from/to and no 'note' field", () => {
+    const client = makeClient(2, 1);
+    playScript(client, [
+      ['selectCharacter', 'marcus-grayline'],
+      ['selectCharacter', 'sophia-ember'],
+      ['rollDice'], ifCanBuy('buyProperty'), ifPendingCard('acceptCard'), ['endTurn'],
+      ['rollDice'], ifCanBuy('buyProperty'), ifPendingCard('acceptCard'), ['endTurn'],
+      ['rollDice'], ifCanBuy('buyProperty'), ifPendingCard('acceptCard'), ['endTurn'],
+      ['rollDice'], ifCanBuy('buyProperty'), ifPendingCard('acceptCard'), ['endTurn'],
+    ]);
+    const G = client.getState().G;
+    const moved = eventsOfType(G, 'moved');
+    expect(moved.length).toBeGreaterThan(0);
+    moved.forEach(e => {
+      expect(typeof e.data.from).toBe('number');
+      expect(typeof e.data.to).toBe('number');
+      expect(e.data.note).toBeUndefined();
+    });
   });
 });
