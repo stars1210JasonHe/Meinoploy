@@ -441,8 +441,8 @@ describe('G.events seq monotonicity (Task 2 harness integration)', () => {
 //    naturally reaches — their byte-identity rests on the assertion itself
 //    (template lifted verbatim), not the golden gate.
 
-describe('card_drawn / card_applied — harness (golden-covered)', () => {
-  test('payPercent: announce + prompt card_drawn, then card_applied on acceptCard', () => {
+describe('card_drawn / card_prompt / card_applied — harness (golden-covered)', () => {
+  test('payPercent: announce card_drawn + card_prompt, then card_applied on acceptCard', () => {
     const client = makeClient(2, 14);
     playScript(client, [
       ['selectCharacter', 'lia-startrace'],
@@ -451,13 +451,15 @@ describe('card_drawn / card_applied — harness (golden-covered)', () => {
     ]);
     let G = client.getState().G;
     const drawn = eventsOfType(G, 'card_drawn');
-    expect(drawn).toHaveLength(2);
+    expect(drawn).toHaveLength(1);
     expect(typeof drawn[0].data.cardIndex).toBe('number');
     expect(drawn[0].data).toEqual({
       deck: 'chance', cardIndex: drawn[0].data.cardIndex,
       text: 'Black Swan Event! Pay 10% of your total assets.',
     });
-    expect(drawn[1].data).toEqual({ deck: 'chance', cardIndex: drawn[0].data.cardIndex, prompt: true });
+    const prompted = eventsOfType(G, 'card_prompt');
+    expect(prompted).toHaveLength(1);
+    expect(prompted[0].data).toEqual({ deck: 'chance', cardIndex: drawn[0].data.cardIndex });
     expect(G.messages).toEqual([
       'Lia Startrace rolled 1 + 6 = 7',
       'Landed on Chance.',
@@ -544,7 +546,7 @@ describe('card_drawn / card_applied — harness (golden-covered)', () => {
     expect(eventsOfType(G, 'passive_triggered').filter(e => e.data.context === 'card')).toHaveLength(0);
   });
 
-  test("goToJail (CHANCE 'Go to Jail. Do not pass GO.'): silent card_applied, no went_to_jail", () => {
+  test("goToJail (CHANCE 'Go to Jail. Do not pass GO.'): silent card_applied + event-only went_to_jail(reason:'card')", () => {
     const client = makeClient(2, 34);
     playScript(client, [
       ['selectCharacter', 'knox-ironlaw'],
@@ -557,12 +559,15 @@ describe('card_drawn / card_applied — harness (golden-covered)', () => {
       deck: 'chance', cardIndex: applied.data.cardIndex, action: 'goToJail',
       text: 'Go to Jail. Do not pass GO.', effect: {},
     });
-    // The pre-migration code never pushed a "Go to Jail!" message for this
-    // card action (only the space-landing goToJail does) — confirmed against
-    // the golden jail-cycle fixture. went_to_jail's formatter unconditionally
-    // returns text, so it must NOT be emitted here (would inject a new
-    // message and break byte-identity).
-    expect(eventsOfType(G, 'went_to_jail')).toHaveLength(0);
+    // went_to_jail now fires (event-only) so event-stream consumers can see
+    // the jailing, but reason:'card' formats to null in the formatter — the
+    // pre-migration code never pushed a "Go to Jail!" message for this card
+    // action (only the space-landing goToJail does), confirmed against the
+    // golden jail-cycle fixture. The unchanged G.messages array below is the
+    // proof: no new line appears despite the new event.
+    const jailed = eventsOfType(G, 'went_to_jail').find(e => e.data.reason === 'card');
+    expect(jailed).toBeDefined();
+    expect(jailed.data).toEqual({ reason: 'card' });
     expect(G.players[0].inJail).toBe(true);
     expect(G.messages).toEqual([
       'Knox Ironlaw rolled 3 + 4 = 7',

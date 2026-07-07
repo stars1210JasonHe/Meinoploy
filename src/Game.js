@@ -495,7 +495,7 @@ function handleLanding(G, ctx) {
       if (canRedraw) {
         G.pendingCard = { card, deck: 'chance', cardIndex };
         G.turnPhase = 'card';
-        logEvent(G, 'card_drawn', ctx.currentPlayer, { deck: 'chance', cardIndex, prompt: true });
+        logEvent(G, 'card_prompt', ctx.currentPlayer, { deck: 'chance', cardIndex });
         return;
       }
       applyCard(G, ctx, player, card, 'chance', cardIndex);
@@ -515,7 +515,7 @@ function handleLanding(G, ctx) {
       if (canRedraw) {
         G.pendingCard = { card, deck: 'community', cardIndex };
         G.turnPhase = 'card';
-        logEvent(G, 'card_drawn', ctx.currentPlayer, { deck: 'community', cardIndex, prompt: true });
+        logEvent(G, 'card_prompt', ctx.currentPlayer, { deck: 'community', cardIndex });
         return;
       }
       applyCard(G, ctx, player, card, 'community', cardIndex);
@@ -653,13 +653,16 @@ function applyCard(G, ctx, player, card, deck, cardIndex) {
     }
     case 'goToJail':
       sendToJail(G, player);
-      // No 'went_to_jail' event here: unlike the space-landing goToJail
-      // (handleLanding), the pre-migration code never pushed a "Go to Jail!"
-      // message for this card action (confirmed against the golden
-      // jail-cycle fixture — only the CHANCE draw line appears). went_to_jail's
-      // formatter unconditionally returns text, so emitting it here would
-      // inject a brand-new message and break byte-identity. card_applied is
-      // data-only for this action (formatter returns null).
+      // Event-only went_to_jail(reason:'card'): unlike the space-landing
+      // goToJail (handleLanding), the pre-migration code never pushed a "Go
+      // to Jail!" message for this card action (confirmed against the
+      // golden jail-cycle fixture — only the CHANCE draw line appears), so
+      // the formatter returns null for reason:'card' specifically (checked
+      // first, before the other reasons' unconditional text) — no new
+      // message, byte-identity preserved, but the jailing is still visible
+      // on the event stream. card_applied is data-only for this action
+      // (formatter returns null).
+      logEvent(G, 'went_to_jail', player.id, { reason: 'card' });
       logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'goToJail', text: card.text, effect: {} });
       break;
 

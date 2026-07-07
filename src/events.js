@@ -18,7 +18,7 @@ export const EVENT_LOG_CAP_FALLBACK = 200;
 const TYPE_LIST = [
   'character_selected', 'dice_rolled', 'route_committed', 'moved', 'landing_notice',
   'salary_collected', 'passive_triggered', 'property_bought', 'property_passed',
-  'rent_paid', 'tax_paid', 'card_drawn', 'card_applied', 'card_redrawn',
+  'rent_paid', 'tax_paid', 'card_drawn', 'card_prompt', 'card_applied', 'card_redrawn',
   'went_to_jail', 'jail_fine_paid', 'left_jail', 'jail_wait', 'property_upgraded',
   'building_sold', 'property_mortgaged', 'property_unmortgaged', 'property_regulated',
   'reroll_used', 'trade_proposed', 'trade_accepted', 'trade_rejected',
@@ -49,7 +49,13 @@ export function formatEventMessage(type, actor, data, G) {
       return `${playerName(p)} rolled ${data.d1} + ${data.d2} = ${data.total}`;
     }
 
+    // reason:'card' (applyCard's goToJail action) is event-only: the
+    // pre-migration code never pushed a "Go to Jail!" message for that
+    // branch (only the space-landing goToJail does — confirmed against the
+    // golden jail-cycle fixture), so it must return null FIRST, before the
+    // other reasons' unconditional text.
     case 'went_to_jail':
+      if (data.reason === 'card') return null;
       return data.reason === 'triples' ? 'Triple doubles! Go to Jail!' : 'Go to Jail!';
 
     // 'doubles'/'served' are the two ways a jailed player actually leaves jail
@@ -143,21 +149,26 @@ export function formatEventMessage(type, actor, data, G) {
     case 'tax_paid':
       return `Paid $${data.amount} in ${G.board.spaces[data.spaceId].name}.`;
 
-    // Card draw + redraw-offer, both from handleLanding's chance/community
-    // cases (Game.js). Three sub-shapes share this one type rather than
-    // getting dedicated types of their own: `empty` (deck exhausted, no card
-    // drawn), the plain announce line, and `prompt` (redraw offer) — the
-    // latter is emitted as a SECOND card_drawn event immediately after the
-    // announce one, same deck/cardIndex, once the game has decided a redraw
-    // is offered. This is a closest-fit reuse (frozen registry has no
-    // dedicated "offer" type): it's the same physical card draw, just two
-    // records of it (revealed, then offered-for-redraw), not two draws.
+    // Card draw, from handleLanding's chance/community cases (Game.js). Two
+    // sub-shapes share this one type: `empty` (deck exhausted, no card
+    // drawn) and the plain announce line. The redraw-offer reminder used to
+    // be folded in here as a second card_drawn event with {prompt:true} —
+    // it now has its own dedicated 'card_prompt' type below (see
+    // task-4-report.md concern #1 / this fix's report section).
     case 'card_drawn': {
       const label = data.deck === 'chance' ? 'CHANCE' : 'COMMUNITY CHEST';
       if (data.empty) return 'The deck is empty.';
-      if (data.prompt) return 'You may accept or redraw this card.';
       return `${label}: ${data.text}`;
     }
+
+    // Redraw offer, emitted immediately after 'card_drawn' (same deck/
+    // cardIndex) once the game has decided a redraw is offered (Cassian
+    // passive or a luck redraw on an eligible action). Dedicated type so
+    // consumers counting card_drawn events per turn see exactly one per
+    // physical draw; deck/cardIndex are carried for consumers even though
+    // the rendered string is static.
+    case 'card_prompt':
+      return 'You may accept or redraw this card.';
 
     // Every applyCard (Game.js) action branch logs one of these, whether or
     // not it produces a message — 'gain'/'pay'/'goToJail'/'moveTo' never had
