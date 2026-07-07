@@ -497,3 +497,88 @@ describe('item 7: hot-seat inertness (single client, enforceSeats false by defau
     expect(client.getState().ctx.currentPlayer).toBe('1');
   });
 });
+
+// ---------------------------------------------------------------------------
+// PRODUCTION REGRESSION — the real defect this task's `client:false` fix
+// (src/Game.js's `withClientFalse`) closes, not just the authorization
+// contract item 2 already covers. Chain (see task-10-report.md's
+// "PRODUCTION FINDING" section and withClientFalse's own header comment for
+// the full trace against framework source): a move rejected client-side —
+// by boardgame.io's own structural isPlayerActive gate (this test's trigger)
+// or by our `requireActor` returning INVALID_MOVE — sets a client-side
+// WithError transient; TransientHandlingMiddleware reacts by internally
+// dispatching a payload-less STRIP_TRANSIENTS action; that action has no
+// `clientOnly` marker, so TransportMiddleware relays it to the Local()
+// master like a real move; Master.onUpdate's stripCredentialsFromAction
+// unconditionally destructures `action.payload` (undefined) and throws —
+// inside an `async` onUpdate, so it surfaces as an UNHANDLED PROMISE
+// REJECTION that aborts that dispatch's broadcast (no state update, no
+// persist — the practical "client hangs silently" symptom). This branch's
+// `src/Lobby.js` ships `setupData: { enforceSeats: true }` for every online
+// match, and Task 9's requireActor guards make wrong-seat rejections
+// ROUTINE, so this was live in production on this branch before the fix.
+//
+// Verified directly during this task (throwaway repro, not shipped): cloning
+// `Monopoly.moves` into plain functions (stripping the `.client`/`.move`
+// markers `withClientFalse` attaches — i.e. reproducing the exact pre-fix
+// shape) and driving this SAME scenario throws
+// `TypeError: Cannot destructure property 'credentials' of 'action.payload'
+// as it is undefined` from `stripCredentialsFromAction`, and Jest attributes
+// that failure to whichever test is currently running (confirmed: the raw
+// clone's test failed with that exact error; the real, fixed `Monopoly` def
+// run through the identical scenario passed cleanly). This test pins that
+// same scenario permanently against the REAL, shipped `Monopoly.moves`
+// (via `makeSeatClients`, which now delegates directly to them — see
+// seatClients.js's header) — if `withClientFalse` ever regresses or is
+// removed, this test reproduces the crash and fails via that same thrown
+// TypeError, on top of the explicit unhandledRejection/continuation
+// assertions below.
+// ---------------------------------------------------------------------------
+describe('production regression: a rejected move over Local() does not crash the master', () => {
+  test('wrong-seat rollDice is cleanly rejected (no unhandled rejection) and the match keeps working afterward', async () => {
+    let caught = null;
+    const onUnhandledRejection = (err) => { caught = err; };
+    process.on('unhandledRejection', onUnhandledRejection);
+
+    try {
+      const [c0, c1] = makeSeatClients(2, {
+        enforceSeats: true,
+        seed: SEED_8,
+        patchG: (G) => { G.phase = 'play'; return G; },
+      });
+
+      // Wrong-seat dispatch: seat 1 tries rollDice while seat 0 is the only
+      // active player (no trade/auction envelope open yet) — rejected by
+      // boardgame.io's OWN structural isPlayerActive gate, exactly the
+      // trigger the production finding documents (layer 1, per this file's
+      // header — no requireActor involvement needed to reproduce it).
+      const before = snapshotG(c1);
+      const rejected = await dispatchAndWait(c1, 'rollDice');
+      expect(rejected.G).toEqual(before);
+      expect(rejected.G.hasRolled).toBe(false);
+
+      // The match must keep working: the LEGIT seat's real move lands...
+      const afterRoll = await dispatchAndWait(c0, 'rollDice');
+      expect(afterRoll.G.hasRolled).toBe(true);
+      expect(afterRoll.G.lastDice.total).toBe(3); // SEED 8: clean landing, Baltic Ave
+
+      // ...and the master keeps broadcasting normally across FURTHER
+      // dispatches too (pre-fix, a crashed onUpdate for the rejected action
+      // is what left the client hanging with no broadcast — this proves the
+      // master's dispatch pipeline for this match is not just alive for one
+      // more action, but durably fine).
+      const afterBuy = await dispatchAndWait(c0, 'buyProperty');
+      expect(afterBuy.G.ownership[3]).toBe('0');
+      const afterEnd = await dispatchAndWait(c0, 'endTurn');
+      expect(afterEnd.ctx.currentPlayer).toBe('1');
+
+      // Give the event loop one more turn so any lingering unhandled
+      // rejection from the crash chain (if it ever regressed) has a chance
+      // to surface before this assertion runs.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(caught).toBeNull();
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+    }
+  }, 15000);
+});

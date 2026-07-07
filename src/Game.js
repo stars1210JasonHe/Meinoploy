@@ -1066,6 +1066,60 @@ function performMove(G, ctx, route) {
 
 // --- Game definition ---
 
+// Production fix (client:false on every move): v0.45's client-side reducer
+// (reducer-763b001e.js MAKE_MOVE case) checks `isPlayerActive` and runs the
+// move body BEFORE relaying to the master. When a client-side move is
+// rejected there — by our own `requireActor` INVALID_MOVE or by
+// boardgame.io's structural isPlayerActive gate — the client sets a
+// transient error (WithError). TransientHandlingMiddleware reacts by
+// internally dispatching a payload-less STRIP_TRANSIENTS action; that action
+// has no `clientOnly` marker, so TransportMiddleware relays it to the
+// master like a real move. Master.onUpdate's stripCredentialsFromAction then
+// unconditionally destructures `action.payload` (undefined) and throws —
+// inside an async fn, so it surfaces as an unhandled promise rejection that
+// aborts the match's onUpdate (no broadcast, no persist; the client just
+// hangs). The reducer's own long-form skip check —
+// `if (isClient && move.client === false) return state;` (L984) — runs
+// BEFORE the client-side isPlayerActive check and the move body, so a move
+// flagged this way never sets a client-side transient and the
+// STRIP_TRANSIENTS relay never happens.
+//
+// Implementation note: the canonical long-form shape is a wrapper object
+// (`{ move: fn, client: false }`), but this codebase's ~280 existing unit
+// tests (Game.test.js, atlas-engine.test.js, engine-events-emit.test.js,
+// engine-seats-unit.test.js) call `Monopoly.moves.someMove(G, ctx, ...)`
+// DIRECTLY as a function — bypassing boardgame.io's Client()/reducer
+// entirely. Wrapping in a plain object breaks every one of those call
+// sites (confirmed by trying it: 242 failures across 4 files —
+// "X is not a function"). Instead, this attaches the long-form markers
+// directly ONTO each move function: `fn.move = fn` (self-reference) and
+// `fn.client = false`. A function IS an `Object` in JS, so this satisfies
+// boardgame.io's own duck-typing identically to the wrapper shape:
+//   - `IsLongFormMove(move)` = `move instanceof Object && move.move !==
+//     undefined` (L745-747) — true for a decorated function.
+//   - `GetMove` (L486-513) returns whatever was stored in `moves[name]`
+//     verbatim, no typeof branching.
+//   - `game.processMove`'s `IsLongFormMove(moveFn) ? moveFn.move : moveFn`
+//     (L725-727) resolves to the SAME function reference either way (since
+//     `fn.move === fn`), then calls it as normal.
+// Net effect: `Monopoly.moves.someMove` is still the exact same callable
+// function (existing direct-call tests are unaffected), while
+// boardgame.io's dispatch path sees a legitimate long-form move and applies
+// the client-skip short-circuit. The master is unaffected either way:
+// `isClient` is false there. Hot-seat is unaffected too: a `Client()` with
+// no `multiplayer` transport has `isClient: false` (client-5202a476.js
+// L228), so the short-circuit condition is never true and every move runs
+// exactly as it did before this change (verified: full suite green, see
+// task-10-report.md "PRODUCTION FINDING").
+function withClientFalse(moves) {
+  for (const name in moves) {
+    const fn = moves[name];
+    fn.client = false;
+    fn.move = fn;
+  }
+  return moves;
+}
+
 export const Monopoly = {
   name: 'monopoly',
 
@@ -1163,7 +1217,7 @@ export const Monopoly = {
     },
   },
 
-  moves: {
+  moves: withClientFalse({
     // --- Character selection ---
     selectCharacter: (G, ctx, characterId) => {
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
@@ -1732,7 +1786,7 @@ export const Monopoly = {
       G.turnPhase = 'roll';
       ctx.events.endTurn();
     },
-  },
+  }),
 
   endIf: (G, ctx) => {
     if (G.phase !== 'play') return undefined;

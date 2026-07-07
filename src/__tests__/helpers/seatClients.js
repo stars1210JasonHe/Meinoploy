@@ -41,36 +41,19 @@
 //     verification. Real credential AUTH is a SocketIO/server-auth concern, entirely
 //     out of scope for Local(). See task-10-report.md item 6 for the dedicated test
 //     and what it does/doesn't prove.
-//   - EVERY move here is dispatched as a long-form `{ move: fn, client: false }`
-//     (built below, NOT a change to the real `Monopoly.moves` — this seatGame is a
-//     fresh, test-only wrapper). `client: false` tells boardgame.io's reducer to
-//     skip CLIENT-SIDE optimistic execution entirely (reducer-763b001e.js L984,
-//     `if (isClient && move.client === false) { return state; }` — a check that
-//     runs BEFORE the client's own local `isPlayerActive` gate) and defer 100% to
-//     the master's authoritative broadcast. This was NOT a style choice — it fixes
-//     a genuine v0.45 crash reproduced and root-caused during this task: a move the
-//     CLIENT'S OWN local reducer rejects at the structural `isPlayerActive` gate
-//     sets a transient error, which `TransientHandlingMiddleware` reacts to by
-//     internally re-dispatching a `stripTransients()` action; that action has no
-//     `clientOnly` marker, so `TransportMiddleware` relays it to the Local() master
-//     like any real move — but it also has no `.payload`, and `Master.onUpdate`
-//     unconditionally destructures `credAction.payload` while stripping
-//     credentials, throwing. Because `onUpdate` is an `async function`, that throw
-//     becomes an UNHANDLED PROMISE REJECTION (never awaited by
-//     `LocalTransport.onAction`), which Jest attributes to whichever test is
-//     currently running regardless of any local try/catch OR a
-//     `process.on('unhandledRejection', ...)` filter (both were tried and
-//     confirmed ineffective under Jest's own environment hooks). `client: false`
-//     sidesteps the whole chain at its root: with no client-side optimistic
-//     execution, the client-side reducer never rejects, never sets a transient,
-//     and never triggers the relay. `game.processMove` (used by the MASTER, the
-//     only place that must actually run the move) correctly unwraps this long-form
-//     shape via `IsLongFormMove`/`moveFn.move` (reducer-763b001e.js L723-728), so
-//     real authorization/game-logic behavior is identical to the un-wrapped moves —
-//     only the client's redundant local pre-check is disabled. A side benefit:
-//     every dispatch now behaves uniformly (state changes ONLY via the master's
-//     async broadcast, never via a synchronous local guess), which is exactly what
-//     dispatchAndWait already assumes.
+//   - EVERY move on the REAL `Monopoly` def is now defined long-form
+//     (`{ move: fn, client: false }`, src/Game.js's `withClientFalse`) as a
+//     production fix — see task-10-report.md's "PRODUCTION FINDING" section for
+//     the full crash chain this closes (a client-side move rejection used to relay
+//     a payload-less STRIP_TRANSIENTS action to the master, which crashed
+//     `Master.onUpdate` with an unhandled promise rejection). This helper no
+//     longer needs to re-wrap `Monopoly.moves` itself — it reuses the real,
+//     already-long-form def directly, so this suite now exercises the EXACT
+//     production move definitions (not a test-only stand-in). `client: false`
+//     defers 100% to the master's authoritative broadcast (skips client-side
+//     optimistic execution — reducer-763b001e.js L984), which is exactly what
+//     `dispatchAndWait` below already assumes (state changes only via the master's
+//     async broadcast, never a synchronous local guess).
 import { Client } from 'boardgame.io/client';
 import { Local } from 'boardgame.io/multiplayer';
 import { Monopoly, setActiveMap } from '../../Game';
@@ -118,14 +101,11 @@ import classicMapJson from '../../../mods/dominion/maps/classic/map.json';
 export function buildSeatGame({ enforceSeats = true, patchG, seed } = {}) {
   setActiveMap(loadMap(classicMapJson));
 
-  const wrappedMoves = {};
-  for (const name in Monopoly.moves) {
-    wrappedMoves[name] = { move: Monopoly.moves[name], client: false };
-  }
-
+  // Reuse the real, already-long-form `Monopoly.moves` directly (see header) —
+  // no test-side re-wrapping needed now that the production def carries
+  // `client: false` itself.
   const seatGame = {
     ...Monopoly,
-    moves: wrappedMoves,
     setup: (ctx) => {
       const G = Monopoly.setup(ctx, { enforceSeats });
       return patchG ? (patchG(G, ctx) || G) : G;
