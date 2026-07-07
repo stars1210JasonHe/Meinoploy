@@ -2,7 +2,13 @@
 // typed events — dice_rolled, moved, salary_collected, passive_triggered
 // (idealist go/hub, financier tax), rent_paid, tax_paid, went_to_jail,
 // left_jail, jail_fine_paid, character_selected (all-selected transition).
-// Grows in Tasks 4-6 as later migration slices add their own event types.
+//
+// Task 4 (migration slice 2) adds: card_drawn, card_applied (all ~10
+// applyCard action branches), card_redrawn, passive_triggered (financier
+// pay/payPercent card contexts), and the moveTo GO-crossing reuse of
+// salary_collected/passive_triggered with context/source 'card'.
+//
+// Grows in later tasks as further migration slices add their own event types.
 //
 // Two driving styles are used, both already established in this codebase:
 //  - Direct move invocation — `Monopoly.moves.X(G, ctx)` against a hand-built
@@ -16,7 +22,7 @@
 //    well-formed G.events stream (seq monotonicity, per the task brief).
 import { INVALID_MOVE } from 'boardgame.io/core';
 import { Monopoly } from '../Game';
-import { getCharacterById, RULES } from '../../mods/dominion';
+import { getCharacterById, COLOR_GROUPS, RULES } from '../../mods/dominion';
 import { makeClient, playScript, ifCanBuy, ifPendingCard } from './helpers/drive';
 
 // --- shared helpers (mirror Game.test.js's own; not exported from there) ---
@@ -415,5 +421,380 @@ describe('G.events seq monotonicity (Task 2 harness integration)', () => {
       expect(typeof e.data.to).toBe('number');
       expect(e.data.note).toBeUndefined();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 4 (migration slice 2): cards + passives
+// ---------------------------------------------------------------------------
+//
+// Two tiers, matching the task-4-report.md split:
+//  - "harness" tests below drive the SAME baked seeds/scripts as the golden
+//    fixtures (card-draw-accept, card-redraw, two-turn-roll-buy, jail-cycle,
+//    bankruptcy) — these action branches are golden-covered (byte-identical
+//    text is already locked by golden-messages.test.js); these tests add the
+//    payload-completeness assertions the golden gate itself doesn't make.
+//  - "direct-invocation" tests build a minimal G + G.pendingCard and call
+//    Monopoly.moves.acceptCard, the same idiom src/__tests__/Game.test.js
+//    already uses hundreds of times for applyCard branches (applyCard itself
+//    is not exported). These cover action/outcome branches no golden scenario
+//    naturally reaches — their byte-identity rests on the assertion itself
+//    (template lifted verbatim), not the golden gate.
+
+describe('card_drawn / card_applied — harness (golden-covered)', () => {
+  test('payPercent: announce + prompt card_drawn, then card_applied on acceptCard', () => {
+    const client = makeClient(2, 14);
+    playScript(client, [
+      ['selectCharacter', 'lia-startrace'],
+      ['selectCharacter', 'renn-chainbreaker'],
+      ['rollDice'],
+    ]);
+    let G = client.getState().G;
+    const drawn = eventsOfType(G, 'card_drawn');
+    expect(drawn).toHaveLength(2);
+    expect(typeof drawn[0].data.cardIndex).toBe('number');
+    expect(drawn[0].data).toEqual({
+      deck: 'chance', cardIndex: drawn[0].data.cardIndex,
+      text: 'Black Swan Event! Pay 10% of your total assets.',
+    });
+    expect(drawn[1].data).toEqual({ deck: 'chance', cardIndex: drawn[0].data.cardIndex, prompt: true });
+    expect(G.messages).toEqual([
+      'Lia Startrace rolled 1 + 6 = 7',
+      'Landed on Chance.',
+      'CHANCE: Black Swan Event! Pay 10% of your total assets.',
+      'You may accept or redraw this card.',
+    ]);
+
+    client.moves.acceptCard();
+    G = client.getState().G;
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'payPercent');
+    expect(applied.data).toEqual({
+      deck: 'chance',
+      cardIndex: drawn[0].data.cardIndex,
+      action: 'payPercent',
+      text: 'Black Swan Event! Pay 10% of your total assets.',
+      effect: { assets: 1750, amount: 175, percent: 10 },
+    });
+    expect(eventsOfType(G, 'passive_triggered')).toHaveLength(0); // Lia isn't financier
+    expect(G.messages).toContain('Total assets: $1750. Paid $175 (10%).');
+  });
+
+  test('card_redrawn + card_applied(forceBuy, no_opponents)', () => {
+    const client = makeClient(2, 14);
+    playScript(client, [
+      ['selectCharacter', 'lia-startrace'],
+      ['selectCharacter', 'renn-chainbreaker'],
+      ['rollDice'],
+      ['redrawCard'],
+    ]);
+    const G = client.getState().G;
+    const redrawn = eventsOfType(G, 'card_redrawn');
+    expect(redrawn).toHaveLength(1);
+    expect(redrawn[0].data).toEqual({
+      deck: 'chance',
+      newText: "Hostile Takeover! Force-buy an opponent's cheapest property at 150% price.",
+    });
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'forceBuy');
+    expect(applied.data.text).toBe("Hostile Takeover! Force-buy an opponent's cheapest property at 150% price.");
+    expect(applied.data.effect).toEqual({ outcome: 'no_opponents' });
+    expect(G.messages).toContain('No opponents with properties for hostile takeover.');
+  });
+
+  test("gain (COMMUNITY CHEST 'Bank error in your favor'): silent card_applied", () => {
+    const client = makeClient(2, 25);
+    playScript(client, [
+      ['selectCharacter', 'marcus-grayline'],
+      ['selectCharacter', 'sophia-ember'],
+      ['rollDice'],
+    ]);
+    const G = client.getState().G;
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'gain');
+    expect(applied.data).toEqual({
+      deck: 'community',
+      cardIndex: applied.data.cardIndex,
+      action: 'gain',
+      text: 'Bank error in your favor. Collect $200.',
+      effect: { amount: 200 },
+    });
+    expect(G.messages).toEqual([
+      'Marcus Grayline rolled 1 + 1 = 2',
+      'Landed on Community Chest.',
+      'COMMUNITY CHEST: Bank error in your favor. Collect $200.',
+    ]);
+  });
+
+  test("moveTo (CHANCE 'Advance to Illinois Ave.'), passedGo false: no salary/passive events", () => {
+    const client = makeClient(2, 1);
+    playScript(client, [
+      ['selectCharacter', 'marcus-grayline'],
+      ['selectCharacter', 'sophia-ember'],
+      ['rollDice'], ifCanBuy('buyProperty'), ['endTurn'],
+      ['rollDice'], // P1 -> Chance -> "Advance to Illinois Ave."
+    ]);
+    const G = client.getState().G;
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'moveTo');
+    expect(applied.data.text).toBe('Advance to Illinois Ave.');
+    expect(applied.data.effect).toEqual({
+      targetSpaceId: applied.data.effect.targetSpaceId,
+      targetSpaceName: 'Illinois Ave',
+      passedGo: false,
+      goBonus: 0,
+    });
+    expect(eventsOfType(G, 'salary_collected').filter(e => e.data.source === 'card')).toHaveLength(0);
+    expect(eventsOfType(G, 'passive_triggered').filter(e => e.data.context === 'card')).toHaveLength(0);
+  });
+
+  test("goToJail (CHANCE 'Go to Jail. Do not pass GO.'): silent card_applied, no went_to_jail", () => {
+    const client = makeClient(2, 34);
+    playScript(client, [
+      ['selectCharacter', 'knox-ironlaw'],
+      ['selectCharacter', 'sophia-ember'],
+      ['rollDice'], // P0 -> Chance -> goToJail, applied immediately (no redraw offered)
+    ]);
+    const G = client.getState().G;
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'goToJail');
+    expect(applied.data).toEqual({
+      deck: 'chance', cardIndex: applied.data.cardIndex, action: 'goToJail',
+      text: 'Go to Jail. Do not pass GO.', effect: {},
+    });
+    // The pre-migration code never pushed a "Go to Jail!" message for this
+    // card action (only the space-landing goToJail does) — confirmed against
+    // the golden jail-cycle fixture. went_to_jail's formatter unconditionally
+    // returns text, so it must NOT be emitted here (would inject a new
+    // message and break byte-identity).
+    expect(eventsOfType(G, 'went_to_jail')).toHaveLength(0);
+    expect(G.players[0].inJail).toBe(true);
+    expect(G.messages).toEqual([
+      'Knox Ironlaw rolled 3 + 4 = 7',
+      'Landed on Chance.',
+      'CHANCE: Go to Jail. Do not pass GO.',
+    ]);
+  });
+});
+
+describe('card_drawn: empty deck', () => {
+  test('empty:true payload and "The deck is empty." message', () => {
+    const G = freshG();
+    G.board = { ...G.board, chanceCards: [] };
+    Monopoly.moves.rollDice(G, makeCtx('0', 1, 6)); // 0 -> 7 (Chance)
+    const drawn = eventsOfType(G, 'card_drawn');
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0].data).toEqual({ deck: 'chance', cardIndex: null, text: null, empty: true });
+    expect(G.messages).toContain('The deck is empty.');
+  });
+});
+
+describe('card_applied: pay (direct-invocation, no golden scenario reaches this action)', () => {
+  test('plain pay: silent card_applied (no message beyond the draw), no passive event', () => {
+    const G = freshG();
+    G.players[0].money = 1000;
+    G.pendingCard = { card: { text: 'Fine', action: 'pay', value: 50 }, deck: 'chance', cardIndex: 2 };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'pay');
+    expect(applied.data).toEqual({ deck: 'chance', cardIndex: 2, action: 'pay', text: 'Fine', effect: { amount: 50 } });
+    expect(eventsOfType(G, 'passive_triggered')).toHaveLength(0);
+    expect(G.players[0].money).toBe(950);
+    expect(G.messages).toEqual(['Select your characters!']); // unchanged: 'pay' never had a message
+  });
+
+  test('financier reduces the loss, logs passive_triggered(context:pay) before card_applied', () => {
+    const G = freshG();
+    G.players[0].character = getCharacterById('albert-victor'); // financier
+    G.players[0].money = 1000;
+    G.pendingCard = { card: { text: 'Fine', action: 'pay', value: 50 }, deck: 'chance', cardIndex: 2 };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    const reduced = Math.floor(50 * (1 - RULES.passives.financier.negativeEventReduction));
+    const passive = eventsOfType(G, 'passive_triggered')[0];
+    expect(passive.data).toEqual({ passive: 'financier', effect: 'loss_reduced', amount: reduced, context: 'pay' });
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'pay');
+    expect(applied.data.effect).toEqual({ amount: reduced });
+    expect(applied.seq).toBeGreaterThan(passive.seq); // same relative order as the original pushes
+    expect(G.players[0].money).toBe(1000 - reduced);
+    expect(G.messages).toEqual(['Select your characters!', `Financial expertise reduces loss to $${reduced}.`]);
+  });
+});
+
+describe('card_applied: payPercent + financier (direct-invocation)', () => {
+  test('financier reduces the percent-of-assets loss', () => {
+    const G = freshG();
+    G.players[0].character = getCharacterById('albert-victor'); // financier
+    G.players[0].money = 1000;
+    G.pendingCard = { card: { text: 'Audit', action: 'payPercent', value: 20 }, deck: 'community', cardIndex: 5 };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    const assets = 1000; // no properties
+    const rawAmount = Math.floor(assets * 20 / 100);
+    const reduced = Math.floor(rawAmount * (1 - RULES.passives.financier.negativeEventReduction));
+    const passive = eventsOfType(G, 'passive_triggered')[0];
+    expect(passive.data).toEqual({ passive: 'financier', effect: 'loss_reduced', amount: reduced, context: 'payPercent' });
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'payPercent');
+    expect(applied.data).toEqual({
+      deck: 'community', cardIndex: 5, action: 'payPercent', text: 'Audit',
+      effect: { assets, amount: reduced, percent: 20 },
+    });
+    expect(G.players[0].money).toBe(1000 - reduced);
+    expect(G.messages).toEqual(expect.arrayContaining([
+      `Financial expertise reduces loss to $${reduced}.`,
+      `Total assets: $${assets}. Paid $${reduced} (20%).`,
+    ]));
+  });
+});
+
+describe('card_applied: moveTo (direct-invocation)', () => {
+  test('passedGo true: passive_triggered(idealist, context:card) + salary_collected(source:card)', () => {
+    const G = freshG();
+    G.players[0].character = getCharacterById('mira-dawnlight'); // idealist
+    G.players[0].position = 35;
+    const before = G.players[0].money;
+    G.pendingCard = { card: { text: 'Advance to Go', action: 'moveTo', value: 5 }, deck: 'chance', cardIndex: 1 };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    const expectedAmount = RULES.core.goSalary + RULES.passives.idealist.goBonus;
+
+    const passive = eventsOfType(G, 'passive_triggered').find(e => e.data.context === 'card');
+    expect(passive.data).toEqual({ passive: 'idealist', effect: 'go_bonus', amount: RULES.passives.idealist.goBonus, context: 'card' });
+    const salary = eventsOfType(G, 'salary_collected').find(e => e.data.source === 'card');
+    expect(salary.data).toEqual({ source: 'card', amount: expectedAmount });
+    expect(G.players[0].money).toBe(before + expectedAmount);
+
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'moveTo');
+    expect(applied.data).toEqual({
+      deck: 'chance', cardIndex: 1, action: 'moveTo', text: 'Advance to Go',
+      effect: { targetSpaceId: 5, targetSpaceName: G.board.spaces[5].name, passedGo: true, goBonus: expectedAmount },
+    });
+    expect(G.messages).toEqual(expect.arrayContaining([
+      `Growth vision: extra $${RULES.passives.idealist.goBonus} from GO!`,
+      `Passed GO! Collect $${expectedAmount}.`,
+    ]));
+  });
+
+  test('atlas movementMode: teleport + hub salary via payHubSalary, effect records movementMode', () => {
+    const G = atlasG();
+    G.pendingCard = { card: { text: 'Teleport', action: 'moveTo', value: 1 }, deck: 'community', cardIndex: 4 };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    const salary = eventsOfType(G, 'salary_collected').find(e => e.data.source === 'hub');
+    expect(salary.data).toEqual({ source: 'hub', amount: RULES.core.goSalary });
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'moveTo');
+    expect(applied.data).toEqual({
+      deck: 'community', cardIndex: 4, action: 'moveTo', text: 'Teleport',
+      effect: { targetSpaceId: 1, targetSpaceName: 'Hub', movementMode: 'atlas' },
+    });
+  });
+});
+
+describe('card_applied: gainAll / gainPerProperty (direct-invocation)', () => {
+  test('gainAll credits every non-bankrupt player', () => {
+    const G = freshG();
+    G.players[1].bankrupt = true;
+    const before0 = G.players[0].money;
+    const before1 = G.players[1].money;
+    G.pendingCard = { card: { text: 'Stimulus', action: 'gainAll', value: 100 }, deck: 'chance', cardIndex: 6 };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    expect(G.players[0].money).toBe(before0 + 100);
+    expect(G.players[1].money).toBe(before1);
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'gainAll');
+    expect(applied.data).toEqual({ deck: 'chance', cardIndex: 6, action: 'gainAll', text: 'Stimulus', effect: { amount: 100 } });
+    expect(G.messages).toContain('All players receive $100!');
+  });
+
+  test('gainPerProperty scales with owned property count', () => {
+    const G = freshG();
+    G.players[0].properties.push(1, 3, 6);
+    const before = G.players[0].money;
+    G.pendingCard = { card: { text: 'Boom', action: 'gainPerProperty', value: 50 }, deck: 'chance', cardIndex: 7 };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    expect(G.players[0].money).toBe(before + 150);
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'gainPerProperty');
+    expect(applied.data).toEqual({
+      deck: 'chance', cardIndex: 7, action: 'gainPerProperty', text: 'Boom',
+      effect: { count: 3, perProperty: 50, amount: 150 },
+    });
+    expect(G.messages).toContain('3 properties x $50 = $150 earned!');
+  });
+});
+
+describe('card_applied: freeUpgrade / downgrade (direct-invocation)', () => {
+  test('freeUpgrade: upgrades the cheapest eligible property', () => {
+    const G = freshG();
+    const groupIds = COLOR_GROUPS['#8B4513']; // brown group
+    groupIds.forEach(id => { G.ownership[id] = '0'; G.players[0].properties.push(id); });
+    G.pendingCard = { card: { text: 'Free Upgrade', action: 'freeUpgrade', value: 0 }, deck: 'community', cardIndex: 8 };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    const pid = groupIds[0];
+    expect(G.buildings[pid]).toBe(1);
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'freeUpgrade');
+    expect(applied.data).toEqual({
+      deck: 'community', cardIndex: 8, action: 'freeUpgrade', text: 'Free Upgrade',
+      effect: { outcome: 'upgraded', propertyId: pid, targetSpaceName: G.board.spaces[pid].name, newLevel: 1, newLevelName: RULES.buildings.names[1] },
+    });
+    expect(G.messages).toContain(`Free upgrade! ${G.board.spaces[pid].name} upgraded to ${RULES.buildings.names[1]}!`);
+  });
+
+  test('freeUpgrade: outcome "none" when nothing is eligible', () => {
+    const G = freshG();
+    G.pendingCard = { card: { text: 'Free Upgrade', action: 'freeUpgrade', value: 0 }, deck: 'community', cardIndex: 9 };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'freeUpgrade');
+    expect(applied.data.effect).toEqual({ outcome: 'none' });
+    expect(G.messages).toContain('No properties eligible for free upgrade.');
+  });
+
+  test('downgrade: reduces the highest-level building by 1', () => {
+    const G = freshG();
+    G.ownership[1] = '0';
+    G.players[0].properties.push(1);
+    G.buildings[1] = 2;
+    G.pendingCard = { card: { text: 'Crash', action: 'downgrade', value: 0 }, deck: 'community', cardIndex: 10 };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    expect(G.buildings[1]).toBe(1);
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'downgrade');
+    expect(applied.data).toEqual({
+      deck: 'community', cardIndex: 10, action: 'downgrade', text: 'Crash',
+      effect: { outcome: 'downgraded', propertyId: 1, targetSpaceName: G.board.spaces[1].name, newLevel: 1, newLevelName: RULES.buildings.names[1] },
+    });
+    expect(G.messages).toContain(`Market Crash! ${G.board.spaces[1].name} downgraded to ${RULES.buildings.names[1]}.`);
+  });
+
+  test('downgrade: outcome "none" without any buildings', () => {
+    const G = freshG();
+    G.pendingCard = { card: { text: 'Crash', action: 'downgrade', value: 0 }, deck: 'community', cardIndex: 11 };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'downgrade');
+    expect(applied.data.effect).toEqual({ outcome: 'none' });
+    expect(G.messages).toContain('No buildings to downgrade.');
+  });
+});
+
+describe('card_applied: forceBuy bought / insufficient_funds (direct-invocation)', () => {
+  test('bought: transfers the cheapest opponent property', () => {
+    const G = freshG();
+    G.ownership[1] = '1';
+    G.players[1].properties.push(1);
+    G.players[0].money = 1000;
+    G.players[1].money = 500;
+    G.pendingCard = { card: { text: 'Hostile Takeover', action: 'forceBuy', value: 150 }, deck: 'chance', cardIndex: 12 };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    const cost = Math.floor(G.board.spaces[1].price * 150 / 100);
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'forceBuy');
+    expect(applied.data).toEqual({
+      deck: 'chance', cardIndex: 12, action: 'forceBuy', text: 'Hostile Takeover',
+      effect: { outcome: 'bought', propertyId: 1, targetSpaceName: G.board.spaces[1].name, targetOwnerId: '1', cost },
+    });
+    expect(G.players[0].money).toBe(1000 - cost);
+    expect(G.players[1].money).toBe(500 + cost);
+    expect(G.messages).toContain(`Hostile Takeover! Bought ${G.board.spaces[1].name} from Player 2 for $${cost}!`);
+  });
+
+  test('insufficient_funds: no transfer, event still carries the cost', () => {
+    const G = freshG();
+    G.ownership[39] = '1';
+    G.players[1].properties.push(39);
+    G.players[0].money = 100;
+    G.pendingCard = { card: { text: 'Hostile Takeover', action: 'forceBuy', value: 150 }, deck: 'chance', cardIndex: 13 };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    const cost = Math.floor(G.board.spaces[39].price * 150 / 100);
+    const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'forceBuy');
+    expect(applied.data.effect).toEqual({ outcome: 'insufficient_funds', cost });
+    expect(G.ownership[39]).toBe('1');
+    expect(G.players[0].money).toBe(100);
+    expect(G.messages).toContain(`Can't afford hostile takeover ($${cost} needed).`);
   });
 });

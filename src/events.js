@@ -115,15 +115,24 @@ export function formatEventMessage(type, actor, data, G) {
     }
 
     // Idealist (GO/hub bonus) and financier (tax loss reduction) branches added
-    // by this slice; other passives (financier pay/payPercent, arbitrageur)
-    // are added by later slices onto this same case.
+    // by slice 1; financier's card pay/payPercent branch added by this slice
+    // (cards+passives) — same underlying passive, distinct text ("loss" vs
+    // "tax"), discriminated by context. Other passives (arbitrageur) are
+    // added by later slices onto this same case.
     case 'passive_triggered': {
       if (data.passive === 'idealist' && data.effect === 'go_bonus') {
+        // Reused verbatim by applyCard's moveTo GO-crossing branch too
+        // (context:'card') — any non-'hub' context reads "from GO", the same
+        // text performMove's real dice-move GO crossing produces.
         const suffix = data.context === 'hub' ? 'at the hub' : 'from GO';
         return `Growth vision: extra $${data.amount} ${suffix}!`;
       }
-      if (data.passive === 'financier' && data.effect === 'loss_reduced' && data.context === 'tax') {
-        return `Financial expertise reduces tax to $${data.amount}.`;
+      if (data.passive === 'financier' && data.effect === 'loss_reduced') {
+        // 'tax' (slice 1, handleLanding) says "reduces tax to"; the card
+        // contexts ('pay'/'payPercent', applyCard) both say "reduces loss to"
+        // — identical text for both card actions, so no per-context branch.
+        if (data.context === 'tax') return `Financial expertise reduces tax to $${data.amount}.`;
+        return `Financial expertise reduces loss to $${data.amount}.`;
       }
       return null;
     }
@@ -133,6 +142,57 @@ export function formatEventMessage(type, actor, data, G) {
 
     case 'tax_paid':
       return `Paid $${data.amount} in ${G.board.spaces[data.spaceId].name}.`;
+
+    // Card draw + redraw-offer, both from handleLanding's chance/community
+    // cases (Game.js). Three sub-shapes share this one type rather than
+    // getting dedicated types of their own: `empty` (deck exhausted, no card
+    // drawn), the plain announce line, and `prompt` (redraw offer) — the
+    // latter is emitted as a SECOND card_drawn event immediately after the
+    // announce one, same deck/cardIndex, once the game has decided a redraw
+    // is offered. This is a closest-fit reuse (frozen registry has no
+    // dedicated "offer" type): it's the same physical card draw, just two
+    // records of it (revealed, then offered-for-redraw), not two draws.
+    case 'card_drawn': {
+      const label = data.deck === 'chance' ? 'CHANCE' : 'COMMUNITY CHEST';
+      if (data.empty) return 'The deck is empty.';
+      if (data.prompt) return 'You may accept or redraw this card.';
+      return `${label}: ${data.text}`;
+    }
+
+    // Every applyCard (Game.js) action branch logs one of these, whether or
+    // not it produces a message — 'gain'/'pay'/'goToJail'/'moveTo' never had
+    // a dedicated template pre-migration (silent or handled by reused
+    // salary_collected/passive_triggered types), so those fall through to
+    // null here, matching that no new message appears. `data.effect` carries
+    // every value the action's original template (if any) interpolated.
+    case 'card_applied': {
+      switch (data.action) {
+        case 'payPercent':
+          return `Total assets: $${data.effect.assets}. Paid $${data.effect.amount} (${data.effect.percent}%).`;
+        case 'gainAll':
+          return `All players receive $${data.effect.amount}!`;
+        case 'gainPerProperty':
+          return `${data.effect.count} properties x $${data.effect.perProperty} = $${data.effect.amount} earned!`;
+        case 'freeUpgrade':
+          if (data.effect.outcome === 'upgraded') return `Free upgrade! ${data.effect.targetSpaceName} upgraded to ${data.effect.newLevelName}!`;
+          return 'No properties eligible for free upgrade.';
+        case 'downgrade':
+          if (data.effect.outcome === 'downgraded') return `Market Crash! ${data.effect.targetSpaceName} downgraded to ${data.effect.newLevelName}.`;
+          return 'No buildings to downgrade.';
+        case 'forceBuy':
+          if (data.effect.outcome === 'bought') return `Hostile Takeover! Bought ${data.effect.targetSpaceName} from ${playerName(G.players[data.effect.targetOwnerId])} for $${data.effect.cost}!`;
+          if (data.effect.outcome === 'insufficient_funds') return `Can't afford hostile takeover ($${data.effect.cost} needed).`;
+          return 'No opponents with properties for hostile takeover.';
+        // 'gain', 'pay', 'moveTo', 'goToJail' — data-only, no message.
+        default:
+          return null;
+      }
+    }
+
+    case 'card_redrawn': {
+      const label = data.deck === 'chance' ? 'CHANCE' : 'COMMUNITY CHEST';
+      return `Redraw! ${label}: ${data.newText}`;
+    }
 
     // Only the all-selected transition (Game.js selectCharacter) is migrated by
     // this slice; the per-player join message (Task 5) adds another branch here.

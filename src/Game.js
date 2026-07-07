@@ -263,10 +263,13 @@ function rollTwoDice(ctx) {
   return { d1, d2, total: d1 + d2, isDoubles: d1 === d2 };
 }
 
+// Returns { card, index } (index into `deck`, needed downstream by
+// card_drawn/card_applied/card_redrawn payloads for a stable card reference),
+// or null for an empty/missing deck.
 function drawCard(ctx, deck) {
   if (!deck || deck.length === 0) return null;
   const index = Math.floor(ctx.random.Number() * deck.length);
-  return deck[index];
+  return { card: deck[index], index };
 }
 
 // --- Rent calculation ---
@@ -426,9 +429,6 @@ function sendToJail(G, player) {
 function handleLanding(G, ctx) {
   const player = G.players[ctx.currentPlayer];
   const space = G.board.spaces[player.position];
-  // Still used by the chance/community cases below (card sites — out of scope
-  // for this slice, migrated by the cards+passives task) so the alias stays.
-  const messages = G.messages;
 
   switch (space.type) {
     case 'go':
@@ -482,41 +482,43 @@ function handleLanding(G, ctx) {
     }
 
     case 'chance': {
-      const card = drawCard(ctx, G.board.chanceCards);
-      if (!card) {
-        messages.push('The deck is empty.');
+      const drawn = drawCard(ctx, G.board.chanceCards);
+      if (!drawn) {
+        logEvent(G, 'card_drawn', ctx.currentPlayer, { deck: 'chance', cardIndex: null, text: null, empty: true });
         break;
       }
-      messages.push(`CHANCE: ${card.text}`);
+      const { card, index: cardIndex } = drawn;
+      logEvent(G, 'card_drawn', ctx.currentPlayer, { deck: 'chance', cardIndex, text: card.text });
       // Check if player can redraw (Cassian passive OR luck redraws)
       const canRedraw = (getPassive(player) === 'merchant') ||
                         (player.luckRedraws > 0 && ['pay', 'payPercent', 'downgrade', 'goToJail'].includes(card.action));
       if (canRedraw) {
-        G.pendingCard = { card, deck: 'chance' };
+        G.pendingCard = { card, deck: 'chance', cardIndex };
         G.turnPhase = 'card';
-        messages.push('You may accept or redraw this card.');
+        logEvent(G, 'card_drawn', ctx.currentPlayer, { deck: 'chance', cardIndex, prompt: true });
         return;
       }
-      applyCard(G, ctx, player, card);
+      applyCard(G, ctx, player, card, 'chance', cardIndex);
       break;
     }
 
     case 'community': {
-      const card = drawCard(ctx, G.board.communityCards);
-      if (!card) {
-        messages.push('The deck is empty.');
+      const drawn = drawCard(ctx, G.board.communityCards);
+      if (!drawn) {
+        logEvent(G, 'card_drawn', ctx.currentPlayer, { deck: 'community', cardIndex: null, text: null, empty: true });
         break;
       }
-      messages.push(`COMMUNITY CHEST: ${card.text}`);
+      const { card, index: cardIndex } = drawn;
+      logEvent(G, 'card_drawn', ctx.currentPlayer, { deck: 'community', cardIndex, text: card.text });
       const canRedraw = (getPassive(player) === 'merchant') ||
                         (player.luckRedraws > 0 && ['pay', 'payPercent', 'downgrade', 'goToJail'].includes(card.action));
       if (canRedraw) {
-        G.pendingCard = { card, deck: 'community' };
+        G.pendingCard = { card, deck: 'community', cardIndex };
         G.turnPhase = 'card';
-        messages.push('You may accept or redraw this card.');
+        logEvent(G, 'card_drawn', ctx.currentPlayer, { deck: 'community', cardIndex, prompt: true });
         return;
       }
-      applyCard(G, ctx, player, card);
+      applyCard(G, ctx, player, card, 'community', cardIndex);
       break;
     }
 
@@ -579,22 +581,33 @@ function rankStandings(G, players) {
     });
 }
 
-function applyCard(G, ctx, player, card) {
+// `deck`/`cardIndex` (the card's origin deck id and index within it) are only
+// known to the three callers (handleLanding's chance/community cases,
+// acceptCard, redrawCard) — threaded through as params so every card_applied
+// event carries a stable card reference without applyCard re-deriving it.
+function applyCard(G, ctx, player, card, deck, cardIndex) {
   switch (card.action) {
     case 'gain':
+      // No message ever existed for this action (silent credit) — card_applied
+      // is still logged (data-only; formatter returns null) so the event
+      // stream has a complete record even where G.messages doesn't.
       player.money += card.value;
+      logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'gain', text: card.text, effect: { amount: card.value } });
       break;
     case 'pay': {
       let amount = card.value;
       // Albert Victor passive: financial negative event loss reduction
       if (getPassive(player) === 'financier') {
         amount = Math.floor(amount * (1 - RULES.passives.financier.negativeEventReduction));
-        G.messages.push(`Financial expertise reduces loss to $${amount}.`);
+        logEvent(G, 'passive_triggered', player.id, { passive: 'financier', effect: 'loss_reduced', amount, context: 'pay' });
       }
       player.money -= amount;
       if (RULES.core.freeParkingPot) {
         G.freeParkingPot += amount;
       }
+      // No primary message ever existed for 'pay' either (only the optional
+      // financier line above) — same data-only rationale as 'gain'.
+      logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'pay', text: card.text, effect: { amount } });
       if (player.money <= 0) {
         handleBankruptcy(G, ctx, player, null);
       }
@@ -610,26 +623,44 @@ function applyCard(G, ctx, player, card) {
           // survive a reroll, matching classic moveTo-GO semantics.
           payHubSalary(G, player);
         }
+        logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'moveTo', text: card.text, effect: { targetSpaceId: card.value, targetSpaceName: G.board.spaces[card.value].name, movementMode: 'atlas' } });
         handleLanding(G, ctx);
         break;
       }
       const oldPos = player.position;
       player.position = card.value;
+      let passedGo = false;
+      let goBonus = 0;
       if (card.value < oldPos && card.value !== G.board.jail) {
-        let goBonus = Math.floor(applyEconMods(G, 'income', RULES.core.goSalary));
-        // Mira Dawnlight passive: GO bonus
+        passedGo = true;
+        goBonus = Math.floor(applyEconMods(G, 'income', RULES.core.goSalary));
+        // Mira Dawnlight passive: GO bonus. Reuses the SAME event
+        // types/text as performMove's real dice-move GO crossing (the
+        // messages are byte-identical: "Growth vision: extra $X from GO!" /
+        // "Passed GO! Collect $X.") — only source/context ('card' instead of
+        // 'go') differs, so an event-stream consumer can still tell a
+        // card-teleport GO bonus apart from an ordinary move.
         if (getPassive(player) === 'idealist') {
           goBonus += RULES.passives.idealist.goBonus;
-          G.messages.push(`Growth vision: extra $${RULES.passives.idealist.goBonus} from GO!`);
+          logEvent(G, 'passive_triggered', player.id, { passive: 'idealist', effect: 'go_bonus', amount: RULES.passives.idealist.goBonus, context: 'card' });
         }
         player.money += goBonus;
-        G.messages.push(`Passed GO! Collect $${goBonus}.`);
+        logEvent(G, 'salary_collected', player.id, { source: 'card', amount: goBonus });
       }
+      logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'moveTo', text: card.text, effect: { targetSpaceId: card.value, targetSpaceName: G.board.spaces[card.value].name, passedGo, goBonus } });
       handleLanding(G, ctx);
       break;
     }
     case 'goToJail':
       sendToJail(G, player);
+      // No 'went_to_jail' event here: unlike the space-landing goToJail
+      // (handleLanding), the pre-migration code never pushed a "Go to Jail!"
+      // message for this card action (confirmed against the golden
+      // jail-cycle fixture — only the CHANCE draw line appears). went_to_jail's
+      // formatter unconditionally returns text, so emitting it here would
+      // inject a brand-new message and break byte-identity. card_applied is
+      // data-only for this action (formatter returns null).
+      logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'goToJail', text: card.text, effect: {} });
       break;
 
     // --- Enhanced card actions ---
@@ -640,13 +671,13 @@ function applyCard(G, ctx, player, card) {
       let amount = Math.floor(assets * card.value / 100);
       if (getPassive(player) === 'financier') {
         amount = Math.floor(amount * (1 - RULES.passives.financier.negativeEventReduction));
-        G.messages.push(`Financial expertise reduces loss to $${amount}.`);
+        logEvent(G, 'passive_triggered', player.id, { passive: 'financier', effect: 'loss_reduced', amount, context: 'payPercent' });
       }
       player.money -= amount;
       if (RULES.core.freeParkingPot) {
         G.freeParkingPot += amount;
       }
-      G.messages.push(`Total assets: $${assets}. Paid $${amount} (${card.value}%).`);
+      logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'payPercent', text: card.text, effect: { assets, amount, percent: card.value } });
       if (player.money <= 0) {
         handleBankruptcy(G, ctx, player, null);
       }
@@ -660,7 +691,7 @@ function applyCard(G, ctx, player, card) {
           p.money += card.value;
         }
       });
-      G.messages.push(`All players receive $${card.value}!`);
+      logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'gainAll', text: card.text, effect: { amount: card.value } });
       break;
     }
 
@@ -669,7 +700,7 @@ function applyCard(G, ctx, player, card) {
       const count = player.properties.length;
       const amount = card.value * count;
       player.money += amount;
-      G.messages.push(`${count} properties x $${card.value} = $${amount} earned!`);
+      logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'gainPerProperty', text: card.text, effect: { count, perProperty: card.value, amount } });
       break;
     }
 
@@ -694,9 +725,9 @@ function applyCard(G, ctx, player, card) {
         const pid = upgradeable[0];
         const level = (G.buildings[pid] || 0) + 1;
         G.buildings[pid] = level;
-        G.messages.push(`Free upgrade! ${G.board.spaces[pid].name} upgraded to ${RULES.buildings.names[level]}!`);
+        logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'freeUpgrade', text: card.text, effect: { outcome: 'upgraded', propertyId: pid, targetSpaceName: G.board.spaces[pid].name, newLevel: level, newLevelName: RULES.buildings.names[level] } });
       } else {
-        G.messages.push('No properties eligible for free upgrade.');
+        logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'freeUpgrade', text: card.text, effect: { outcome: 'none' } });
       }
       break;
     }
@@ -712,9 +743,9 @@ function applyCard(G, ctx, player, card) {
         G.buildings[pid]--;
         if (G.buildings[pid] === 0) delete G.buildings[pid];
         const newLevel = G.buildings[pid] || 0;
-        G.messages.push(`Market Crash! ${G.board.spaces[pid].name} downgraded to ${RULES.buildings.names[newLevel]}.`);
+        logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'downgrade', text: card.text, effect: { outcome: 'downgraded', propertyId: pid, targetSpaceName: G.board.spaces[pid].name, newLevel, newLevelName: RULES.buildings.names[newLevel] } });
       } else {
-        G.messages.push('No buildings to downgrade.');
+        logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'downgrade', text: card.text, effect: { outcome: 'none' } });
       }
       break;
     }
@@ -723,7 +754,7 @@ function applyCard(G, ctx, player, card) {
       // Force-buy opponent's cheapest property at X% price
       const opponents = G.players.filter(p => p.id !== player.id && !p.bankrupt && p.properties.length > 0);
       if (opponents.length === 0) {
-        G.messages.push('No opponents with properties for hostile takeover.');
+        logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'forceBuy', text: card.text, effect: { outcome: 'no_opponents' } });
         break;
       }
       // Find the cheapest property among all opponents
@@ -750,9 +781,9 @@ function applyCard(G, ctx, player, card) {
           player.properties.push(cheapestPid);
           G.ownership[cheapestPid] = player.id;
           // Transfer buildings & mortgage status
-          G.messages.push(`Hostile Takeover! Bought ${G.board.spaces[cheapestPid].name} from ${playerName(targetOwner)} for $${cost}!`);
+          logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'forceBuy', text: card.text, effect: { outcome: 'bought', propertyId: cheapestPid, targetSpaceName: G.board.spaces[cheapestPid].name, targetOwnerId: targetOwner.id, cost } });
         } else {
-          G.messages.push(`Can't afford hostile takeover ($${cost} needed).`);
+          logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'forceBuy', text: card.text, effect: { outcome: 'insufficient_funds', cost } });
         }
       }
       break;
@@ -1155,9 +1186,11 @@ export const Monopoly = {
     acceptCard: (G, ctx) => {
       if (!G.pendingCard) return INVALID_MOVE;
       const player = G.players[ctx.currentPlayer];
-      const card = G.pendingCard.card;
+      const { card, deck, cardIndex } = G.pendingCard;
       G.pendingCard = null;
-      applyCard(G, ctx, player, card);
+      // acceptCard itself never had a message of its own (pre-migration) —
+      // only applyCard's card_applied event/message follows.
+      applyCard(G, ctx, player, card, deck, cardIndex);
       // applyCard can chain a NEW pending card (atlas moveTo onto a card
       // space) — don't clobber it or the card phase.
       if (G.turnPhase !== 'card') {
@@ -1175,12 +1208,12 @@ export const Monopoly = {
         player.luckRedraws--;
       }
 
-      const deck = G.pendingCard.deck === 'chance' ? G.board.chanceCards : G.board.communityCards;
-      const deckName = G.pendingCard.deck === 'chance' ? 'CHANCE' : 'COMMUNITY CHEST';
+      const deckId = G.pendingCard.deck;
+      const deck = deckId === 'chance' ? G.board.chanceCards : G.board.communityCards;
       G.pendingCard = null;
-      const newCard = drawCard(ctx, deck);
-      G.messages.push(`Redraw! ${deckName}: ${newCard.text}`);
-      applyCard(G, ctx, player, newCard);
+      const { card: newCard, index: cardIndex } = drawCard(ctx, deck);
+      logEvent(G, 'card_redrawn', player.id, { deck: deckId, newText: newCard.text });
+      applyCard(G, ctx, player, newCard, deckId, cardIndex);
       // applyCard can chain a NEW pending card (atlas moveTo onto a card
       // space) — don't clobber it or the card phase.
       if (G.turnPhase !== 'card') {
