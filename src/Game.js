@@ -951,7 +951,11 @@ function resolveAuction(G, ctx) {
   // that cleanup can't corrupt state. Falls back to the same no-winner outcome
   // already used elsewhere (advanceAuction's all-passed branch, passAuction's
   // zero-active-bidders branch) — no new message shape.
-  if (!winner || winner.bankrupt) {
+  // Also guards a MERELY-POORER (not bankrupt) high bidder (final-review
+  // Fix 2): money can drop below the standing winning bid between placeBid
+  // and resolve (e.g. useReroll's salary-refund clawback) without crossing
+  // into bankruptcy. Same fallback: no winner, property stays unowned.
+  if (!winner || winner.bankrupt || winner.money < auction.currentBid) {
     logEvent(G, 'auction_ended', null, { propertyId: auction.propertyId, winnerId: null, amount: null });
     G.auction = null;
     G.turnPhase = 'done';
@@ -1663,6 +1667,38 @@ export const Monopoly = {
       const { proposerId, targetPlayerId, offeredProperties, requestedProperties, offeredMoney, requestedMoney } = G.trade;
       const proposer = G.players[proposerId];
       const target = G.players[targetPlayerId];
+
+      // Re-validate against CURRENT state (final-review Fix 1): mortgage/
+      // unmortgage aren't trade-gated, so between propose and accept either
+      // side's money or a traded property's ownership/building/mortgage
+      // status can have drifted from the snapshot proposeTrade validated at
+      // propose-time. Mirrors proposeTrade's checks exactly, for BOTH sides
+      // (ownership, no buildings, mortgage rule per RULES.trading, money >=
+      // the amount that side offered). A failure here is treated as an
+      // auto-cancel, not INVALID_MOVE: INVALID_MOVE would discard the
+      // G.trade = null cleanup along with everything else, stranding the
+      // seat envelope on a trade that can never again be accepted, rejected,
+      // or cancelled. Payload mirrors cancelTrade's normal-path shape
+      // ({targetPlayerId}) plus a reason field, same convention already used
+      // by handleBankruptcy's own auto-cancel (reason:'bankruptcy') — the
+      // formatter for 'trade_cancelled' is unconditional ('Trade
+      // cancelled.') and ignores payload shape entirely, so this stays
+      // byte-identical to the normal cancel line by construction.
+      const staleTrade =
+        offeredProperties.some(pid => G.ownership[pid] !== proposerId || (G.buildings[pid] || 0) > 0 || (!RULES.trading.allowMortgagedProperties && G.mortgaged[pid])) ||
+        requestedProperties.some(pid => G.ownership[pid] !== targetPlayerId || (G.buildings[pid] || 0) > 0 || (!RULES.trading.allowMortgagedProperties && G.mortgaged[pid])) ||
+        offeredMoney > proposer.money ||
+        requestedMoney > target.money;
+
+      if (staleTrade) {
+        logEvent(G, 'trade_cancelled', proposerId, { targetPlayerId, reason: 'stale' });
+        G.trade = null;
+        G.turnPhase = 'done';
+        if (G.enforceSeats) {
+          ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
+        }
+        return;
+      }
 
       // Transfer offered properties (proposer → target)
       for (const pid of offeredProperties) {

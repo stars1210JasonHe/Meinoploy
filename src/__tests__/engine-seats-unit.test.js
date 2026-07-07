@@ -27,6 +27,7 @@
 import { INVALID_MOVE } from 'boardgame.io/core';
 import { Client } from 'boardgame.io/client';
 import { Monopoly, requireActor } from '../Game';
+import { RULES } from '../../mods/dominion';
 
 // --- shared helpers (mirror engine-events-emit.test.js's own; not exported from there) ---
 
@@ -488,5 +489,151 @@ describe('activePlayers envelopes (Task 9, enforceSeats forced true)', () => {
 
     expect(G.auction).toBeNull();
     expect(ctx.events.setActivePlayers).toHaveBeenCalledWith({ currentPlayer: null });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Final-review Fix 1: acceptTrade re-validates against CURRENT state.
+//
+// proposeTrade validates ownership/buildings/mortgage/money once, at
+// propose-time, and snapshots the terms into G.trade. Mortgage/unmortgage
+// are NOT trade-gated, so a proposer (or target) can drain money or mortgage
+// an offered property between propose and accept. Without re-validation,
+// acceptTrade blindly executes the stale snapshot: a mortgaged property can
+// change hands despite RULES.trading.allowMortgagedProperties:false, and
+// proposer.money -= offeredMoney can go negative with no bankruptcy
+// processing. acceptTrade must re-check the same conditions proposeTrade
+// checked and, on failure, auto-cancel (not INVALID_MOVE — INVALID_MOVE
+// would discard the G.trade = null cleanup too).
+// ---------------------------------------------------------------------------
+describe('acceptTrade re-validation against current state (final-review Fix 1)', () => {
+  test('offered property mortgaged after propose -> auto-cancel, target unchanged, no negative money', () => {
+    const G = freshG();
+    G.ownership[1] = '0'; // Mediterranean Ave, owned by the proposer
+    G.players[0].properties.push(1);
+    G.players[0].money = 500;
+    G.players[1].money = 500;
+    G.trade = {
+      proposerId: '0', targetPlayerId: '1',
+      offeredProperties: [1], requestedProperties: [],
+      offeredMoney: 0, requestedMoney: 0,
+    };
+    G.turnPhase = 'trade';
+    // Drifted AFTER propose (mortgage isn't trade-gated) — the stale snapshot
+    // acceptTrade would otherwise blindly execute.
+    G.mortgaged[1] = true;
+    expect(RULES.trading.allowMortgagedProperties).toBe(false);
+
+    const targetPropertiesBefore = [...G.players[1].properties];
+    const targetMoneyBefore = G.players[1].money;
+    const proposerMoneyBefore = G.players[0].money;
+
+    const result = Monopoly.moves.acceptTrade(G, makeCtx('1'));
+
+    expect(result).not.toBe(INVALID_MOVE);
+    expect(G.trade).toBeNull();
+    // Target never receives the mortgaged property.
+    expect(G.players[1].properties).toEqual(targetPropertiesBefore);
+    expect(G.ownership[1]).toBe('0');
+    // No money moved either.
+    expect(G.players[1].money).toBe(targetMoneyBefore);
+    expect(G.players[0].money).toBe(proposerMoneyBefore);
+    expect(G.players[0].money).toBeGreaterThanOrEqual(0);
+
+    const cancelled = eventsOfType(G, 'trade_cancelled');
+    expect(cancelled).toHaveLength(1);
+    expect(cancelled[0].actor).toBe('0'); // proposer, mirroring cancelTrade's normal-path actor
+    expect(cancelled[0].data).toEqual({ targetPlayerId: '1', reason: 'stale' });
+    // Same unconditional formatter string as the normal cancel path.
+    expect(G.messages).toContain('Trade cancelled.');
+  });
+
+  test('proposer money drained below offeredMoney after propose -> auto-cancel, no negative money', () => {
+    const G = freshG();
+    G.players[0].money = 100;
+    G.players[1].money = 500;
+    G.trade = {
+      proposerId: '0', targetPlayerId: '1',
+      offeredProperties: [], requestedProperties: [],
+      offeredMoney: 80, requestedMoney: 0,
+    };
+    G.turnPhase = 'trade';
+    // Drifted AFTER propose (e.g. a mortgage payoff, a tax hit) — proposer no
+    // longer has the 80 they offered.
+    G.players[0].money = 20;
+
+    const result = Monopoly.moves.acceptTrade(G, makeCtx('1'));
+
+    expect(result).not.toBe(INVALID_MOVE);
+    expect(G.trade).toBeNull();
+    expect(G.players[0].money).toBe(20); // untouched — no debit applied
+    expect(G.players[0].money).toBeGreaterThanOrEqual(0);
+    expect(G.players[1].money).toBe(500); // target untouched
+
+    const cancelled = eventsOfType(G, 'trade_cancelled');
+    expect(cancelled).toHaveLength(1);
+    expect(cancelled[0].data).toEqual({ targetPlayerId: '1', reason: 'stale' });
+  });
+
+  test('happy path: nothing drifted -> accept still executes the trade normally', () => {
+    const G = freshG();
+    G.ownership[1] = '0';
+    G.players[0].properties.push(1);
+    G.players[0].money = 500;
+    G.players[1].money = 500;
+    G.trade = {
+      proposerId: '0', targetPlayerId: '1',
+      offeredProperties: [1], requestedProperties: [],
+      offeredMoney: 50, requestedMoney: 0,
+    };
+    G.turnPhase = 'trade';
+
+    const result = Monopoly.moves.acceptTrade(G, makeCtx('1'));
+
+    expect(result).not.toBe(INVALID_MOVE);
+    expect(G.trade).toBeNull();
+    expect(G.ownership[1]).toBe('1');
+    expect(G.players[1].properties).toContain(1);
+    expect(G.players[0].money).toBe(450); // proposer paid the 50 offeredMoney
+    expect(G.players[1].money).toBe(550); // target received it
+    expect(eventsOfType(G, 'trade_accepted')).toHaveLength(1);
+    expect(eventsOfType(G, 'trade_cancelled')).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Final-review Fix 2: resolveAuction re-checks the winner's money.
+//
+// The bankrupt-currentBidder case is already guarded (see the "STANDING HIGH
+// BIDDER going bankrupt" tests above). A merely-poorer high bidder — money
+// dropped below the winning bid via useReroll's salary-refund clawback, but
+// not enough to trigger bankruptcy — was NOT guarded: resolveAuction would
+// still debit winner.money -= currentBid and drive it negative. Must fall
+// back to the same no-winner (unowned) outcome as the bankrupt/no-bids paths.
+// ---------------------------------------------------------------------------
+describe('resolveAuction re-checks winner solvency (final-review Fix 2)', () => {
+  test('high bidder poorer than the winning bid at resolve -> unowned outcome, no negative money', () => {
+    const G = freshG();
+    G.players[0].money = 30; // less than the standing bid (50), but not bankrupt
+    G.auction = {
+      propertyId: 5, currentBid: 50, currentBidder: '0',
+      bidders: [
+        { playerId: '0', passed: false },
+        { playerId: '1', passed: false },
+      ],
+      currentBidderIndex: 1, // P1 on the clock
+    };
+
+    Monopoly.moves.passAuction(G, makeCtx('1')); // sole remaining bidder passes -> resolve
+
+    expect(G.ownership[5]).toBeNull();
+    expect(G.players[0].properties).not.toContain(5);
+    expect(G.players[0].money).toBe(30); // untouched — no debit applied, never goes negative
+    expect(G.auction).toBeNull();
+    const ended = eventsOfType(G, 'auction_ended');
+    expect(ended).toHaveLength(1);
+    expect(ended[0].data).toEqual({ propertyId: 5, winnerId: null, amount: null });
+    // Same byte-identical unowned line as the bankrupt/no-bids paths.
+    expect(G.messages).toContain('No bids. Reading Railroad remains unowned.');
   });
 });
