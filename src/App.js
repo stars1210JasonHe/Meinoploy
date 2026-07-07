@@ -8,7 +8,7 @@ import { PLAYER_COLORS, BUILDING_ICONS, BUILDING_NAMES, UPGRADE_COST_MULTIPLIERS
 import { RULES } from '../mods/active-rules';
 import { Lobby } from './Lobby';
 import { loadMap, getGridDimensions, positionsToGrid } from './map-loader';
-import { CharacterAI, EVENT_TYPES, VERBOSITY } from './character-ai';
+import { CharacterAI, VERBOSITY, mapEngineEventToAi, consumeNewEvents } from './character-ai';
 import { loadWorld } from './world-loader';
 import { routeChoices } from './atlas-movement';
 import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
@@ -187,8 +187,7 @@ class MonopolyBoard {
     this.aiResponses = [];
     this.chatHistories = {};
     this.activeChatCharId = null;
-    this._prevMessages = [];
-    this._prevSeasonIdx = undefined;
+    this._lastEventSeq = undefined;
 
     this.createLayout();
     this.showModeSelect();
@@ -2089,19 +2088,21 @@ class MonopolyBoard {
   }
 
   // ─────────────────────────────────────────────────────────
-  // AI event detection (unchanged logic)
+  // AI event detection — event-driven (lazy seq cursor over G.events;
+  // see mapEngineEventToAi/consumeNewEvents in character-ai.js and spec
+  // §2.4). String-sniffing over G.messages retired.
   // ─────────────────────────────────────────────────────────
   detectAndTriggerAI(G, ctx) {
     if (!this.characterAI.isEnabled()) return;
     if (G.phase !== 'play') return;
 
-    const currentMessages = G.messages.slice();
-    const prevMessages = this._prevMessages || [];
-    this._prevMessages = currentMessages;
-    const prevSeasonIndex = this._prevSeasonIdx;
-    this._prevSeasonIdx = G.seasonIndex;
-
-    if (prevMessages.length === 0 && currentMessages.length === 0) return;
+    // Lazy cursor: undefined on first sight of G.events (new game, load,
+    // exit-to-menu restart, mid-match online join) -> consumeNewEvents sets
+    // the cursor to the current max seq WITHOUT returning anything to fire,
+    // so none of those transitions replay old events as a reaction burst.
+    const { newEvents, nextSeq } = consumeNewEvents(G.events, this._lastEventSeq);
+    this._lastEventSeq = nextSeq;
+    if (newEvents.length === 0) return;
 
     const player = G.players[ctx.currentPlayer];
     const char = player.character;
@@ -2114,65 +2115,10 @@ class MonopolyBoard {
       propertyCount: player.properties.length,
     };
 
-    let newMessages = [];
-    if (currentMessages.length >= prevMessages.length &&
-        currentMessages.slice(0, prevMessages.length).every((m, i) => m === prevMessages[i])) {
-      newMessages = currentMessages.slice(prevMessages.length);
-    } else {
-      newMessages = currentMessages;
-    }
-
-    if (newMessages.length === 0 && G.seasonIndex === prevSeasonIndex) return;
-
-    for (const msg of newMessages) {
-      const lowerMsg = msg.toLowerCase();
-      let eventType = null;
-      let eventData = {};
-
-      if (lowerMsg.includes('rolled') && lowerMsg.includes('+')) {
-        eventType = EVENT_TYPES.ROLL_DICE;
-        if (G.lastDice) eventData = { d1: G.lastDice.d1, d2: G.lastDice.d2, total: G.lastDice.total, isDoubles: G.lastDice.isDoubles };
-      } else if (lowerMsg.includes('available') && (lowerMsg.includes('buy or pass') || lowerMsg.includes('listed'))) {
-        eventType = EVENT_TYPES.LAND_PROPERTY_BUY;
-        eventData = { spaceName: msg, price: 0, money: player.money };
-      } else if (lowerMsg.includes('bought') || lowerMsg.includes('purchased')) {
-        eventType = EVENT_TYPES.BUY_PROPERTY;
-        eventData = { spaceName: msg.split('bought ')[1] || msg };
-      } else if (lowerMsg.includes('paid') && lowerMsg.includes('rent')) {
-        eventType = EVENT_TYPES.LAND_PROPERTY_RENT;
-        eventData = { spaceName: msg, ownerName: '', rent: 0 };
-      } else if (lowerMsg.includes('tax')) {
-        eventType = EVENT_TYPES.PAY_TAX;
-        eventData = { amount: 0 };
-      } else if (lowerMsg.includes('drew a') || lowerMsg.includes('card:')) {
-        eventType = EVENT_TYPES.DRAW_CARD;
-        eventData = { cardText: msg };
-      } else if (lowerMsg.includes('sent to jail') || lowerMsg.includes('go to jail')) {
-        eventType = EVENT_TYPES.GO_TO_JAIL;
-        eventData = { reason: msg };
-      } else if (lowerMsg.includes('passed go') || lowerMsg.includes('collects')) {
-        eventType = EVENT_TYPES.PASS_GO;
-        eventData = { amount: RULES.core.goSalary };
-      } else if (lowerMsg.includes('upgraded') || lowerMsg.includes('built')) {
-        eventType = EVENT_TYPES.UPGRADE_PROPERTY;
-        eventData = { spaceName: msg };
-      } else if (lowerMsg.includes('auction')) {
-        eventType = EVENT_TYPES.AUCTION_START;
-        eventData = { spaceName: msg };
-      } else if (lowerMsg.includes('trade') && lowerMsg.includes('propos')) {
-        eventType = EVENT_TYPES.TRADE_PROPOSED;
-        eventData = { targetName: msg };
-      } else if (lowerMsg.includes('bankrupt')) {
-        eventType = EVENT_TYPES.BANKRUPTCY;
-        eventData = { playerName: msg };
-      }
-
-      if (eventType) this._triggerAIResponse(char, eventType, eventData, gameState);
-    }
-
-    if (prevSeasonIndex !== undefined && G.seasonIndex !== prevSeasonIndex) {
-      const newSeason = SEASONS[G.seasonIndex] ? SEASONS[G.seasonIndex].name : '';
-      this._triggerAIResponse(char, EVENT_TYPES.SEASON_CHANGE, { newSeason }, gameState);
+    for (const event of newEvents) {
+      const mapped = mapEngineEventToAi(event, G);
+      if (!mapped) continue;
+      this._triggerAIResponse(char, mapped.eventType, mapped.eventData, gameState);
     }
   }
 
@@ -2330,8 +2276,7 @@ class MonopolyBoard {
     this.aiResponses = [];
     this.chatHistories = {};
     this.activeChatCharId = null;
-    this._prevMessages = [];
-    this._prevSeasonIdx = undefined;
+    this._lastEventSeq = undefined;
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
     this.closeUiModal();
@@ -2393,8 +2338,7 @@ class MonopolyBoard {
     this.aiResponses = [];
     this.chatHistories = {};
     this.activeChatCharId = null;
-    this._prevMessages = [];
-    this._prevSeasonIdx = undefined;
+    this._lastEventSeq = undefined;
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
     const savedG = saveData.G;

@@ -1,5 +1,6 @@
 // CharacterAI — AI integration module for character responses and chat
 // Calls OpenAI API to generate in-character dialogue based on lore + game state
+import { playerName } from './events';
 
 // Event types that trigger AI responses
 export const EVENT_TYPES = {
@@ -40,6 +41,148 @@ export const VERBOSITY = {
   MAJOR: 'major',
   ALL: 'all',
 };
+
+// Human-readable labels for went_to_jail's data.reason ('space'/'triples'/'card')
+// — read by mapEngineEventToAi, not by the engine's own formatter (events.js
+// already has its own byte-identical G.messages strings for these reasons;
+// this is a separate, AI-prompt-facing phrasing).
+const JAIL_REASON_LABELS = {
+  space: 'Go To Jail space',
+  triples: 'Triple doubles',
+  card: 'a Chance/Community Chest card',
+};
+
+// Pure adapter: engine event (from G.events, shape {seq,turn,type,actor,data})
+// -> { eventType, eventData } for the AI's own EVENT_TYPES/​_formatEventContext,
+// or null when the engine type has no AI reaction (unmapped, or filtered by a
+// sub-condition like landing_notice's note or salary_collected's source).
+// G is read-only here — only used to resolve names/space labels off ids
+// already carried in the payload (never re-derives amounts from live state).
+export function mapEngineEventToAi(event, G) {
+  if (!event) return null;
+  const { type, actor, data } = event;
+
+  switch (type) {
+    case 'dice_rolled':
+      return {
+        eventType: EVENT_TYPES.ROLL_DICE,
+        eventData: { d1: data.d1, d2: data.d2, total: data.total, isDoubles: data.doubles },
+      };
+
+    // Only the 'available' note is a buy prompt — 'unaffordable'/'owned'/
+    // 'visiting_jail'/'parking_relax' carry no buy decision and must not
+    // trigger a LAND_PROPERTY_BUY reaction.
+    case 'landing_notice': {
+      if (data.note !== 'available') return null;
+      const space = G.board.spaces[data.propertyId];
+      const player = G.players[actor];
+      return {
+        eventType: EVENT_TYPES.LAND_PROPERTY_BUY,
+        eventData: { spaceName: space.name, price: data.effectivePrice, money: player ? player.money : 0 },
+      };
+    }
+
+    case 'rent_paid': {
+      const space = G.board.spaces[data.propertyId];
+      return {
+        eventType: EVENT_TYPES.LAND_PROPERTY_RENT,
+        eventData: { spaceName: space.name, ownerName: playerName(G.players[data.ownerId]), rent: data.amount },
+      };
+    }
+
+    case 'tax_paid':
+      return { eventType: EVENT_TYPES.PAY_TAX, eventData: { amount: data.amount } };
+
+    // data.empty (deck exhausted) still maps — the fallback text keeps the
+    // "You drew a card: ..." prompt coherent instead of interpolating undefined.
+    case 'card_drawn':
+      return {
+        eventType: EVENT_TYPES.DRAW_CARD,
+        eventData: { cardText: data.empty ? 'The deck is empty.' : data.text },
+      };
+
+    case 'went_to_jail':
+      return {
+        eventType: EVENT_TYPES.GO_TO_JAIL,
+        eventData: { reason: JAIL_REASON_LABELS[data.reason] || data.reason },
+      };
+
+    // Only the GO-crossing salary is a "passed GO" moment — hub/parking/card
+    // salary sources are real money but not this specific reaction.
+    case 'salary_collected': {
+      if (data.source !== 'go') return null;
+      return { eventType: EVENT_TYPES.PASS_GO, eventData: { amount: data.amount } };
+    }
+
+    case 'property_bought': {
+      const space = G.board.spaces[data.propertyId];
+      return { eventType: EVENT_TYPES.BUY_PROPERTY, eventData: { spaceName: space.name, price: data.paidPrice } };
+    }
+
+    case 'property_upgraded': {
+      const space = G.board.spaces[data.propertyId];
+      return {
+        eventType: EVENT_TYPES.UPGRADE_PROPERTY,
+        eventData: { spaceName: space.name, levelName: data.newLevelName, cost: data.cost },
+      };
+    }
+
+    case 'auction_started': {
+      const space = G.board.spaces[data.propertyId];
+      return { eventType: EVENT_TYPES.AUCTION_START, eventData: { spaceName: space.name } };
+    }
+
+    case 'trade_proposed':
+      return {
+        eventType: EVENT_TYPES.TRADE_PROPOSED,
+        eventData: { targetName: playerName(G.players[data.targetPlayerId]) },
+      };
+
+    case 'bankruptcy':
+      return {
+        eventType: EVENT_TYPES.BANKRUPTCY,
+        eventData: { playerName: playerName(G.players[actor]) },
+      };
+
+    case 'season_changed':
+      return { eventType: EVENT_TYPES.SEASON_CHANGE, eventData: { newSeason: data.seasonName } };
+
+    case 'game_over': {
+      const winnerId = data.result && data.result.winner;
+      const winnerName = (winnerId !== undefined && winnerId !== null) ? playerName(G.players[winnerId]) : '';
+      return { eventType: EVENT_TYPES.GAME_OVER, eventData: { winnerName } };
+    }
+
+    default:
+      return null;
+  }
+}
+
+// Pure cursor-advance helper for detectAndTriggerAI's lazy seq cursor
+// (App.js — a DOM-bound class method, so the cursor arithmetic is extracted
+// here to stay unit-testable). `events` is G.events (seq-monotonic, front-
+// trimmed at the cap); `lastSeq` is the caller's last-seen seq.
+//
+// lastSeq === undefined (first sight of G.events — new game, load, exit-to-
+// menu restart, mid-match online join) -> lazy-init: absorb everything
+// already present WITHOUT firing (newEvents: []), cursor set to the current
+// max seq (-1 if there are no events yet, so seq 0 is still "new" next call).
+//
+// Otherwise -> incremental: return events with seq > lastSeq, in order.
+// Trim-gap (lastSeq older than the oldest remaining seq, because the cap
+// trimmed everything in between) needs no special case: filtering by
+// seq > lastSeq already returns every event still present, which IS "skip to
+// oldest available" — there is nothing older left to skip past.
+export function consumeNewEvents(events, lastSeq) {
+  const list = events || [];
+  if (lastSeq === undefined) {
+    const nextSeq = list.length ? list[list.length - 1].seq : -1;
+    return { newEvents: [], nextSeq };
+  }
+  const newEvents = list.filter(e => e.seq > lastSeq);
+  const nextSeq = newEvents.length ? newEvents[newEvents.length - 1].seq : lastSeq;
+  return { newEvents, nextSeq };
+}
 
 export class CharacterAI {
   constructor(apiKey, options = {}) {

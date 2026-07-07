@@ -1,4 +1,4 @@
-const { CharacterAI, EVENT_TYPES, VERBOSITY } = require('../character-ai');
+const { CharacterAI, EVENT_TYPES, VERBOSITY, mapEngineEventToAi, consumeNewEvents } = require('../character-ai');
 
 // Mock character and lore data
 const mockCharacter = {
@@ -367,5 +367,187 @@ describe('VERBOSITY', () => {
     expect(VERBOSITY.OFF).toBe('off');
     expect(VERBOSITY.MAJOR).toBe('major');
     expect(VERBOSITY.ALL).toBe('all');
+  });
+});
+
+// --- Task 8: mapEngineEventToAi + consumeNewEvents (event-driven AI reactions) ---
+
+// Minimal G fixture: only what mapEngineEventToAi reads (G.board.spaces by
+// numeric id, G.players by string id, each with .money/.character.name).
+function makeG() {
+  const spaces = [];
+  spaces[0] = { id: 0, name: 'GO' };
+  spaces[5] = { id: 5, name: 'Park Place' };
+  spaces[10] = { id: 10, name: 'Boardwalk' };
+  return {
+    board: { spaces },
+    players: [
+      { id: '0', money: 1000, character: { name: 'Albert Victor' } },
+      { id: '1', money: 500, character: { name: 'Lia Frost' } },
+    ],
+  };
+}
+
+describe('mapEngineEventToAi', () => {
+  const G = makeG();
+
+  test('dice_rolled -> ROLL_DICE with real dice values (isDoubles renamed from data.doubles)', () => {
+    const result = mapEngineEventToAi({ seq: 1, type: 'dice_rolled', actor: '0', data: { d1: 3, d2: 4, total: 7, doubles: false } }, G);
+    expect(result).toEqual({ eventType: EVENT_TYPES.ROLL_DICE, eventData: { d1: 3, d2: 4, total: 7, isDoubles: false } });
+  });
+
+  test('landing_notice note:available -> LAND_PROPERTY_BUY with real spaceName/price/money', () => {
+    const result = mapEngineEventToAi(
+      { seq: 2, type: 'landing_notice', actor: '0', data: { note: 'available', propertyId: 5, listPrice: 350, effectivePrice: 315 } },
+      G
+    );
+    expect(result).toEqual({ eventType: EVENT_TYPES.LAND_PROPERTY_BUY, eventData: { spaceName: 'Park Place', price: 315, money: 1000 } });
+  });
+
+  test.each(['unaffordable', 'owned', 'visiting_jail', 'parking_relax'])(
+    'landing_notice note:%s -> null (not a buy prompt)',
+    (note) => {
+      const result = mapEngineEventToAi({ seq: 2, type: 'landing_notice', actor: '0', data: { note, propertyId: 5 } }, G);
+      expect(result).toBeNull();
+    }
+  );
+
+  test('rent_paid -> LAND_PROPERTY_RENT with ownerName resolved from G, not the placeholder \'\'', () => {
+    const result = mapEngineEventToAi({ seq: 3, type: 'rent_paid', actor: '0', data: { propertyId: 5, ownerId: '1', amount: 42 } }, G);
+    expect(result).toEqual({ eventType: EVENT_TYPES.LAND_PROPERTY_RENT, eventData: { spaceName: 'Park Place', ownerName: 'Lia Frost', rent: 42 } });
+  });
+
+  test('tax_paid -> PAY_TAX with the real amount, not 0', () => {
+    const result = mapEngineEventToAi({ seq: 4, type: 'tax_paid', actor: '0', data: { amount: 200, spaceId: 4 } }, G);
+    expect(result).toEqual({ eventType: EVENT_TYPES.PAY_TAX, eventData: { amount: 200 } });
+  });
+
+  test('card_drawn -> DRAW_CARD with the real card text', () => {
+    const result = mapEngineEventToAi({ seq: 5, type: 'card_drawn', actor: '0', data: { deck: 'chance', cardIndex: 2, text: 'Advance to GO', empty: false } }, G);
+    expect(result).toEqual({ eventType: EVENT_TYPES.DRAW_CARD, eventData: { cardText: 'Advance to GO' } });
+  });
+
+  test('card_drawn (empty deck) -> DRAW_CARD with a fallback cardText instead of undefined', () => {
+    const result = mapEngineEventToAi({ seq: 5, type: 'card_drawn', actor: '0', data: { deck: 'chance', cardIndex: null, text: null, empty: true } }, G);
+    expect(result.eventData.cardText).toBe('The deck is empty.');
+  });
+
+  test.each([
+    ['space', 'Go To Jail space'],
+    ['triples', 'Triple doubles'],
+    ['card', 'a Chance/Community Chest card'],
+  ])('went_to_jail reason:%s -> GO_TO_JAIL with a readable reason', (reason, expected) => {
+    const result = mapEngineEventToAi({ seq: 6, type: 'went_to_jail', actor: '0', data: { reason } }, G);
+    expect(result).toEqual({ eventType: EVENT_TYPES.GO_TO_JAIL, eventData: { reason: expected } });
+  });
+
+  test('salary_collected source:go -> PASS_GO with the real amount', () => {
+    const result = mapEngineEventToAi({ seq: 7, type: 'salary_collected', actor: '0', data: { source: 'go', amount: 200 } }, G);
+    expect(result).toEqual({ eventType: EVENT_TYPES.PASS_GO, eventData: { amount: 200 } });
+  });
+
+  test.each(['hub', 'parking', 'card'])('salary_collected source:%s -> null (only a GO crossing is "passed GO")', (source) => {
+    const result = mapEngineEventToAi({ seq: 7, type: 'salary_collected', actor: '0', data: { source, amount: 200 } }, G);
+    expect(result).toBeNull();
+  });
+
+  test('property_bought -> BUY_PROPERTY with real spaceName/price', () => {
+    const result = mapEngineEventToAi({ seq: 8, type: 'property_bought', actor: '0', data: { propertyId: 10, listPrice: 400, paidPrice: 400 } }, G);
+    expect(result).toEqual({ eventType: EVENT_TYPES.BUY_PROPERTY, eventData: { spaceName: 'Boardwalk', price: 400 } });
+  });
+
+  test('property_upgraded -> UPGRADE_PROPERTY with real spaceName/levelName/cost', () => {
+    const result = mapEngineEventToAi(
+      { seq: 9, type: 'property_upgraded', actor: '0', data: { propertyId: 5, newLevel: 2, newLevelName: 'Hotel', cost: 150 } },
+      G
+    );
+    expect(result).toEqual({ eventType: EVENT_TYPES.UPGRADE_PROPERTY, eventData: { spaceName: 'Park Place', levelName: 'Hotel', cost: 150 } });
+  });
+
+  test('auction_started -> AUCTION_START with real spaceName', () => {
+    const result = mapEngineEventToAi({ seq: 10, type: 'auction_started', actor: null, data: { propertyId: 10, bidders: ['0', '1'] } }, G);
+    expect(result).toEqual({ eventType: EVENT_TYPES.AUCTION_START, eventData: { spaceName: 'Boardwalk' } });
+  });
+
+  test('trade_proposed -> TRADE_PROPOSED with targetName resolved from G', () => {
+    const result = mapEngineEventToAi(
+      { seq: 11, type: 'trade_proposed', actor: '0', data: { targetPlayerId: '1', offeredProperties: [], requestedProperties: [], offeredMoney: 0, requestedMoney: 0 } },
+      G
+    );
+    expect(result).toEqual({ eventType: EVENT_TYPES.TRADE_PROPOSED, eventData: { targetName: 'Lia Frost' } });
+  });
+
+  test('bankruptcy -> BANKRUPTCY with playerName resolved from the actor (the bankrupt player)', () => {
+    const result = mapEngineEventToAi({ seq: 12, type: 'bankruptcy', actor: '1', data: { creditorId: '0' } }, G);
+    expect(result).toEqual({ eventType: EVENT_TYPES.BANKRUPTCY, eventData: { playerName: 'Lia Frost' } });
+  });
+
+  test('season_changed -> SEASON_CHANGE with the real season name (from the payload, no lookup needed)', () => {
+    const result = mapEngineEventToAi({ seq: 13, type: 'season_changed', actor: null, data: { seasonIndex: 1, seasonName: 'Autumn' } }, G);
+    expect(result).toEqual({ eventType: EVENT_TYPES.SEASON_CHANGE, eventData: { newSeason: 'Autumn' } });
+  });
+
+  test('game_over -> GAME_OVER with winnerName resolved from data.result.winner', () => {
+    const result = mapEngineEventToAi(
+      { seq: 14, type: 'game_over', actor: null, data: { result: { winner: '0', reason: 'survival', standings: [] } } },
+      G
+    );
+    expect(result).toEqual({ eventType: EVENT_TYPES.GAME_OVER, eventData: { winnerName: 'Albert Victor' } });
+  });
+
+  test.each([
+    'route_committed', 'moved', 'passive_triggered', 'property_passed', 'card_prompt',
+    'card_applied', 'card_redrawn', 'jail_fine_paid', 'left_jail', 'jail_wait',
+    'building_sold', 'property_mortgaged', 'property_unmortgaged', 'property_regulated',
+    'reroll_used', 'trade_accepted', 'trade_rejected', 'trade_cancelled', 'auction_turn',
+    'bid_placed', 'auction_passed', 'auction_ended', 'character_selected', 'jail_reminder',
+  ])('unmapped engine type %s -> null (no AI reaction)', (type) => {
+    const result = mapEngineEventToAi({ seq: 99, type, actor: '0', data: {} }, G);
+    expect(result).toBeNull();
+  });
+
+  test('null event -> null', () => {
+    expect(mapEngineEventToAi(null, G)).toBeNull();
+  });
+});
+
+describe('consumeNewEvents', () => {
+  function ev(seq) { return { seq, type: 'dice_rolled', actor: '0', data: { d1: 1, d2: 1, total: 2, doubles: true } }; }
+
+  test('lazy-init (lastSeq undefined) on a 50-event burst fires nothing and sets the cursor to the max seq', () => {
+    const events = Array.from({ length: 50 }, (_, i) => ev(i));
+    const { newEvents, nextSeq } = consumeNewEvents(events, undefined);
+    expect(newEvents).toEqual([]);
+    expect(nextSeq).toBe(49);
+  });
+
+  test('lazy-init on an empty G.events sets the cursor to -1 so seq 0 is still "new" next call', () => {
+    const { newEvents, nextSeq } = consumeNewEvents([], undefined);
+    expect(newEvents).toEqual([]);
+    expect(nextSeq).toBe(-1);
+  });
+
+  test('incremental: returns only events after lastSeq, in order, and advances the cursor', () => {
+    const events = [ev(0), ev(1), ev(2), ev(3)];
+    const { newEvents, nextSeq } = consumeNewEvents(events, 1);
+    expect(newEvents.map(e => e.seq)).toEqual([2, 3]);
+    expect(nextSeq).toBe(3);
+  });
+
+  test('incremental with nothing new since lastSeq: empty result, cursor unchanged', () => {
+    const events = [ev(0), ev(1)];
+    const { newEvents, nextSeq } = consumeNewEvents(events, 1);
+    expect(newEvents).toEqual([]);
+    expect(nextSeq).toBe(1);
+  });
+
+  test('trim-gap: cursor older than the oldest remaining seq consumes everything available, no error', () => {
+    // Simulates the eventLogCap having trimmed every seq below 100 from the
+    // front while the cursor was still sitting at 5 (a stale/very-behind
+    // cursor) — there is nothing to skip past, so all of it counts as new.
+    const events = [ev(100), ev(101), ev(102)];
+    const { newEvents, nextSeq } = consumeNewEvents(events, 5);
+    expect(newEvents.map(e => e.seq)).toEqual([100, 101, 102]);
+    expect(nextSeq).toBe(102);
   });
 });
