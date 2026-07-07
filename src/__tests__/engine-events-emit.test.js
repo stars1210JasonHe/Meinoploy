@@ -1033,6 +1033,17 @@ describe('bankruptcy + passive_triggered(arbitrageur) — harness (golden-covere
     });
     expect(arbitrage.seq).toBeGreaterThan(bankrupt[0].seq); // order preserved: bankruptcy first, bonus second
 
+    // Integration-tier: bankruptcy reaches gameover, fires exactly one game_over event
+    const gameOver = eventsOfType(G, 'game_over');
+    expect(gameOver).toHaveLength(1);
+    expect(gameOver[0].actor).toBeNull();
+    expect(gameOver[0].data.result).toBeDefined();
+    expect(gameOver[0].data.result.winner).toBe('1');
+    expect(gameOver[0].data.result.reason).toBe('survival');
+    // event-only: formatter returns null, so the last message is still the bankruptcy line
+    const lastMessage = G.messages[G.messages.length - 1];
+    expect(lastMessage).toMatch(/BANKRUPT|crisis arbitrage/);
+
     expect(G.messages).toEqual(expect.arrayContaining([
       'Marcus Grayline is BANKRUPT!',
       `Sophia Ember gains $${RULES.passives.arbitrageur.bankruptcyBonus} from crisis arbitrage!`,
