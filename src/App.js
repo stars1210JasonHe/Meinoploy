@@ -2399,7 +2399,7 @@ class MonopolyBoard {
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
     const savedG = saveData.G;
     // _resumeLoad: tells turn.onBegin to skip the turn/season bump on the first turn after load.
-    const LoadedGame = { ...Monopoly, setup: () => ({ ...savedG, _resumeLoad: true }) };
+    const LoadedGame = { ...Monopoly, setup: () => ({ ...savedG, events: savedG.events || [], eventSeq: savedG.eventSeq || 0, enforceSeats: savedG.enforceSeats || false, _resumeLoad: true }) };
     this.client = Client({ game: LoadedGame, numPlayers: saveData.numPlayers, debug: false });
     this.client.start();
     this.client.subscribe(state => this.update(state));
