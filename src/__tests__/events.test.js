@@ -1,6 +1,10 @@
 import { ENGINE_EVENTS, logEvent, resetMessages, formatEventMessage } from '../events';
 
-const freshG = () => ({ events: [], eventSeq: 0, messages: [], totalTurns: 3 });
+// players: minimal stub so real formatter branches (added by the migration
+// tasks) can resolve `G.players[actor]` for playerName lookups without
+// throwing — this fixture predates any real branch (Task 1 wrote it when
+// formatEventMessage always returned null).
+const freshG = () => ({ events: [], eventSeq: 0, messages: [], totalTurns: 3, players: [{ id: '0' }, { id: '1' }] });
 
 describe('logEvent', () => {
   test('appends event with seq/turn and (when formatter knows the type) a message', () => {

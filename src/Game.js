@@ -6,6 +6,7 @@ import { RULES } from '../mods/active-rules';
 import { MODS, PRISTINE } from '../mods/index';
 import { deepMerge, DEFAULT_RULES } from './mod-loader';
 import { refreshConstants } from './constants';
+import { logEvent, resetMessages, playerName } from './events';
 
 // Active map data — defaults to classic mod, can be overridden via setActiveMap().
 // Per-match board config is snapshotted into G.board at setup(); all engine readers
@@ -175,11 +176,6 @@ export function computeAffinityBonus(char, traits) {
 
 function getPassive(player) {
   return player.character ? player.character.passive.id : null;
-}
-
-function playerName(player) {
-  if (player.character) return player.character.name;
-  return `Player ${parseInt(player.id) + 1}`;
 }
 
 function ownsColorGroup(G, playerId, color) {
@@ -381,10 +377,10 @@ function payHubSalary(G, player) {
   let salary = Math.floor(applyEconMods(G, 'income', RULES.core.goSalary));
   if (getPassive(player) === 'idealist') {
     salary += RULES.passives.idealist.goBonus;
-    G.messages.push(`Growth vision: extra $${RULES.passives.idealist.goBonus} at the hub!`);
+    logEvent(G, 'passive_triggered', player.id, { passive: 'idealist', effect: 'go_bonus', amount: RULES.passives.idealist.goBonus, context: 'hub' });
   }
   player.money += salary;
-  G.messages.push(`${playerName(player)} passes a capital hub! Collect $${salary}.`);
+  logEvent(G, 'salary_collected', player.id, { source: 'hub', amount: salary });
   return salary;
 }
 
@@ -408,7 +404,7 @@ function atlasWalk(G, player, dice, route) {
     }
   });
   if (steps.length < dice.total) {
-    G.messages.push('No path forward — the route ends here.');
+    logEvent(G, 'moved', player.id, { from: dice.preRollPosition, to: player.position, passedGo: false, routeExhausted: true });
   }
   G.lastDice.salaryCollected = salaryCollected;
   return true;
@@ -430,6 +426,8 @@ function sendToJail(G, player) {
 function handleLanding(G, ctx) {
   const player = G.players[ctx.currentPlayer];
   const space = G.board.spaces[player.position];
+  // Still used by the chance/community cases below (card sites — out of scope
+  // for this slice, migrated by the cards+passives task) so the alias stays.
   const messages = G.messages;
 
   switch (space.type) {
@@ -445,24 +443,20 @@ function handleLanding(G, ctx) {
         if (player.money >= effectivePrice) {
           G.canBuy = true;
           G.effectivePrice = effectivePrice;
-          if (effectivePrice < space.price) {
-            messages.push(`${space.name} available! Listed $${space.price}, your price $${effectivePrice}. Buy or pass?`);
-          } else {
-            messages.push(`${space.name} is available for $${effectivePrice}. Buy or pass?`);
-          }
+          logEvent(G, 'moved', ctx.currentPlayer, { note: 'available', propertyId: space.id, listPrice: space.price, effectivePrice });
         } else {
-          messages.push(`${space.name} costs $${getEffectiveBuyPrice(G, player, space)} but you only have $${player.money}.`);
+          logEvent(G, 'moved', ctx.currentPlayer, { note: 'unaffordable', propertyId: space.id, price: getEffectiveBuyPrice(G, player, space), playerMoney: player.money });
         }
       } else if (owner !== ctx.currentPlayer) {
         const rent = calculateRent(G, space, G.lastDice.total, player);
         player.money -= rent;
         G.players[owner].money += rent;
-        messages.push(`Paid $${rent} rent to ${playerName(G.players[owner])} for ${space.name}.`);
+        logEvent(G, 'rent_paid', ctx.currentPlayer, { propertyId: space.id, ownerId: owner, amount: rent });
         if (player.money <= 0) {
           handleBankruptcy(G, ctx, player, owner);
         }
       } else {
-        messages.push(`You own ${space.name}.`);
+        logEvent(G, 'moved', ctx.currentPlayer, { note: 'owned', propertyId: space.id });
       }
       break;
     }
@@ -474,13 +468,13 @@ function handleLanding(G, ctx) {
       // Albert Victor passive: financial negative event loss reduction
       if (getPassive(player) === 'financier') {
         taxAmount = Math.floor(taxAmount * (1 - RULES.passives.financier.negativeEventReduction));
-        messages.push(`Financial expertise reduces tax to $${taxAmount}.`);
+        logEvent(G, 'passive_triggered', ctx.currentPlayer, { passive: 'financier', effect: 'loss_reduced', amount: taxAmount, context: 'tax' });
       }
       player.money -= taxAmount;
       if (RULES.core.freeParkingPot) {
         G.freeParkingPot += taxAmount;
       }
-      messages.push(`Paid $${taxAmount} in ${space.name}.`);
+      logEvent(G, 'tax_paid', ctx.currentPlayer, { amount: taxAmount, spaceId: space.id });
       if (player.money <= 0) {
         handleBankruptcy(G, ctx, player, null);
       }
@@ -528,20 +522,20 @@ function handleLanding(G, ctx) {
 
     case 'goToJail':
       sendToJail(G, player);
-      messages.push('Go to Jail!');
+      logEvent(G, 'went_to_jail', ctx.currentPlayer, { reason: 'space' });
       break;
 
     case 'jail':
-      messages.push('Just visiting jail.');
+      logEvent(G, 'moved', ctx.currentPlayer, { note: 'visiting_jail' });
       break;
 
     case 'parking':
       if (RULES.core.freeParkingPot && G.freeParkingPot > 0) {
         player.money += G.freeParkingPot;
-        messages.push(`Free Parking jackpot! Collected $${G.freeParkingPot}!`);
+        logEvent(G, 'salary_collected', ctx.currentPlayer, { source: 'parking', amount: G.freeParkingPot });
         G.freeParkingPot = 0;
       } else {
-        messages.push('Free Parking - relax!');
+        logEvent(G, 'moved', ctx.currentPlayer, { note: 'parking_relax' });
       }
       break;
   }
@@ -856,13 +850,14 @@ function rollAndResolveJail(G, ctx) {
   dice.salaryCollected = 0;
   G.lastDice = dice;
   G.hasRolled = true;
-  G.messages = [`${playerName(player)} rolled ${dice.d1} + ${dice.d2} = ${dice.total}`];
+  resetMessages(G);
+  logEvent(G, 'dice_rolled', ctx.currentPlayer, { d1: dice.d1, d2: dice.d2, total: dice.total, doubles: dice.isDoubles });
 
   if (dice.isDoubles) {
     G.doublesCount++;
     if (G.doublesCount >= RULES.core.doublesJailThreshold) {
       sendToJail(G, player);
-      G.messages.push('Triple doubles! Go to Jail!');
+      logEvent(G, 'went_to_jail', ctx.currentPlayer, { reason: 'triples' });
       G.turnPhase = 'done';
       return 'done';
     }
@@ -874,21 +869,21 @@ function rollAndResolveJail(G, ctx) {
     if (dice.isDoubles) {
       player.inJail = false;
       player.jailTurns = 0;
-      G.messages.push('Doubles! You\'re free from jail!');
+      logEvent(G, 'left_jail', ctx.currentPlayer, { how: 'doubles' });
     } else {
       player.jailTurns++;
       if (player.jailTurns >= RULES.core.jailMaxTurns) {
         player.money -= RULES.core.jailFine;
         player.inJail = false;
         player.jailTurns = 0;
-        G.messages.push(`${RULES.core.jailMaxTurns} turns in jail. Paid $${RULES.core.jailFine} fine.`);
+        logEvent(G, 'left_jail', ctx.currentPlayer, { how: 'served', maxTurns: RULES.core.jailMaxTurns, fine: RULES.core.jailFine });
         if (player.money <= 0) {
           handleBankruptcy(G, ctx, player, null);
           G.turnPhase = 'done';
           return 'done';
         }
       } else {
-        G.messages.push(`Still in jail. Turn ${player.jailTurns}/${RULES.core.jailMaxTurns}.`);
+        logEvent(G, 'left_jail', ctx.currentPlayer, { how: 'waiting', maxTurns: RULES.core.jailMaxTurns });
         G.turnPhase = 'done';
         return 'done';
       }
@@ -902,6 +897,7 @@ function rollAndResolveJail(G, ctx) {
 function performMove(G, ctx, route) {
   const player = G.players[ctx.currentPlayer];
   const dice = G.lastDice;
+  let passedGo = false;
   if (G.board.movementMode === 'atlas') {
     if (!atlasWalk(G, player, dice, route)) return false;
   } else {
@@ -911,19 +907,20 @@ function performMove(G, ctx, route) {
     player.distanceTraveled = (player.distanceTraveled || 0) + dice.total;
 
     if (player.position < oldPos && G.board.spaces[player.position].type !== 'goToJail') {
+      passedGo = true;
       let goBonus = Math.floor(applyEconMods(G, 'income', RULES.core.goSalary));
       // Mira Dawnlight passive: GO bonus
       if (getPassive(player) === 'idealist') {
         goBonus += RULES.passives.idealist.goBonus;
-        G.messages.push(`Growth vision: extra $${RULES.passives.idealist.goBonus} from GO!`);
+        logEvent(G, 'passive_triggered', ctx.currentPlayer, { passive: 'idealist', effect: 'go_bonus', amount: RULES.passives.idealist.goBonus, context: 'go' });
       }
       player.money += goBonus;
       G.lastDice.salaryCollected = goBonus;
-      G.messages.push(`Passed GO! Collect $${goBonus}.`);
+      logEvent(G, 'salary_collected', ctx.currentPlayer, { source: 'go', amount: goBonus });
     }
   }
 
-  G.messages.push(`Landed on ${G.board.spaces[player.position].name}.`);
+  logEvent(G, 'moved', ctx.currentPlayer, { from: dice.preRollPosition, to: player.position, passedGo });
   handleLanding(G, ctx);
 
   // Set turnPhase based on what happened
@@ -987,6 +984,8 @@ export const Monopoly = {
       freeParkingPot: 0,
       victory: resolveVictory(),
       _resumeLoad: false, // one-shot: set true by loadGame so the first onBegin doesn't bump turn/season
+      events: [],   // typed engine event log — see src/events.js (logEvent/resetMessages)
+      eventSeq: 0,  // monotonic sequence counter for G.events, never reset in a match
     };
   },
 
@@ -1071,7 +1070,8 @@ export const Monopoly = {
       const allSelected = G.players.every(p => p.character !== null);
       if (allSelected) {
         G.phase = 'play';
-        G.messages = ['All characters selected! Game begins! ' + playerName(G.players[0]) + ' rolls first.'];
+        resetMessages(G);
+        logEvent(G, 'character_selected', null, { allSelected: true });
       }
 
       ctx.events.endTurn();
@@ -1369,14 +1369,15 @@ export const Monopoly = {
       if (G.hasRolled) return INVALID_MOVE;
 
       if (player.money < RULES.core.jailFine) {
-        G.messages.push(`Not enough money to pay $${RULES.core.jailFine} fine!`);
+        logEvent(G, 'jail_fine_paid', ctx.currentPlayer, { fine: RULES.core.jailFine, failed: true });
         return INVALID_MOVE;
       }
 
       player.money -= RULES.core.jailFine;
       player.inJail = false;
       player.jailTurns = 0;
-      G.messages = [`${playerName(player)} paid $${RULES.core.jailFine} to get out of jail.`];
+      resetMessages(G);
+      logEvent(G, 'jail_fine_paid', ctx.currentPlayer, { fine: RULES.core.jailFine });
     },
 
     // --- Trading ---
