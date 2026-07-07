@@ -407,11 +407,32 @@ function handleBankruptcy(G, ctx, player, creditorId) {
     }
   }
 
-  // Bankruptcy during a pending auction: advanceAuction's own bidder filter
-  // (below) skips bankrupt bidders whenever the ROTATION reaches them, but if
-  // the bankrupt player IS the bidder currently on the clock (currentBidderIndex),
-  // they can no longer placeBid/passAuction to move the rotation along — advance
-  // immediately so the auction doesn't stall forever.
+  // Bankruptcy during a pending auction, part 1: the bankrupt player can be
+  // the STANDING HIGH BIDDER (G.auction.currentBidder) without being the
+  // bidder currently on the clock (currentBidderIndex) — e.g. they bid, the
+  // rotation moved on to another bidder, and THEN a same-turn refund (e.g.
+  // useReroll's salary clawback, guarded only by ctx.currentPlayer, not by
+  // "is the acting bidder") bankrupts them. advanceAuction's bankrupt-skip
+  // only guards the ROTATION, so a bankrupt currentBidder would otherwise
+  // still be handed the property once the remaining bidders pass. Clear the
+  // high bid back to its pre-bid state (mirrors passProperty's auction init:
+  // currentBid: 0, currentBidder: null) so bidding effectively restarts among
+  // the live bidders. No new message: this is bid-state cleanup, not a
+  // player-facing event, and no golden fixture exercises this interleaving.
+  if (G.auction && G.auction.currentBidder === player.id) {
+    G.auction.currentBidder = null;
+    G.auction.currentBid = 0;
+  }
+
+  // Bankruptcy during a pending auction, part 2: advanceAuction's own bidder
+  // filter (below) skips bankrupt bidders whenever the ROTATION reaches them,
+  // but if the bankrupt player IS the bidder currently on the clock
+  // (currentBidderIndex), they can no longer placeBid/passAuction to move the
+  // rotation along — advance immediately so the auction doesn't stall
+  // forever. Runs AFTER the currentBidder cleanup above so, if the bankrupt
+  // player happened to be both the acting bidder and the standing high
+  // bidder, advanceAuction's "all passed" fallback (which resolves to
+  // auction.currentBidder when non-null) can no longer resolve to them.
   if (G.auction) {
     const actingBidder = G.auction.bidders[G.auction.currentBidderIndex];
     if (actingBidder && actingBidder.playerId === player.id) {
@@ -921,6 +942,24 @@ function advanceAuction(G, ctx) {
 function resolveAuction(G, ctx) {
   const auction = G.auction;
   const winner = G.players[auction.currentBidder];
+
+  // Defensive second layer (Task 9 interleaving guard): a bankrupt player must
+  // never receive the property or have their (already-zeroed) money driven
+  // further negative. handleBankruptcy clears auction.currentBidder the
+  // instant its owner goes bankrupt, so `winner` should never be missing or
+  // bankrupt here — this guard exists purely so a future call site that skips
+  // that cleanup can't corrupt state. Falls back to the same no-winner outcome
+  // already used elsewhere (advanceAuction's all-passed branch, passAuction's
+  // zero-active-bidders branch) — no new message shape.
+  if (!winner || winner.bankrupt) {
+    logEvent(G, 'auction_ended', null, { propertyId: auction.propertyId, winnerId: null, amount: null });
+    G.auction = null;
+    G.turnPhase = 'done';
+    if (G.enforceSeats) {
+      ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
+    }
+    return;
+  }
 
   winner.money -= auction.currentBid;
   winner.properties.push(auction.propertyId);

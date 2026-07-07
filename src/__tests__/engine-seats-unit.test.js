@@ -250,6 +250,90 @@ describe('advanceAuction skips bankrupt bidders (Task 9 interleaving fix)', () =
     expect(G.auction).not.toBeNull(); // one live bidder ('1') remains — not resolved/ended
     expect(G.auction.currentBidderIndex).toBe(1); // advanced off the now-bankrupt acting bidder
   });
+
+  // Reviewer-traced defect: P0 is a bidder AND ctx.currentPlayer for the
+  // whole turn. P0 places the high bid (auction.currentBidder = '0'), the
+  // rotation moves on to P1 (currentBidderIndex now points at P1, NOT P0), and
+  // THEN P0 calls useReroll — legal, since useReroll is guarded only by
+  // requireActor(ctx.currentPlayer), not by "is the acting bidder". The
+  // salary refund bankrupts P0 while P0 is not the acting bidder, so the
+  // pre-existing acting-bidder-advance check alone would never fire, leaving
+  // auction.currentBidder pointing at a bankrupt player. If the sole
+  // remaining live bidder (P1) then passes, resolveAuction must NOT hand the
+  // property to bankrupt P0.
+  test('the STANDING HIGH BIDDER going bankrupt (not the acting bidder) cannot win the auction', () => {
+    const G = freshG();
+    G.players[0].rerollsLeft = 1;
+    G.hasRolled = true;
+    G.lastDice = { d1: 1, d2: 2, total: 3, preRollPosition: 0, preRollDistance: 0, salaryCollected: 10 };
+    G.players[0].money = 5; // refund (10) will bankrupt P0 (5 - 10 <= 0)
+    G.auction = {
+      propertyId: 5, currentBid: 50, currentBidder: '0', // P0 is the standing high bidder
+      bidders: [
+        { playerId: '0', passed: false },
+        { playerId: '1', passed: false }, // rotation has already moved on to P1
+      ],
+      currentBidderIndex: 1, // P1 is on the clock, NOT P0
+    };
+
+    Monopoly.moves.useReroll(G, makeCtx('0'));
+
+    expect(G.players[0].bankrupt).toBe(true);
+    expect(G.players[0].money).toBe(0); // handleBankruptcy zeroes it; no further debit ever applied
+    // (a) the bankrupt player is no longer the standing high bidder
+    expect(G.auction.currentBidder).not.toBe('0');
+    expect(G.auction.currentBidder).toBeNull();
+    expect(G.auction.currentBid).toBe(0);
+    // P1 was left untouched (still on the clock, hasn't acted) — rotation
+    // wasn't force-advanced, since P0 wasn't blocking it.
+    expect(G.auction.currentBidderIndex).toBe(1);
+
+    // Drive the auction to resolution: the only live bidder (P1) passes.
+    Monopoly.moves.passAuction(G, makeCtx('1'));
+
+    // (b) bankrupt P0 never receives the property, and money never goes
+    // further negative than the zero handleBankruptcy already set.
+    expect(G.ownership[5]).not.toBe('0');
+    expect(G.players[0].properties).not.toContain(5);
+    expect(G.players[0].money).toBe(0);
+    // (c) the auction ends in the unowned (no-winner) outcome.
+    expect(G.auction).toBeNull();
+    expect(G.ownership[5]).toBeNull();
+    const ended = eventsOfType(G, 'auction_ended');
+    expect(ended).toHaveLength(1);
+    expect(ended[0].data).toEqual({ propertyId: 5, winnerId: null, amount: null });
+  });
+
+  // Defensive second layer (resolveAuction's own bankrupt-winner guard):
+  // proves the guard holds even when a bankrupt currentBidder reaches
+  // resolveAuction WITHOUT going through handleBankruptcy's cleanup (e.g. a
+  // future call site that misses it). P0 is marked bankrupt directly, still
+  // sitting as auction.currentBidder — resolveAuction must refuse to award
+  // the property rather than relying solely on the handleBankruptcy cleanup.
+  test('resolveAuction refuses to award a bankrupt currentBidder even if the cleanup step is bypassed', () => {
+    const G = Monopoly.setup({ numPlayers: 2, playOrder: ['0', '1'] });
+    G.phase = 'play';
+    const moneyBefore = G.players[0].money;
+    G.players[0].bankrupt = true; // bypasses handleBankruptcy's currentBidder cleanup entirely
+    G.auction = {
+      propertyId: 8, currentBid: 80, currentBidder: '0', // still points at the bankrupt player (id 8 = Vermont Ave, an ownable property)
+      bidders: [
+        { playerId: '0', passed: false },
+        { playerId: '1', passed: false },
+      ],
+      currentBidderIndex: 1, // P1 on the clock
+    };
+
+    Monopoly.moves.passAuction(G, makeCtx('1'));
+
+    expect(G.ownership[8]).toBeNull();
+    expect(G.players[0].properties).not.toContain(8);
+    expect(G.players[0].money).toBe(moneyBefore); // untouched — no debit applied
+    expect(G.auction).toBeNull();
+    const ended = eventsOfType(G, 'auction_ended');
+    expect(ended).toHaveLength(1);
+    expect(ended[0].data).toEqual({ propertyId: 8, winnerId: null, amount: null });
+  });
 });
 
 describe('hot-seat inertness (Task 9): guards are no-ops when enforceSeats is false', () => {
