@@ -1018,6 +1018,7 @@ export const Monopoly = {
       _resumeLoad: false, // one-shot: set true by loadGame so the first onBegin doesn't bump turn/season
       events: [],   // typed engine event log — see src/events.js (logEvent/resetMessages)
       eventSeq: 0,  // monotonic sequence counter for G.events, never reset in a match
+      enforceSeats: false,  // seat enforcement toggle (configured in Task 9)
     };
   },
 

@@ -83,6 +83,7 @@ function atlasG() {
 describe('dice_rolled', () => {
   test('payload {d1,d2,total,doubles}; actor is the roller', () => {
     const G = freshG();
+    expect(G.enforceSeats).toBe(false);
     Monopoly.moves.rollDice(G, makeCtx('0', 1, 2)); // non-double, total 3 -> Baltic Ave
     const rolls = eventsOfType(G, 'dice_rolled');
     expect(rolls).toHaveLength(1);
