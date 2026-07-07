@@ -24,6 +24,7 @@ const TYPE_LIST = [
   'reroll_used', 'trade_proposed', 'trade_accepted', 'trade_rejected',
   'trade_cancelled', 'auction_started', 'auction_turn', 'bid_placed',
   'auction_passed', 'auction_ended', 'bankruptcy', 'season_changed', 'game_over',
+  'jail_reminder',
 ];
 export const ENGINE_EVENTS = Object.freeze(Object.fromEntries(TYPE_LIST.map(t => [t, t])));
 
@@ -78,6 +79,14 @@ export function formatEventMessage(type, actor, data, G) {
       if (data.failed) return `Not enough money to pay $${data.fine} fine!`;
       return `${playerName(G.players[actor])} paid $${data.fine} to get out of jail.`;
     }
+
+    // Per-turn reminder (Game.js turn.onBegin) shown to a still-jailed player
+    // BEFORE they roll, offering to pay the fine or try for doubles. Distinct
+    // from 'jail_wait' (fired AFTER a roll that fails to escape jail, mid-turn,
+    // with a turn-count progress line) — different string, different
+    // lifecycle point, hence its own dedicated type rather than a reuse.
+    case 'jail_reminder':
+      return `${playerName(G.players[actor])} is in jail. Pay $${data.fine} or try to roll doubles.`;
 
     // Homogeneous movement events only: the unconditional "Landed on X" (every
     // move) and the atlas dead-end notice. Both payload shapes carry
@@ -139,6 +148,13 @@ export function formatEventMessage(type, actor, data, G) {
         // — identical text for both card actions, so no per-context branch.
         if (data.context === 'tax') return `Financial expertise reduces tax to $${data.amount}.`;
         return `Financial expertise reduces loss to $${data.amount}.`;
+      }
+      // Sophia Ember (arbitrageur): bonus paid to every other non-bankrupt
+      // arbitrageur when a player goes bankrupt (Game.js handleBankruptcy).
+      // Logged AFTER the bankrupt player's own 'bankruptcy' event, same order
+      // as the original G.messages.push calls.
+      if (data.passive === 'arbitrageur' && data.effect === 'bankruptcy_bonus') {
+        return `${playerName(G.players[actor])} gains $${data.amount} from crisis arbitrage!`;
       }
       return null;
     }
@@ -205,12 +221,56 @@ export function formatEventMessage(type, actor, data, G) {
       return `Redraw! ${label}: ${data.newText}`;
     }
 
-    // Only the all-selected transition (Game.js selectCharacter) is migrated by
-    // this slice; the per-player join message (Task 5) adds another branch here.
+    // Two sub-shapes on one type: the per-player join line (this slice, actor =
+    // the selecting player, data.allSelected absent) and the all-selected
+    // transition (slice 1, actor null, data:{allSelected:true}). Both fire in
+    // the same selectCharacter move — the join line first, then (only after
+    // the LAST player selects) resetMessages() clears the per-turn buffer
+    // before the transition line is logged, so only the transition line
+    // survives into G.messages on that final call (see task-5-report.md).
     case 'character_selected':
-      return data.allSelected
-        ? `All characters selected! Game begins! ${playerName(G.players[0])} rolls first.`
-        : null;
+      if (data.allSelected) return `All characters selected! Game begins! ${playerName(G.players[0])} rolls first.`;
+      return data.affinityBonus > 0
+        ? `${playerName(G.players[actor])} joins the game! ($${data.money}, +$${data.affinityBonus} world affinity)`
+        : `${playerName(G.players[actor])} joins the game! ($${data.money})`;
+
+    case 'property_bought':
+      return `Bought ${G.board.spaces[data.propertyId].name} for $${data.paidPrice}!`;
+
+    case 'property_passed':
+      return 'Passed on buying.';
+
+    case 'property_upgraded':
+      return `Built ${data.newLevelName} on ${G.board.spaces[data.propertyId].name} for $${data.cost}!`;
+
+    case 'property_mortgaged':
+      return `Mortgaged ${G.board.spaces[data.propertyId].name} for $${data.amount}.`;
+
+    case 'property_unmortgaged':
+      return `Unmortgaged ${G.board.spaces[data.propertyId].name} for $${data.cost}.`;
+
+    // soldLevel (the level just sold off) is newLevel+1 — building_sold always
+    // fires after decrementing by exactly one level, so this is safe
+    // arithmetic, not a lookup into any mutable state (RULES.buildings.names
+    // is static config, already imported here).
+    case 'building_sold': {
+      const soldLevel = data.newLevel + 1;
+      return `Sold ${RULES.buildings.names[soldLevel]} on ${G.board.spaces[data.propertyId].name} for $${data.refund}. Now: ${RULES.buildings.names[data.newLevel]}.`;
+    }
+
+    case 'property_regulated':
+      return `${playerName(G.players[actor])} regulates ${G.board.spaces[data.propertyId].name}! (+${RULES.passives.enforcer.regulatedRentBonus * 100}% rent)`;
+
+    case 'reroll_used':
+      return `${playerName(G.players[actor])} uses a reroll! (${data.rerollsLeft} left)`;
+
+    case 'season_changed': {
+      const season = RULES.seasons.list[data.seasonIndex];
+      return `${season.icon} Season changed to ${season.name}!`;
+    }
+
+    case 'bankruptcy':
+      return `${playerName(G.players[actor])} is BANKRUPT!`;
 
     default:
       return null;

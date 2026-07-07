@@ -345,7 +345,7 @@ function calculateRent(G, space, diceTotal, visitor) {
 function handleBankruptcy(G, ctx, player, creditorId) {
   player.bankrupt = true;
   player.money = 0;
-  G.messages.push(`${playerName(player)} is BANKRUPT!`);
+  logEvent(G, 'bankruptcy', player.id, { creditorId: (creditorId === undefined) ? null : creditorId });
 
   // Transfer properties to creditor (if any)
   if (creditorId !== null && creditorId !== undefined) {
@@ -368,7 +368,7 @@ function handleBankruptcy(G, ctx, player, creditorId) {
   G.players.forEach(p => {
     if (p.id !== player.id && !p.bankrupt && getPassive(p) === 'arbitrageur') {
       p.money += RULES.passives.arbitrageur.bankruptcyBonus;
-      G.messages.push(`${playerName(p)} gains $${RULES.passives.arbitrageur.bankruptcyBonus} from crisis arbitrage!`);
+      logEvent(G, 'passive_triggered', p.id, { passive: 'arbitrageur', effect: 'bankruptcy_bonus', amount: RULES.passives.arbitrageur.bankruptcyBonus });
     }
   });
 }
@@ -1046,14 +1046,14 @@ export const Monopoly = {
         if (newSeasonIndex !== G.seasonIndex) {
           G.seasonIndex = newSeasonIndex;
           const season = RULES.seasons.list[G.seasonIndex];
-          G.messages.push(`${season.icon} Season changed to ${season.name}!`);
+          logEvent(G, 'season_changed', null, { seasonIndex: G.seasonIndex, seasonName: season.name });
         }
       }
 
       const player = G.players[ctx.currentPlayer];
       if (player.bankrupt) return;
       if (player.inJail) {
-        G.messages.push(`${playerName(player)} is in jail. Pay $${RULES.core.jailFine} or try to roll doubles.`);
+        logEvent(G, 'jail_reminder', ctx.currentPlayer, { fine: RULES.core.jailFine });
       }
     },
   },
@@ -1095,10 +1095,7 @@ export const Monopoly = {
         player.rerollsLeft = RULES.stats.stamina.rerollCount;
       }
 
-      const joinMsg = affinityBonus > 0
-        ? `${playerName(player)} joins the game! ($${player.money}, +$${affinityBonus} world affinity)`
-        : `${playerName(player)} joins the game! ($${player.money})`;
-      G.messages.push(joinMsg);
+      logEvent(G, 'character_selected', player.id, { characterId, money: player.money, affinityBonus });
 
       // Check if all players have selected
       const allSelected = G.players.every(p => p.character !== null);
@@ -1182,7 +1179,7 @@ export const Monopoly = {
         }
       }
       G.lastDice = null;
-      G.messages.push(`${playerName(player)} uses a reroll! (${player.rerollsLeft} left)`);
+      logEvent(G, 'reroll_used', ctx.currentPlayer, { rerollsLeft: player.rerollsLeft });
     },
 
     // --- Card accept/redraw ---
@@ -1234,7 +1231,7 @@ export const Monopoly = {
       if (G.ownership[propertyId] !== ctx.currentPlayer) return INVALID_MOVE;
       // Can only regulate one at a time
       player.regulatedProperty = propertyId;
-      G.messages.push(`${playerName(player)} regulates ${G.board.spaces[propertyId].name}! (+${RULES.passives.enforcer.regulatedRentBonus * 100}% rent)`);
+      logEvent(G, 'property_regulated', ctx.currentPlayer, { propertyId });
     },
 
     // --- Property upgrades ---
@@ -1267,7 +1264,7 @@ export const Monopoly = {
 
       player.money -= cost;
       G.buildings[propertyId] = targetLevel;
-      G.messages.push(`Built ${RULES.buildings.names[targetLevel]} on ${space.name} for $${cost}!`);
+      logEvent(G, 'property_upgraded', ctx.currentPlayer, { propertyId, newLevel: targetLevel, newLevelName: RULES.buildings.names[targetLevel], cost });
     },
 
     mortgageProperty: (G, ctx, propertyId) => {
@@ -1294,7 +1291,7 @@ export const Monopoly = {
       G.mortgaged[propertyId] = true;
       const mortgageValue = Math.floor(applyEconMods(G, 'price', space.price * RULES.core.mortgageRate));
       player.money += mortgageValue;
-      G.messages.push(`Mortgaged ${space.name} for $${mortgageValue}.`);
+      logEvent(G, 'property_mortgaged', ctx.currentPlayer, { propertyId, amount: mortgageValue });
     },
 
     unmortgageProperty: (G, ctx, propertyId) => {
@@ -1312,7 +1309,7 @@ export const Monopoly = {
 
       player.money -= unmortgageCost;
       G.mortgaged[propertyId] = false;
-      G.messages.push(`Unmortgaged ${space.name} for $${unmortgageCost}.`);
+      logEvent(G, 'property_unmortgaged', ctx.currentPlayer, { propertyId, cost: unmortgageCost });
     },
 
     sellBuilding: (G, ctx, propertyId) => {
@@ -1344,7 +1341,7 @@ export const Monopoly = {
       player.money += refund;
 
       const newLevel = G.buildings[propertyId] || 0;
-      G.messages.push(`Sold ${RULES.buildings.names[currentLevel]} on ${space.name} for $${refund}. Now: ${RULES.buildings.names[newLevel]}.`);
+      logEvent(G, 'building_sold', ctx.currentPlayer, { propertyId, newLevel, refund });
     },
 
     // --- Buy property ---
@@ -1362,7 +1359,7 @@ export const Monopoly = {
       G.ownership[space.id] = ctx.currentPlayer;
       G.canBuy = false;
       G.effectivePrice = 0;
-      G.messages.push(`Bought ${space.name} for $${effectivePrice}!`);
+      logEvent(G, 'property_bought', ctx.currentPlayer, { propertyId: space.id, listPrice: space.price, paidPrice: effectivePrice });
       G.turnPhase = 'done';
     },
 
@@ -1371,9 +1368,10 @@ export const Monopoly = {
       G.canBuy = false;
       G.effectivePrice = 0;
 
+      const player = G.players[ctx.currentPlayer];
+      const space = G.board.spaces[player.position];
+
       if (RULES.auction.enabled && RULES.auction.auctionOnPass) {
-        const player = G.players[ctx.currentPlayer];
-        const space = G.board.spaces[player.position];
         const activeBidders = G.players
           .filter(p => !p.bankrupt)
           .map(p => ({ playerId: p.id, passed: false }));
@@ -1394,7 +1392,7 @@ export const Monopoly = {
         }
       }
 
-      G.messages.push('Passed on buying.');
+      logEvent(G, 'property_passed', ctx.currentPlayer, { propertyId: space.id });
       G.turnPhase = 'done';
     },
 

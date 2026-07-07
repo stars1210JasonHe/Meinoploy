@@ -359,21 +359,42 @@ describe('jail_fine_paid', () => {
   });
 });
 
-describe('character_selected (all-selected transition)', () => {
-  test('emits once, actor null, only after the LAST player selects', () => {
+describe('character_selected (join line + all-selected transition)', () => {
+  test('each select emits a join event; the LAST one also emits the all-selected transition', () => {
     const ctx0 = { numPlayers: 2, playOrder: ['0', '1'] };
     const G = Monopoly.setup(ctx0);
     const endTurn0 = jest.fn();
     Monopoly.moves.selectCharacter(G, { currentPlayer: '0', numPlayers: 2, events: { endTurn: endTurn0 } }, 'marcus-grayline');
-    expect(eventsOfType(G, 'character_selected')).toHaveLength(0);
+    const afterFirst = eventsOfType(G, 'character_selected');
+    expect(afterFirst).toHaveLength(1);
+    expect(afterFirst[0].actor).toBe('0');
+    expect(afterFirst[0].data).toEqual({ characterId: 'marcus-grayline', money: G.players[0].money, affinityBonus: 0 });
+    expect(G.messages).toEqual(['Select your characters!', 'Marcus Grayline joins the game! ($1800)']);
 
     const endTurn1 = jest.fn();
     Monopoly.moves.selectCharacter(G, { currentPlayer: '1', numPlayers: 2, events: { endTurn: endTurn1 } }, 'sophia-ember');
     const sel = eventsOfType(G, 'character_selected');
-    expect(sel).toHaveLength(1);
-    expect(sel[0].actor).toBeNull();
-    expect(sel[0].data).toEqual({ allSelected: true });
+    expect(sel).toHaveLength(3); // 2 joins + 1 all-selected transition
+    const join1 = sel.find(e => e.actor === '1');
+    expect(join1.data).toEqual({ characterId: 'sophia-ember', money: G.players[1].money, affinityBonus: 0 });
+    const transition = sel.find(e => e.actor === null);
+    expect(transition.data).toEqual({ allSelected: true });
+    // resetMessages() wipes the per-turn buffer before the transition line is
+    // logged, so only the transition line survives into G.messages here (the
+    // join lines are still on G.events, just not on the reset G.messages).
     expect(G.messages).toEqual([`All characters selected! Game begins! ${getCharacterById('marcus-grayline').name} rolls first.`]);
+  });
+
+  test('affinity-bonus join line: conditional template with the bonus suffix', () => {
+    // No golden scenario reaches a positive affinityBonus (classic map has no
+    // traits); direct-invocation covers the conditional branch.
+    const ctx0 = { numPlayers: 2, playOrder: ['0', '1'] };
+    const G = Monopoly.setup(ctx0);
+    G.board = { ...G.board, traits: { capital: 10 } };
+    Monopoly.moves.selectCharacter(G, { currentPlayer: '0', numPlayers: 2, events: { endTurn: jest.fn() } }, 'marcus-grayline');
+    const join = eventsOfType(G, 'character_selected')[0];
+    expect(join.data.affinityBonus).toBeGreaterThan(0);
+    expect(G.messages).toContain(`Marcus Grayline joins the game! ($${join.data.money}, +$${join.data.affinityBonus} world affinity)`);
   });
 });
 
@@ -395,7 +416,7 @@ describe('G.events seq monotonicity (Task 2 harness integration)', () => {
     }
     expect(G.eventSeq).toBe(G.events[G.events.length - 1].seq + 1);
     expect(eventsOfType(G, 'dice_rolled').length).toBeGreaterThanOrEqual(4);
-    expect(eventsOfType(G, 'character_selected')).toHaveLength(1);
+    expect(eventsOfType(G, 'character_selected')).toHaveLength(3); // 2 joins + 1 all-selected transition
   });
 
   // Shape-homogeneity pin: 'moved' must carry only {from,to,passedGo[,
@@ -801,5 +822,218 @@ describe('card_applied: forceBuy bought / insufficient_funds (direct-invocation)
     expect(G.ownership[39]).toBe('1');
     expect(G.players[0].money).toBe(100);
     expect(G.messages).toContain(`Can't afford hostile takeover ($${cost} needed).`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 5 (migration slice 3): property management + selection + season +
+// bankruptcy
+// ---------------------------------------------------------------------------
+//
+// Same two-tier split as Task 4:
+//  - "harness" tests drive the SAME baked seeds/scripts as the matching
+//    golden scenario (two-turn-roll-buy, build-mortgage, season-change,
+//    bankruptcy) — byte-identical text is already locked by
+//    golden-messages.test.js; these add payload-completeness assertions.
+//  - "direct-invocation" tests cover property_passed, property_regulated, and
+//    reroll_used — NONE of the 10 frozen golden scenarios reach these lines
+//    (property_passed: RULES.auction.enabled/auctionOnPass default to true,
+//    so passProperty always takes the auction branch in every scenario
+//    in golden-messages.test.js — confirmed by grepping the fixture for
+//    "Passed on buying." with zero hits; property_regulated needs Knox's
+//    enforcer passive; reroll_used needs a stamina-reroll character — no
+//    golden scenario's cast exercises either).
+
+function proposeForProperty(pid) {
+  return (client) => {
+    const owner = client.getState().G.ownership[pid];
+    if (owner !== '0' && owner !== null && owner !== undefined) {
+      client.moves.proposeTrade({
+        targetPlayerId: owner, offeredProperties: [], requestedProperties: [pid],
+        offeredMoney: 100, requestedMoney: 0,
+      });
+    }
+  };
+}
+function acceptIfTrade(client) {
+  if (client.getState().G.trade) client.moves.acceptTrade();
+}
+function round() {
+  return [['rollDice'], ifCanBuy('buyProperty'), ifPendingCard('acceptCard'), ['endTurn']];
+}
+
+describe('property_bought — harness (golden-covered: two-turn-roll-buy)', () => {
+  test('payload {propertyId, listPrice, paidPrice}, actor is the buyer', () => {
+    const client = makeClient(2, 1);
+    playScript(client, [
+      ['selectCharacter', 'marcus-grayline'],
+      ['selectCharacter', 'sophia-ember'],
+      ['rollDice'],
+      ['buyProperty'],
+    ]);
+    const G = client.getState().G;
+    const bought = eventsOfType(G, 'property_bought');
+    expect(bought).toHaveLength(1);
+    expect(bought[0].actor).toBe('0');
+    expect(bought[0].data).toEqual({ propertyId: 5, listPrice: 200, paidPrice: 186 });
+    expect(G.messages).toContain('Bought Reading Railroad for $186!');
+  });
+});
+
+describe('property_passed (direct-invocation; auction defaults route every golden pass through the auction branch instead)', () => {
+  test('payload {propertyId} when auction is disabled', () => {
+    RULES.auction.enabled = false;
+    try {
+      const G = freshG();
+      Monopoly.moves.rollDice(G, makeCtx('0', 1, 2)); // -> Baltic Ave, unowned, affordable
+      Monopoly.moves.passProperty(G, makeCtx('0'));
+      const passed = eventsOfType(G, 'property_passed');
+      expect(passed).toHaveLength(1);
+      expect(passed[0].actor).toBe('0');
+      expect(passed[0].data).toEqual({ propertyId: 3 });
+      expect(G.turnPhase).toBe('done');
+      expect(G.messages).toContain('Passed on buying.');
+    } finally {
+      RULES.auction.enabled = true; // restore the shared live RULES singleton
+    }
+  });
+});
+
+describe('property_upgraded / property_mortgaged / property_unmortgaged / building_sold — harness (golden-covered: build-mortgage)', () => {
+  test('payloads match the build-mortgage golden scenario at each step', () => {
+    const client = makeClient(3, 72);
+    playScript(client, [
+      ['selectCharacter', 'marcus-grayline'],
+      ['selectCharacter', 'sophia-ember'],
+      ['selectCharacter', 'knox-ironlaw'],
+      ['rollDice'], ifCanBuy('buyProperty'), ['endTurn'], // P0
+      ['rollDice'], ifCanBuy('buyProperty'), ['endTurn'], // P1
+      ['rollDice'], ifCanBuy('buyProperty'), ['endTurn'], // P2
+      ['rollDice'], ifCanBuy('buyProperty'), ifPendingCard('acceptCard'), // P0
+      proposeForProperty(6), acceptIfTrade,
+      proposeForProperty(8), acceptIfTrade,
+      proposeForProperty(9), acceptIfTrade,
+      ['mortgageProperty', 9],
+      ['unmortgageProperty', 9],
+      ['upgradeProperty', 6],
+      ['sellBuilding', 6],
+    ]);
+    const G = client.getState().G;
+
+    const mortgaged = eventsOfType(G, 'property_mortgaged');
+    expect(mortgaged).toHaveLength(1);
+    expect(mortgaged[0].actor).toBe('0');
+    expect(mortgaged[0].data).toEqual({ propertyId: 9, amount: 60 });
+
+    const unmortgaged = eventsOfType(G, 'property_unmortgaged');
+    expect(unmortgaged).toHaveLength(1);
+    expect(unmortgaged[0].actor).toBe('0');
+    expect(unmortgaged[0].data).toEqual({ propertyId: 9, cost: 66 });
+
+    const upgraded = eventsOfType(G, 'property_upgraded');
+    expect(upgraded).toHaveLength(1);
+    expect(upgraded[0].actor).toBe('0');
+    expect(upgraded[0].data).toEqual({ propertyId: 6, newLevel: 1, newLevelName: 'House', cost: 46 });
+
+    const sold = eventsOfType(G, 'building_sold');
+    expect(sold).toHaveLength(1);
+    expect(sold[0].actor).toBe('0');
+    expect(sold[0].data).toEqual({ propertyId: 6, newLevel: 0, refund: 23 });
+
+    expect(G.messages).toEqual(expect.arrayContaining([
+      'Mortgaged Connecticut Ave for $60.',
+      'Unmortgaged Connecticut Ave for $66.',
+      'Built House on Oriental Ave for $46!',
+      'Sold House on Oriental Ave for $23. Now: Vacant.',
+    ]));
+  });
+});
+
+describe('property_regulated (direct-invocation; no golden scenario\'s cast has Knox exercise his enforcer passive)', () => {
+  test('payload {propertyId}, actor is the regulating player', () => {
+    const G = freshG();
+    G.players[0].character = getCharacterById('knox-ironlaw'); // enforcer passive
+    G.ownership[1] = '0';
+    Monopoly.moves.regulateProperty(G, makeCtx('0'), 1);
+    const reg = eventsOfType(G, 'property_regulated');
+    expect(reg).toHaveLength(1);
+    expect(reg[0].actor).toBe('0');
+    expect(reg[0].data).toEqual({ propertyId: 1 });
+    expect(G.players[0].regulatedProperty).toBe(1);
+    expect(G.messages).toContain(`Knox Ironlaw regulates ${G.board.spaces[1].name}! (+${RULES.passives.enforcer.regulatedRentBonus * 100}% rent)`);
+  });
+});
+
+describe('reroll_used (direct-invocation; no golden scenario\'s cast has a stamina-reroll character use one)', () => {
+  test('payload {rerollsLeft}, decremented before logging', () => {
+    const G = freshG();
+    G.players[0].rerollsLeft = 2;
+    G.hasRolled = true;
+    G.lastDice = { d1: 1, d2: 2, total: 3 };
+    Monopoly.moves.useReroll(G, makeCtx('0'));
+    const used = eventsOfType(G, 'reroll_used');
+    expect(used).toHaveLength(1);
+    expect(used[0].actor).toBe('0');
+    expect(used[0].data).toEqual({ rerollsLeft: 1 });
+    expect(G.messages).toContain('Player 1 uses a reroll! (1 left)');
+  });
+});
+
+describe('season_changed — harness (golden-covered: season-change)', () => {
+  test('payload {seasonIndex, seasonName}, actor null, fires once crossing the changeInterval boundary', () => {
+    const client = makeClient(2, 1);
+    const steps = [['selectCharacter', 'marcus-grayline'], ['selectCharacter', 'sophia-ember']];
+    for (let i = 0; i < 9; i++) steps.push(...round());
+    playScript(client, steps);
+    const G = client.getState().G;
+    const changed = eventsOfType(G, 'season_changed');
+    expect(changed).toHaveLength(1);
+    expect(changed[0].actor).toBeNull();
+    expect(changed[0].data).toEqual({ seasonIndex: 1, seasonName: 'Autumn' });
+    expect(G.messages).toContain('🍂 Season changed to Autumn!');
+  });
+});
+
+describe('bankruptcy + passive_triggered(arbitrageur) — harness (golden-covered: bankruptcy)', () => {
+  test('bankruptcy carries creditorId; the arbitrageur bonus follows in the same order as the original pushes', () => {
+    const client = makeClient(2, 25);
+    playScript(client, [
+      ['selectCharacter', 'marcus-grayline'],
+      ['selectCharacter', 'sophia-ember'],
+      ['rollDice'],
+      ifCanBuy('buyProperty'),
+      ifPendingCard('acceptCard'),
+      (c) => {
+        const m = c.getState().G.players[0].money;
+        c.moves.proposeTrade({
+          targetPlayerId: '1', offeredProperties: [], requestedProperties: [],
+          offeredMoney: m - 1, requestedMoney: 0,
+        });
+      },
+      ['acceptTrade'],
+      ['endTurn'],
+      ['rollDice'], ifCanBuy('buyProperty'), ifPendingCard('acceptCard'), ['endTurn'], // P1 buys something
+      ['rollDice'], // P0 lands on P1's new property -> rent -> bankrupt
+    ]);
+    const G = client.getState().G;
+
+    const bankrupt = eventsOfType(G, 'bankruptcy');
+    expect(bankrupt).toHaveLength(1);
+    expect(bankrupt[0].actor).toBe('0');
+    expect(bankrupt[0].data).toEqual({ creditorId: '1' });
+
+    const arbitrage = eventsOfType(G, 'passive_triggered').find(e => e.data.passive === 'arbitrageur');
+    expect(arbitrage).toBeDefined();
+    expect(arbitrage.actor).toBe('1');
+    expect(arbitrage.data).toEqual({
+      passive: 'arbitrageur', effect: 'bankruptcy_bonus',
+      amount: RULES.passives.arbitrageur.bankruptcyBonus,
+    });
+    expect(arbitrage.seq).toBeGreaterThan(bankrupt[0].seq); // order preserved: bankruptcy first, bonus second
+
+    expect(G.messages).toEqual(expect.arrayContaining([
+      'Marcus Grayline is BANKRUPT!',
+      `Sophia Ember gains $${RULES.passives.arbitrageur.bankruptcyBonus} from crisis arbitrage!`,
+    ]));
   });
 });
