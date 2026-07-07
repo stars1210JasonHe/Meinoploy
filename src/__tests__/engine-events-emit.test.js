@@ -23,6 +23,7 @@
 import fs from 'fs';
 import path from 'path';
 import { INVALID_MOVE } from 'boardgame.io/core';
+import { Client } from 'boardgame.io/client';
 import { Monopoly } from '../Game';
 import { getCharacterById, COLOR_GROUPS, RULES } from '../../mods/dominion';
 import { makeClient, playScript, ifCanBuy, ifPendingCard } from './helpers/drive';
@@ -1204,6 +1205,63 @@ describe('game_over (direct-invocation; no golden scenario reaches a victory con
     expect(G.events.length).toBe(eventsBefore + 1);
     // event-only: formatter returns null, so no line is appended to G.messages
     expect(G.messages).toEqual(messagesBefore);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 7: old-save backfill for event fields
+// ---------------------------------------------------------------------------
+//
+// When loading an old save (pre-event-field era), the loadGame stub-setup must
+// backfill events: [], eventSeq: 0, enforceSeats: false so the game doesn't
+// crash when processing the first move after load. This test simulates an old
+// save by driving a short game, deleting the new fields, and reconstructing
+// via the loadGame stub pattern.
+
+describe('loadGame backfill for old saves (Task 7)', () => {
+  test('old save without events/eventSeq/enforceSeats backfills cleanly and emits seq 0 on first move', () => {
+    // Drive a short game and serialize G
+    const client = makeClient(2, 1);
+    playScript(client, [
+      ['selectCharacter', 'marcus-grayline'],
+      ['selectCharacter', 'sophia-ember'],
+      ['rollDice'], ifCanBuy('buyProperty'), ['endTurn'],
+    ]);
+    const savedG = JSON.parse(JSON.stringify(client.getState().G));
+    const numPlayers = 2;
+
+    // Simulate an old save: delete the three new fields
+    delete savedG.events;
+    delete savedG.eventSeq;
+    delete savedG.enforceSeats;
+
+    // Reconstruct via the loadGame stub-setup pattern (mirrors App.js line 2403)
+    const LoadedGame = {
+      ...Monopoly,
+      setup: () => ({
+        ...savedG,
+        events: savedG.events || [],
+        eventSeq: savedG.eventSeq || 0,
+        enforceSeats: savedG.enforceSeats || false,
+        _resumeLoad: true,
+      }),
+    };
+    const restoredClient = Client({ game: LoadedGame, numPlayers, debug: false });
+    restoredClient.start();
+
+    const G = restoredClient.getState().G;
+    // Backfilled on load (stub-setup fires during Client init)
+    expect(G.events).toEqual([]);
+    expect(G.eventSeq).toBe(0);
+    expect(G.enforceSeats).toBe(false);
+
+    // First move after load emits seq 0, no crash
+    restoredClient.moves.rollDice();
+    const G2 = restoredClient.getState().G;
+    expect(G2.events.length).toBeGreaterThan(0);
+    const firstEvent = G2.events[0];
+    expect(firstEvent.seq).toBe(0);
+    expect(firstEvent.type).toBe('dice_rolled');
   });
 });
 
