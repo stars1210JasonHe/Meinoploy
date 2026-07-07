@@ -29,7 +29,10 @@ export class Lobby {
       const res = await fetch(`${this.serverUrl}/games/monopoly/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ numPlayers }),
+        // enforceSeats: online matches require the acting seat to match the
+        // authorizing client (Task 9) — hot-seat's Client() has no setupData
+        // channel, so this flag only ever reaches online matches.
+        body: JSON.stringify({ numPlayers, setupData: { enforceSeats: true } }),
       });
       const data = await res.json();
       // Auto-join as player 0

@@ -1,4 +1,4 @@
-import { INVALID_MOVE } from 'boardgame.io/core';
+import { INVALID_MOVE, Stage } from 'boardgame.io/core';
 import { validateRoute, autoRoute } from './atlas-movement';
 import { BOARD_SPACES as DEFAULT_BOARD_SPACES, COLOR_GROUPS as DEFAULT_COLOR_GROUPS } from '../mods/dominion/board';
 import { CHANCE_CARDS as DEFAULT_CHANCE_CARDS, COMMUNITY_CARDS as DEFAULT_COMMUNITY_CARDS } from '../mods/dominion/cards';
@@ -140,6 +140,21 @@ function resolveVictory() {
     maxTurns: (ovr.maxTurns != null ? ovr.maxTurns : (map.maxTurns != null ? map.maxTurns : base.maxTurns)) || 0,
     groupsToWin: ovr.groupsToWin || mapGroups || base.groupsToWin || 3,
   };
+}
+
+// --- Seat authorization (Task 9) ---
+//
+// Hot-seat fact (verified against boardgame.io's Client): a local client with
+// no playerID gets ctx.playerID SUBSTITUTED to the assumedPlayerID (== the
+// current turn's player) — ctx.playerID is NEVER null in hot-seat. Guard
+// inertness therefore comes EXCLUSIVELY from the `!G.enforceSeats` prefix; no
+// code may ever branch on `ctx.playerID === null` to detect hot-seat. String()
+// coercion on expectedId tolerates numeric ids (bidders/players arrays use
+// string ids everywhere in this file, but callers passing a raw index are
+// still matched correctly against ctx.playerID, which bgio always stores as
+// a string). Exported for direct unit testing.
+export function requireActor(G, ctx, expectedId) {
+  return !G.enforceSeats || ctx.playerID === String(expectedId);
 }
 
 function createPlayer(id) {
@@ -371,6 +386,38 @@ function handleBankruptcy(G, ctx, player, creditorId) {
       logEvent(G, 'passive_triggered', p.id, { passive: 'arbitrageur', effect: 'bankruptcy_bonus', amount: RULES.passives.arbitrageur.bankruptcyBonus });
     }
   });
+
+  // --- Task 9 interleaving fixes ---
+  //
+  // Bankruptcy during a pending trade: accepting/rejecting a trade with a
+  // bankrupt party is undefined behavior, so cancel it outright. This is a
+  // previously-undefined path (no G.messages site ever existed for it) — the
+  // new 'trade_cancelled' line here is an accepted, documented deviation from
+  // strict byte-identity (no golden scenario has a pending trade at
+  // bankruptcy, so the golden gate is unaffected). Actor is the bankrupt
+  // player (whichever side of the trade they were on); payload carries the
+  // OTHER party's id so consumers don't need the now-nulled G.trade.
+  if (G.trade && (G.trade.proposerId === player.id || G.trade.targetPlayerId === player.id)) {
+    const otherPartyId = G.trade.proposerId === player.id ? G.trade.targetPlayerId : G.trade.proposerId;
+    logEvent(G, 'trade_cancelled', player.id, { otherPartyId, reason: 'bankruptcy' });
+    G.trade = null;
+    G.turnPhase = 'done';
+    if (G.enforceSeats) {
+      ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
+    }
+  }
+
+  // Bankruptcy during a pending auction: advanceAuction's own bidder filter
+  // (below) skips bankrupt bidders whenever the ROTATION reaches them, but if
+  // the bankrupt player IS the bidder currently on the clock (currentBidderIndex),
+  // they can no longer placeBid/passAuction to move the rotation along — advance
+  // immediately so the auction doesn't stall forever.
+  if (G.auction) {
+    const actingBidder = G.auction.bidders[G.auction.currentBidderIndex];
+    if (actingBidder && actingBidder.playerId === player.id) {
+      advanceAuction(G, ctx);
+    }
+  }
 }
 
 // Pay the hub-gated salary (atlas income, spec D4). Same RULES.core.goSalary
@@ -827,8 +874,12 @@ function checkGameOver(G) {
 }
 
 // --- Auction helpers ---
+//
+// Both take (G, ctx) — ctx is needed to queue the seat envelope on rotation/
+// exit (Task 9). All call sites updated. `ctx` is always in scope at every
+// call site (move bodies and handleBankruptcy all receive it).
 
-function advanceAuction(G) {
+function advanceAuction(G, ctx) {
   const auction = G.auction;
   let nextIndex = auction.currentBidderIndex;
   const total = auction.bidders.length;
@@ -836,29 +887,38 @@ function advanceAuction(G) {
   for (let i = 0; i < total; i++) {
     nextIndex = (nextIndex + 1) % total;
     const bidder = auction.bidders[nextIndex];
-    if (!bidder.passed) {
+    // Skip both players who have passed AND players who have since gone
+    // bankrupt (Task 9 interleaving fix — bankruptcy can happen mid-auction
+    // via useReroll; a bankrupt bidder can no longer bid/pass).
+    if (!bidder.passed && !G.players[bidder.playerId].bankrupt) {
       // Check if this is the current highest bidder (auction complete)
       if (bidder.playerId === auction.currentBidder) {
-        resolveAuction(G);
+        resolveAuction(G, ctx);
         return;
       }
       auction.currentBidderIndex = nextIndex;
       logEvent(G, 'auction_turn', null, { bidderId: bidder.playerId });
+      if (G.enforceSeats) {
+        ctx.events.setActivePlayers({ value: { [bidder.playerId]: Stage.NULL } });
+      }
       return;
     }
   }
 
-  // All passed
+  // All passed (or skipped as bankrupt)
   if (auction.currentBidder !== null) {
-    resolveAuction(G);
+    resolveAuction(G, ctx);
   } else {
     logEvent(G, 'auction_ended', null, { propertyId: auction.propertyId, winnerId: null, amount: null });
     G.auction = null;
     G.turnPhase = 'done';
+    if (G.enforceSeats) {
+      ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
+    }
   }
 }
 
-function resolveAuction(G) {
+function resolveAuction(G, ctx) {
   const auction = G.auction;
   const winner = G.players[auction.currentBidder];
 
@@ -868,6 +928,9 @@ function resolveAuction(G) {
   logEvent(G, 'auction_ended', null, { propertyId: auction.propertyId, winnerId: auction.currentBidder, amount: auction.currentBid });
   G.auction = null;
   G.turnPhase = 'done';
+  if (G.enforceSeats) {
+    ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
+  }
 }
 
 // --- Roll / movement helpers (shared by rollDice / rollOnly / commitRoute) ---
@@ -967,7 +1030,7 @@ function performMove(G, ctx, route) {
 export const Monopoly = {
   name: 'monopoly',
 
-  setup: (ctx) => {
+  setup: (ctx, setupData) => {
     const players = [];
     for (let i = 0; i < ctx.numPlayers; i++) {
       players.push(createPlayer(String(i)));
@@ -1018,7 +1081,11 @@ export const Monopoly = {
       _resumeLoad: false, // one-shot: set true by loadGame so the first onBegin doesn't bump turn/season
       events: [],   // typed engine event log — see src/events.js (logEvent/resetMessages)
       eventSeq: 0,  // monotonic sequence counter for G.events, never reset in a match
-      enforceSeats: false,  // seat enforcement toggle (configured in Task 9)
+      // Seat enforcement toggle: online matches opt in via createMatch's
+      // setupData (src/Lobby.js); hot-seat Client() has no setupData channel,
+      // so setupData is always undefined there and this is always false —
+      // guards are inert (see requireActor above).
+      enforceSeats: !!(setupData && setupData.enforceSeats),
     };
   },
 
@@ -1060,6 +1127,7 @@ export const Monopoly = {
   moves: {
     // --- Character selection ---
     selectCharacter: (G, ctx, characterId) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.phase !== 'characterSelect') return INVALID_MOVE;
 
       const char = _activeMod.getCharacterById(characterId);
@@ -1112,6 +1180,7 @@ export const Monopoly = {
     // → first-edge walk). Body is rollAndResolveJail + performMove — identical
     // behavior to the pre-split version (the 381-test baseline is the proof).
     rollDice: (G, ctx, route) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       if (G.hasRolled) return INVALID_MOVE;
       if (G.players[ctx.currentPlayer].bankrupt) return INVALID_MOVE;
@@ -1122,6 +1191,7 @@ export const Monopoly = {
 
     // Atlas: roll, resolve jail/doubles, then PAUSE for route choice (D11).
     rollOnly: (G, ctx) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       if (G.hasRolled) return INVALID_MOVE;
       if (G.players[ctx.currentPlayer].bankrupt) return INVALID_MOVE;
@@ -1137,6 +1207,7 @@ export const Monopoly = {
 
     // Commit the player's chosen whole route (atlas). Validated by performMove.
     commitRoute: (G, ctx, route) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       if (G.players[ctx.currentPlayer].bankrupt) return INVALID_MOVE;
       if (!G.awaitingRoute) return INVALID_MOVE;
@@ -1147,6 +1218,7 @@ export const Monopoly = {
 
     // --- Reroll (Stamina ability) ---
     useReroll: (G, ctx) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       if (!G.hasRolled) return INVALID_MOVE;
       const player = G.players[ctx.currentPlayer];
@@ -1183,6 +1255,7 @@ export const Monopoly = {
 
     // --- Card accept/redraw ---
     acceptCard: (G, ctx) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (!G.pendingCard) return INVALID_MOVE;
       const player = G.players[ctx.currentPlayer];
       const { card, deck, cardIndex } = G.pendingCard;
@@ -1198,6 +1271,7 @@ export const Monopoly = {
     },
 
     redrawCard: (G, ctx) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (!G.pendingCard) return INVALID_MOVE;
       const player = G.players[ctx.currentPlayer];
 
@@ -1222,6 +1296,7 @@ export const Monopoly = {
 
     // --- Knox: Regulate property ---
     regulateProperty: (G, ctx, propertyId) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       const player = G.players[ctx.currentPlayer];
       if (getPassive(player) !== 'enforcer') return INVALID_MOVE;
@@ -1235,6 +1310,7 @@ export const Monopoly = {
 
     // --- Property upgrades ---
     upgradeProperty: (G, ctx, propertyId) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       if (!G.hasRolled) return INVALID_MOVE;
 
@@ -1267,6 +1343,7 @@ export const Monopoly = {
     },
 
     mortgageProperty: (G, ctx, propertyId) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
 
       const player = G.players[ctx.currentPlayer];
@@ -1294,6 +1371,7 @@ export const Monopoly = {
     },
 
     unmortgageProperty: (G, ctx, propertyId) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
 
       const player = G.players[ctx.currentPlayer];
@@ -1312,6 +1390,7 @@ export const Monopoly = {
     },
 
     sellBuilding: (G, ctx, propertyId) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       if (!G.hasRolled) return INVALID_MOVE;
 
@@ -1345,6 +1424,7 @@ export const Monopoly = {
 
     // --- Buy property ---
     buyProperty: (G, ctx) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (!G.canBuy) return INVALID_MOVE;
       const player = G.players[ctx.currentPlayer];
       const space = G.board.spaces[player.position];
@@ -1363,6 +1443,7 @@ export const Monopoly = {
     },
 
     passProperty: (G, ctx) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (!G.canBuy) return INVALID_MOVE;
       G.canBuy = false;
       G.effectivePrice = 0;
@@ -1386,6 +1467,9 @@ export const Monopoly = {
           G.turnPhase = 'auction';
           logEvent(G, 'auction_started', null, { propertyId: space.id, bidders: activeBidders.map(b => b.playerId) });
           logEvent(G, 'auction_turn', null, { bidderId: activeBidders[0].playerId });
+          if (G.enforceSeats) {
+            ctx.events.setActivePlayers({ value: { [activeBidders[0].playerId]: Stage.NULL } });
+          }
           return;
         }
       }
@@ -1395,6 +1479,7 @@ export const Monopoly = {
     },
 
     payJailFine: (G, ctx) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       const player = G.players[ctx.currentPlayer];
       if (!player.inJail) return INVALID_MOVE;
@@ -1414,11 +1499,15 @@ export const Monopoly = {
 
     // --- Trading ---
     proposeTrade: (G, ctx, proposal) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       if (!RULES.trading.enabled) return INVALID_MOVE;
       if (!G.hasRolled) return INVALID_MOVE;
       if (G.canBuy || G.pendingCard || G.auction) return INVALID_MOVE;
       if (G.trade) return INVALID_MOVE;
+      // Route-stomping hole (Task 9): proposing mid-route-choice (atlas) would
+      // silently clobber turnPhase and skip the pending movement entirely.
+      if (G.awaitingRoute) return INVALID_MOVE;
 
       const player = G.players[ctx.currentPlayer];
       if (!RULES.trading.canTradeInJail && player.inJail) return INVALID_MOVE;
@@ -1466,10 +1555,17 @@ export const Monopoly = {
         offeredMoney: G.trade.offeredMoney,
         requestedMoney: G.trade.requestedMoney,
       });
+      if (G.enforceSeats) {
+        ctx.events.setActivePlayers({ value: { [G.trade.targetPlayerId]: Stage.NULL, [G.trade.proposerId]: Stage.NULL } });
+      }
     },
 
+    // acceptTrade/rejectTrade are the genuine cross-seat exception: the
+    // ACTOR is the trade's target, not ctx.currentPlayer (the proposer is
+    // still mid-turn while the target responds).
     acceptTrade: (G, ctx) => {
       if (!G.trade) return INVALID_MOVE;
+      if (!requireActor(G, ctx, G.trade.targetPlayerId)) return INVALID_MOVE;
 
       const { proposerId, targetPlayerId, offeredProperties, requestedProperties, offeredMoney, requestedMoney } = G.trade;
       const proposer = G.players[proposerId];
@@ -1502,27 +1598,43 @@ export const Monopoly = {
       logEvent(G, 'trade_accepted', targetPlayerId, { proposerId });
       G.trade = null;
       G.turnPhase = 'done';
+      if (G.enforceSeats) {
+        ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
+      }
     },
 
     rejectTrade: (G, ctx) => {
       if (!G.trade) return INVALID_MOVE;
+      if (!requireActor(G, ctx, G.trade.targetPlayerId)) return INVALID_MOVE;
       const { proposerId, targetPlayerId } = G.trade;
       logEvent(G, 'trade_rejected', targetPlayerId, { proposerId });
       G.trade = null;
       G.turnPhase = 'done';
+      if (G.enforceSeats) {
+        ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
+      }
     },
 
     cancelTrade: (G, ctx) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (!G.trade) return INVALID_MOVE;
       if (G.trade.proposerId !== ctx.currentPlayer) return INVALID_MOVE;
       logEvent(G, 'trade_cancelled', ctx.currentPlayer, { targetPlayerId: G.trade.targetPlayerId });
       G.trade = null;
       G.turnPhase = 'done';
+      if (G.enforceSeats) {
+        ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
+      }
     },
 
     // --- Auctions ---
+    // placeBid/passAuction are the other genuine cross-seat exception: the
+    // ACTOR is whichever bidder is currently on the clock (bidder rotation is
+    // independent of ctx.currentPlayer — the property's original owner stays
+    // ctx.currentPlayer for the whole auction).
     placeBid: (G, ctx, amount) => {
       if (!G.auction) return INVALID_MOVE;
+      if (!requireActor(G, ctx, G.auction.bidders[G.auction.currentBidderIndex].playerId)) return INVALID_MOVE;
 
       const auction = G.auction;
       const bidderEntry = auction.bidders[auction.currentBidderIndex];
@@ -1540,11 +1652,12 @@ export const Monopoly = {
       logEvent(G, 'bid_placed', bidderEntry.playerId, { propertyId: auction.propertyId, amount });
 
       // Advance to next bidder
-      advanceAuction(G);
+      advanceAuction(G, ctx);
     },
 
     passAuction: (G, ctx) => {
       if (!G.auction) return INVALID_MOVE;
+      if (!requireActor(G, ctx, G.auction.bidders[G.auction.currentBidderIndex].playerId)) return INVALID_MOVE;
 
       const auction = G.auction;
       const bidderEntry = auction.bidders[auction.currentBidderIndex];
@@ -1555,18 +1668,22 @@ export const Monopoly = {
       // Check if auction is over
       const activeBidders = auction.bidders.filter(b => !b.passed);
       if (activeBidders.length <= 1 && auction.currentBidder !== null) {
-        resolveAuction(G);
+        resolveAuction(G, ctx);
       } else if (activeBidders.length === 0) {
         // Everyone passed with no bids
         logEvent(G, 'auction_ended', null, { propertyId: auction.propertyId, winnerId: null, amount: null });
         G.auction = null;
         G.turnPhase = 'done';
+        if (G.enforceSeats) {
+          ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
+        }
       } else {
-        advanceAuction(G);
+        advanceAuction(G, ctx);
       }
     },
 
     endTurn: (G, ctx) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.phase === 'characterSelect') return INVALID_MOVE;
       if (!G.hasRolled) return INVALID_MOVE;
       if (G.canBuy) return INVALID_MOVE;
