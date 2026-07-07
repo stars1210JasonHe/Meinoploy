@@ -93,12 +93,12 @@ export function mapEngineEventToAi(event, G) {
     case 'tax_paid':
       return { eventType: EVENT_TYPES.PAY_TAX, eventData: { amount: data.amount } };
 
-    // data.empty (deck exhausted) still maps — the fallback text keeps the
-    // "You drew a card: ..." prompt coherent instead of interpolating undefined.
+    // data.empty (deck exhausted) -> no AI reaction (parity with old string sniffer)
     case 'card_drawn':
+      if (data.empty) return null;
       return {
         eventType: EVENT_TYPES.DRAW_CARD,
-        eventData: { cardText: data.empty ? 'The deck is empty.' : data.text },
+        eventData: { cardText: data.text },
       };
 
     case 'went_to_jail':

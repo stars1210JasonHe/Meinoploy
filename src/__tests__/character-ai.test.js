@@ -427,9 +427,9 @@ describe('mapEngineEventToAi', () => {
     expect(result).toEqual({ eventType: EVENT_TYPES.DRAW_CARD, eventData: { cardText: 'Advance to GO' } });
   });
 
-  test('card_drawn (empty deck) -> DRAW_CARD with a fallback cardText instead of undefined', () => {
+  test('card_drawn (empty deck) -> null (no AI reaction — sniffing parity)', () => {
     const result = mapEngineEventToAi({ seq: 5, type: 'card_drawn', actor: '0', data: { deck: 'chance', cardIndex: null, text: null, empty: true } }, G);
-    expect(result.eventData.cardText).toBe('The deck is empty.');
+    expect(result).toBeNull();
   });
 
   test.each([
