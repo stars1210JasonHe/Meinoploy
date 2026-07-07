@@ -1,6 +1,6 @@
 # Meinopoly Roadmap
 
-_Last updated: 2026-07-06. This records direction agreed with the project owner; the two
+_Last updated: 2026-07-07. This records direction agreed with the project owner; the two
 major tasks below are to **discuss + design before building** — each is a large initiative._
 
 ## Where we are
@@ -79,10 +79,31 @@ major tasks below are to **discuss + design before building** — each is a larg
 
 ## Major Task 2 — API / MCP layer (game mechanisms)
 **Goal:** establish the character-dialogue mechanism + other mechanisms via a real API / MCP surface.
+Decomposed 2026-07-06 into: SP1 foundation (events+seats) → SP2 duel/对战 → SP3 MCP → SP4 dialogue
+(with per-character turn memory + personality memory).
+
+> **MT2-SP1 — Typed engine events + seat authorization: DONE 2026-07-07 (main `d992f7b`).** Every
+> gameplay occurrence is now ONE typed event on `G.events` (40-type frozen registry, seq-monotonic,
+> capped log) via `src/events.js`'s `logEvent`; all 71 `G.messages` sites migrated with BYTE-IDENTICAL
+> text (golden-capture harness: 9 scenarios/167 frozen snapshots; guardrail test bans raw pushes;
+> 26/26 E2E first-run). `detectAndTriggerAI` is event-driven (lazy seq cursor, no load/join bursts) —
+> string-sniffing retired, AI eventData now carries real values. Seat authorization: `enforceSeats`
+> (Lobby sends setupData), uniform `requireActor` on all 22 moves (privilege-escalation hole closed —
+> a trade target can no longer rewind/bankrupt the proposer), `setActivePlayers` envelopes with every
+> exit restored — ONLINE TRADES AND AUCTIONS WORK ACROSS SEATS for the first time. Hardened along the
+> way: accept-time trade re-validation (stale-snapshot auto-cancel), auction solvency re-checks,
+> bankrupt-bidder cleanup, and a PRODUCTION boardgame.io v0.45 crash (rejected moves → STRIP_TRANSIENTS
+> → master unhandled rejection) fixed via `client:false` on all moves (empirically reproduced pre-fix).
+> 932 unit tests + 26 E2E. The event registry is the contract SP2/SP3/SP4 consume. Post-merge tickets:
+> endTurn×awaitingRoute pre-existing hole; SP3 must document the 200-event front-trim for slow consumers.
+
 - **Character dialogue** — formalize AI character conversation (today: `src/character-ai.js`, OpenAI,
-  per-event + chat) into a proper, game-state-aware, in-character, multi-turn dialogue system.
+  per-event + chat) into a proper, game-state-aware, in-character, multi-turn dialogue system,
+  WITH per-character turn memory + personality memory (owner requirement 2026-07-06).
 - **MCP** — expose game state + mechanisms over MCP so external agents/tools (and the dialogue layer)
-  can observe/drive the game.
+  can observe/drive the game. (`sim/match.js` is the headless-driving precedent; events = subscribe feed.)
+- **Duel/对战 (SP2, next)** — same-tile co-location trigger, 6-stat opposed rolls, `RULES.duel` config
+  bucket, defender-response via the SP1 envelope machinery.
 - **Other mechanisms (TBD — to discuss):** e.g. AI bot players, alliances/voting, world events.
 
 ## Sequencing (proposed; to confirm)
