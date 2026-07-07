@@ -272,6 +272,58 @@ export function formatEventMessage(type, actor, data, G) {
     case 'bankruptcy':
       return `${playerName(G.players[actor])} is BANKRUPT!`;
 
+    // actor = the proposer (Game.js proposeTrade); data mirrors G.trade's
+    // real field names verbatim (the normalized-with-defaults values, not the
+    // raw incoming proposal, which may have undefined optional fields).
+    case 'trade_proposed':
+      return `${playerName(G.players[actor])} proposes a trade to ${playerName(G.players[data.targetPlayerId])}!`;
+
+    // actor = the target (Game.js acceptTrade — the target is the one whose
+    // move accepts), data carries proposerId so consumers don't need G.trade
+    // (already nulled out by the time this logs).
+    case 'trade_accepted':
+      return `Trade accepted! ${playerName(G.players[data.proposerId])} and ${playerName(G.players[actor])} completed a trade.`;
+
+    // actor = the target (Game.js rejectTrade).
+    case 'trade_rejected':
+      return `${playerName(G.players[actor])} rejected the trade.`;
+
+    // actor = the proposer (Game.js cancelTrade — only the proposer may
+    // cancel). The original string never interpolated anything.
+    case 'trade_cancelled':
+      return 'Trade cancelled.';
+
+    // actor null (system announcement, Game.js passProperty's auction branch).
+    case 'auction_started':
+      return `${G.board.spaces[data.propertyId].name} goes to auction! Bidding starts at $${RULES.auction.startingBid}.`;
+
+    // actor null (system rotation prompt). Two Game.js call sites share this
+    // branch verbatim: passProperty's first-bidder announce and
+    // advanceAuction's per-rotation prompt — same string, same shape.
+    case 'auction_turn':
+      return `${playerName(G.players[data.bidderId])}'s turn to bid.`;
+
+    case 'bid_placed':
+      return `${playerName(G.players[actor])} bids $${data.amount}!`;
+
+    case 'auction_passed':
+      return `${playerName(G.players[actor])} passes.`;
+
+    // actor null. Two sub-shapes on one type, discriminated by winnerId: the
+    // win (resolveAuction) and the two no-bids sites (advanceAuction's
+    // all-passed branch, passAuction's zero-active-bidders branch) — both
+    // no-bids call sites share this SAME branch, so their rendered text is
+    // byte-identical by construction, not by coincidence.
+    case 'auction_ended':
+      if (data.winnerId === null) return `No bids. ${G.board.spaces[data.propertyId].name} remains unowned.`;
+      return `${playerName(G.players[data.winnerId])} wins the auction for ${G.board.spaces[data.propertyId].name} at $${data.amount}!`;
+
+    // New in this slice (Monopoly.onEnd, game-def level, not a move). No
+    // pre-migration G.messages site ever announced game-over, so this is
+    // event-only by design — always null, not merely unhandled.
+    case 'game_over':
+      return null;
+
     default:
       return null;
   }

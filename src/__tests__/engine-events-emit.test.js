@@ -20,6 +20,8 @@
 //  - The Task 2 harness (makeClient/playScript, src/__tests__/helpers/drive.js)
 //    for an end-to-end integration check that a full scripted game produces a
 //    well-formed G.events stream (seq monotonicity, per the task brief).
+import fs from 'fs';
+import path from 'path';
 import { INVALID_MOVE } from 'boardgame.io/core';
 import { Monopoly } from '../Game';
 import { getCharacterById, COLOR_GROUPS, RULES } from '../../mods/dominion';
@@ -1035,5 +1037,169 @@ describe('bankruptcy + passive_triggered(arbitrageur) — harness (golden-covere
       'Marcus Grayline is BANKRUPT!',
       `Sophia Ember gains $${RULES.passives.arbitrageur.bankruptcyBonus} from crisis arbitrage!`,
     ]));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 6 (migration slice 4, FINAL): trade lifecycle + auction lifecycle +
+// game_over + guardrail
+// ---------------------------------------------------------------------------
+//
+// Same two-tier split as Tasks 4/5:
+//  - "harness" tests drive the SAME baked seed/script as the matching golden
+//    scenario (trade-lifecycle, auction-lifecycle) — byte-identical text is
+//    already locked by golden-messages.test.js; these add payload-completeness
+//    assertions the golden gate itself doesn't make.
+//  - game_over has NO golden scenario reaching gameover (none of the 10 frozen
+//    scenarios cross a victory condition) — direct-invocation tier only,
+//    calling Monopoly.onEnd directly against a crafted G + ctx.gameover.
+
+function propose(targetPlayerId, offeredMoney) {
+  return (client) => client.moves.proposeTrade({
+    targetPlayerId, offeredProperties: [], requestedProperties: [],
+    offeredMoney, requestedMoney: 0,
+  });
+}
+
+describe('trade_proposed / trade_accepted / trade_rejected / trade_cancelled — harness (golden-covered: trade-lifecycle)', () => {
+  test('payloads mirror G.trade field names at each step; actors per the brief (proposer for propose/cancel, target for accept/reject)', () => {
+    const client = makeClient(2, 1);
+    playScript(client, [
+      ['selectCharacter', 'marcus-grayline'],
+      ['selectCharacter', 'sophia-ember'],
+      ['rollDice'],
+      ifCanBuy('buyProperty'),
+      ifPendingCard('acceptCard'),
+      propose('1', 50),
+      ['rejectTrade'],
+      propose('1', 50),
+      ['acceptTrade'],
+      propose('1', 50),
+      ['cancelTrade'],
+    ]);
+    const G = client.getState().G;
+
+    const proposed = eventsOfType(G, 'trade_proposed');
+    expect(proposed).toHaveLength(3);
+    proposed.forEach(e => {
+      expect(e.actor).toBe('0');
+      expect(e.data).toEqual({
+        targetPlayerId: '1', offeredProperties: [], requestedProperties: [],
+        offeredMoney: 50, requestedMoney: 0,
+      });
+    });
+
+    const rejected = eventsOfType(G, 'trade_rejected');
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].actor).toBe('1'); // target rejects
+    expect(rejected[0].data).toEqual({ proposerId: '0' });
+
+    const accepted = eventsOfType(G, 'trade_accepted');
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0].actor).toBe('1'); // target accepts
+    expect(accepted[0].data).toEqual({ proposerId: '0' });
+
+    const cancelled = eventsOfType(G, 'trade_cancelled');
+    expect(cancelled).toHaveLength(1);
+    expect(cancelled[0].actor).toBe('0'); // proposer cancels
+    expect(cancelled[0].data).toEqual({ targetPlayerId: '1' });
+
+    expect(G.messages).toEqual(expect.arrayContaining([
+      'Marcus Grayline proposes a trade to Sophia Ember!',
+      'Sophia Ember rejected the trade.',
+      'Trade accepted! Marcus Grayline and Sophia Ember completed a trade.',
+    ]));
+  });
+});
+
+describe('auction_started / auction_turn / bid_placed / auction_passed / auction_ended — harness (golden-covered: auction-lifecycle)', () => {
+  test('auction #1 (bid then win) + auction #2 (zero bids) payload shapes', () => {
+    const client = makeClient(2, 1);
+    playScript(client, [
+      ['selectCharacter', 'marcus-grayline'],
+      ['selectCharacter', 'sophia-ember'],
+      ['rollDice'],
+      ['passProperty'],  // -> auction #1 (Reading Railroad, propertyId 5)
+      ['placeBid', 2],
+      ['passAuction'],   // P1 passes -> P0 wins
+      ['endTurn'],
+      ['rollDice'], ifCanBuy('buyProperty'), ifPendingCard('acceptCard'), ['endTurn'], // P1 filler turn
+      ['rollDice'],
+      ['passProperty'],  // -> auction #2 (Vermont Ave, propertyId 8)
+      ['passAuction'],   // P0 (bidders[0]) passes with no bid
+      ['passAuction'],   // P1 passes -> zero bids, remains unowned
+    ]);
+    const G = client.getState().G;
+
+    const started = eventsOfType(G, 'auction_started');
+    expect(started).toHaveLength(2);
+    started.forEach(e => {
+      expect(e.actor).toBeNull();
+      expect(e.data.bidders).toEqual(['0', '1']);
+    });
+    expect(started[0].data.propertyId).toBe(5); // Reading Railroad
+    expect(started[1].data.propertyId).toBe(8); // Vermont Ave
+
+    const turns = eventsOfType(G, 'auction_turn');
+    expect(turns).toHaveLength(4); // 2 per auction: initial announce + one rotation
+    expect(turns.map(e => e.data.bidderId)).toEqual(['0', '1', '0', '1']);
+    turns.forEach(e => expect(e.actor).toBeNull());
+
+    const bids = eventsOfType(G, 'bid_placed');
+    expect(bids).toHaveLength(1);
+    expect(bids[0].actor).toBe('0');
+    expect(bids[0].data).toEqual({ propertyId: 5, amount: 2 });
+
+    const passes = eventsOfType(G, 'auction_passed');
+    expect(passes).toHaveLength(3); // Sophia (auction #1), Marcus + Sophia (auction #2)
+    expect(passes.map(e => e.actor)).toEqual(['1', '0', '1']);
+    passes.forEach(e => expect(e.data.propertyId).toBeDefined());
+
+    const ended = eventsOfType(G, 'auction_ended');
+    expect(ended).toHaveLength(2);
+    expect(ended[0].actor).toBeNull();
+    expect(ended[0].data).toEqual({ propertyId: 5, winnerId: '0', amount: 2 });
+    expect(ended[1].actor).toBeNull();
+    expect(ended[1].data).toEqual({ propertyId: 8, winnerId: null, amount: null });
+
+    // G.messages is the per-turn reset buffer (rollDice resets it), so only
+    // auction #2's lines survive into the final snapshot here — auction #1's
+    // text ("Reading Railroad goes to auction...", "...wins the auction...")
+    // is locked byte-identical by the golden gate instead (see
+    // fixtures/golden-messages.json's auction-lifecycle scenario).
+    expect(G.messages).toEqual(expect.arrayContaining([
+      'Vermont Ave goes to auction! Bidding starts at $1.',
+      "Marcus Grayline's turn to bid.",
+      'Marcus Grayline passes.',
+      'Sophia Ember passes.',
+      'No bids. Vermont Ave remains unowned.',
+    ]));
+  });
+});
+
+describe('game_over (direct-invocation; no golden scenario reaches a victory condition)', () => {
+  test('Monopoly.onEnd logs a null-formatted, event-only game_over carrying ctx.gameover', () => {
+    const G = freshG();
+    const messagesBefore = [...G.messages];
+    const eventsBefore = G.events.length;
+    const gameover = { winner: '0', reason: 'survival', standings: [{ id: '0', netWorth: 1800 }] };
+
+    Monopoly.onEnd(G, { gameover });
+
+    const ended = eventsOfType(G, 'game_over');
+    expect(ended).toHaveLength(1);
+    expect(ended[0].actor).toBeNull();
+    expect(ended[0].data).toEqual({ result: gameover });
+    expect(G.events.length).toBe(eventsBefore + 1);
+    // event-only: formatter returns null, so no line is appended to G.messages
+    expect(G.messages).toEqual(messagesBefore);
+  });
+});
+
+describe('guardrail: no raw G.messages mutation remains in Game.js', () => {
+  test('src/Game.js has zero matches for messages.push or G.messages assignment', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'Game.js'), 'utf8');
+    expect(source).not.toMatch(/messages\s*\.push/);
+    expect(source).not.toMatch(/G\.messages\s*=/);
   });
 });

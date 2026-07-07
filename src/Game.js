@@ -843,8 +843,7 @@ function advanceAuction(G) {
         return;
       }
       auction.currentBidderIndex = nextIndex;
-      const player = G.players[bidder.playerId];
-      G.messages.push(`${playerName(player)}'s turn to bid.`);
+      logEvent(G, 'auction_turn', null, { bidderId: bidder.playerId });
       return;
     }
   }
@@ -853,7 +852,7 @@ function advanceAuction(G) {
   if (auction.currentBidder !== null) {
     resolveAuction(G);
   } else {
-    G.messages.push(`No bids. ${G.board.spaces[auction.propertyId].name} remains unowned.`);
+    logEvent(G, 'auction_ended', null, { propertyId: auction.propertyId, winnerId: null, amount: null });
     G.auction = null;
     G.turnPhase = 'done';
   }
@@ -862,12 +861,11 @@ function advanceAuction(G) {
 function resolveAuction(G) {
   const auction = G.auction;
   const winner = G.players[auction.currentBidder];
-  const space = G.board.spaces[auction.propertyId];
 
   winner.money -= auction.currentBid;
   winner.properties.push(auction.propertyId);
   G.ownership[auction.propertyId] = auction.currentBidder;
-  G.messages.push(`${playerName(winner)} wins the auction for ${space.name} at $${auction.currentBid}!`);
+  logEvent(G, 'auction_ended', null, { propertyId: auction.propertyId, winnerId: auction.currentBidder, amount: auction.currentBid });
   G.auction = null;
   G.turnPhase = 'done';
 }
@@ -1385,9 +1383,8 @@ export const Monopoly = {
             currentBidderIndex: 0,
           };
           G.turnPhase = 'auction';
-          G.messages.push(`${space.name} goes to auction! Bidding starts at $${RULES.auction.startingBid}.`);
-          const firstBidder = G.players[activeBidders[0].playerId];
-          G.messages.push(`${playerName(firstBidder)}'s turn to bid.`);
+          logEvent(G, 'auction_started', null, { propertyId: space.id, bidders: activeBidders.map(b => b.playerId) });
+          logEvent(G, 'auction_turn', null, { bidderId: activeBidders[0].playerId });
           return;
         }
       }
@@ -1461,7 +1458,13 @@ export const Monopoly = {
         requestedMoney: requestedMoney || 0,
       };
       G.turnPhase = 'trade';
-      G.messages.push(`${playerName(player)} proposes a trade to ${playerName(target)}!`);
+      logEvent(G, 'trade_proposed', ctx.currentPlayer, {
+        targetPlayerId: G.trade.targetPlayerId,
+        offeredProperties: G.trade.offeredProperties,
+        requestedProperties: G.trade.requestedProperties,
+        offeredMoney: G.trade.offeredMoney,
+        requestedMoney: G.trade.requestedMoney,
+      });
     },
 
     acceptTrade: (G, ctx) => {
@@ -1495,15 +1498,15 @@ export const Monopoly = {
         proposer.money += requestedMoney;
       }
 
-      G.messages.push(`Trade accepted! ${playerName(proposer)} and ${playerName(target)} completed a trade.`);
+      logEvent(G, 'trade_accepted', targetPlayerId, { proposerId });
       G.trade = null;
       G.turnPhase = 'done';
     },
 
     rejectTrade: (G, ctx) => {
       if (!G.trade) return INVALID_MOVE;
-      const target = G.players[G.trade.targetPlayerId];
-      G.messages.push(`${playerName(target)} rejected the trade.`);
+      const { proposerId, targetPlayerId } = G.trade;
+      logEvent(G, 'trade_rejected', targetPlayerId, { proposerId });
       G.trade = null;
       G.turnPhase = 'done';
     },
@@ -1511,7 +1514,7 @@ export const Monopoly = {
     cancelTrade: (G, ctx) => {
       if (!G.trade) return INVALID_MOVE;
       if (G.trade.proposerId !== ctx.currentPlayer) return INVALID_MOVE;
-      G.messages.push('Trade cancelled.');
+      logEvent(G, 'trade_cancelled', ctx.currentPlayer, { targetPlayerId: G.trade.targetPlayerId });
       G.trade = null;
       G.turnPhase = 'done';
     },
@@ -1533,7 +1536,7 @@ export const Monopoly = {
 
       auction.currentBid = amount;
       auction.currentBidder = bidderEntry.playerId;
-      G.messages.push(`${playerName(player)} bids $${amount}!`);
+      logEvent(G, 'bid_placed', bidderEntry.playerId, { propertyId: auction.propertyId, amount });
 
       // Advance to next bidder
       advanceAuction(G);
@@ -1544,10 +1547,9 @@ export const Monopoly = {
 
       const auction = G.auction;
       const bidderEntry = auction.bidders[auction.currentBidderIndex];
-      const player = G.players[bidderEntry.playerId];
 
       bidderEntry.passed = true;
-      G.messages.push(`${playerName(player)} passes.`);
+      logEvent(G, 'auction_passed', bidderEntry.playerId, { propertyId: auction.propertyId });
 
       // Check if auction is over
       const activeBidders = auction.bidders.filter(b => !b.passed);
@@ -1555,7 +1557,7 @@ export const Monopoly = {
         resolveAuction(G);
       } else if (activeBidders.length === 0) {
         // Everyone passed with no bids
-        G.messages.push(`No bids. ${G.board.spaces[auction.propertyId].name} remains unowned.`);
+        logEvent(G, 'auction_ended', null, { propertyId: auction.propertyId, winnerId: null, amount: null });
         G.auction = null;
         G.turnPhase = 'done';
       } else {
@@ -1578,5 +1580,13 @@ export const Monopoly = {
   endIf: (G, ctx) => {
     if (G.phase !== 'play') return undefined;
     return checkGameOver(G);
+  },
+
+  // Fires once, when endIf's return value ends the match. G here is the same
+  // mutable Immer draft moves/endIf receive — the mutation persists into the
+  // final state (verified pattern, not a guess). No pre-migration G.messages
+  // site existed for game-over, so this is event-only from day one.
+  onEnd: (G, ctx) => {
+    logEvent(G, 'game_over', null, { result: ctx.gameover });
   },
 };
