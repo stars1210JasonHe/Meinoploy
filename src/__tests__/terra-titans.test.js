@@ -67,8 +67,17 @@ describe('Terra Titans mod content', () => {
     expect(getStartingMoney(getCharacterById('mansa-musa'))).toBe(2000);
   });
 
-  test('reuses Dominion economy: terra-titans rules === dominion rules object', () => {
-    expect(terraTitansData.rules).toBe(MODS.dominion.rules);
+  test('extends Dominion economy with duels enabled', () => {
+    const ttRules = terraTitansData.rules;
+    const domRules = MODS.dominion.rules;
+    // Separate objects (terra-titans has its own rules)
+    expect(ttRules).not.toBe(domRules);
+    // But inherit core economy from Dominion
+    expect(ttRules.core.baseStartingMoney).toBe(domRules.core.baseStartingMoney);
+    expect(ttRules.buildings).toEqual(domRules.buildings);
+    // And enable duels (the terra-titans difference)
+    expect(ttRules.duel.enabled).toBe(true);
+    expect(domRules.duel.enabled).toBe(false);
   });
 
   test('bundles the Terra Titans globe world and no map.json boards', () => {

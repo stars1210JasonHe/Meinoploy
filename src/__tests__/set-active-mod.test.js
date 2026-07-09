@@ -49,4 +49,26 @@ describe('setActiveMod', () => {
     expect(MODS.dominion.portraits).toBeUndefined(); // tier A has NO portraits
     expect(MODS.dominion.keyArt).toBeUndefined();     // tier A has NO keyArt
   });
+
+  test('terra-titans enables duel mode while dominion keeps it disabled (pristine isolation)', () => {
+    // Verify pristine clones exist and have divergent duel config
+    expect(PRISTINE['terra-titans']).toBeDefined();
+    expect(PRISTINE.dominion.duel.enabled).toBe(false);
+    expect(PRISTINE['terra-titans'].duel.enabled).toBe(true);
+    expect(PRISTINE['terra-titans']).not.toBe(PRISTINE.dominion);
+
+    // Live RULES follows the mod when switched
+    setActiveMod('terra-titans');
+    expect(RULES.duel.enabled).toBe(true);
+
+    setActiveMod('dominion');
+    expect(RULES.duel.enabled).toBe(false);
+
+    // Switch back and forth twice to verify pristine isolation holds
+    setActiveMod('terra-titans');
+    expect(RULES.duel.enabled).toBe(true);
+
+    setActiveMod('dominion');
+    expect(RULES.duel.enabled).toBe(false);
+  });
 });

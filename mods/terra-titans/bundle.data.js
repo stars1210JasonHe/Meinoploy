@@ -5,7 +5,7 @@
 // globe world are mod-specific. The client layers portraits/keyArt/atlas assets on top in
 // bundle.client.js; this file stays PNG-free so `node -r esm` / the server can import it.
 
-import { RULES } from '../dominion/rules';
+import { RULES } from './rules';
 import { CHARACTERS_DATA, getCharacterById, getStartingMoney } from './characters-data';
 import { BOARD_SPACES, COLOR_GROUPS } from '../dominion/board';
 import { CHANCE_CARDS, COMMUNITY_CARDS } from '../dominion/cards';
