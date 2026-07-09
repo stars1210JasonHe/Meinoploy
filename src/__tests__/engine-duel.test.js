@@ -500,3 +500,421 @@ describe('Duel mechanism — landing interception (Task 3)', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 4: the four duel-resolution moves (payRent / initiateDuel /
+// respondDuel / declineDuel) + per-challenger cooldown + enforceSeats
+// envelopes.
+//
+// Driving style: direct `Monopoly.moves.X(G, ctx, ...)` invocation against a
+// hand-built G (Task 2 / engine-seats-unit.test.js precedent) for the
+// controlled win/lose/tie/decline/cooldown matrix — hand-crafting G.duel and
+// G.players[i].character.stats gives exact, seed-independent control over
+// dice totals and stat sums, which a real seeded Client would otherwise need
+// a seed hunt for (especially the tie case). A real-Client integration run
+// (reusing Task 3's seed-96 scenario) proves the whole landing -> offer ->
+// initiate -> respond pipeline wires up through boardgame.io's actual
+// reducer, and is repeated verbatim on the identical seed to prove
+// determinism through the REAL seeded PRNG (not just a mocked ctx.random
+// returning the same values twice, which would be trivially true by
+// construction).
+// ---------------------------------------------------------------------------
+describe('Duel mechanism — resolution moves (Task 4)', () => {
+  function freshG() {
+    const ctx = { numPlayers: 2, playOrder: ['0', '1'] };
+    const G = Monopoly.setup(ctx);
+    G.phase = 'play'; // skip character selection for gameplay tests
+    return G;
+  }
+
+  function valForDie(n) {
+    return (n - 1) / 6 + 0.01;
+  }
+
+  // ctx.random.Number() yields the given die faces in call order.
+  // respondDuel's pinned roll order (Game.js) is: challenger d1, d2, then
+  // defender d1, d2.
+  function ctxWithDice(currentPlayer, dice) {
+    let i = 0;
+    const values = dice.length ? dice.map(valForDie) : [0.5];
+    return {
+      currentPlayer,
+      numPlayers: 2,
+      random: { Number: () => values[i++ % values.length] },
+      events: { endTurn: jest.fn(), setActivePlayers: jest.fn() },
+    };
+  }
+
+  // A full stats object (all six axes) so calculateRent/passives-adjacent
+  // reads elsewhere never see a partial shape — only stamina/luck matter to
+  // respondDuel's roll(), but the real character data always carries all six
+  // (mods/dominion/characters-data.js), so tests match that shape.
+  function statChar(stats) {
+    return {
+      id: 'test-char', name: 'Test Character', passive: {},
+      stats: { capital: 5, luck: 4, negotiation: 5, charisma: 5, tech: 5, stamina: 4, ...stats },
+    };
+  }
+
+  // Pinned envelope shape (Task 3): propertyId 3 = Baltic Ave, rent 8,
+  // owner P1, challenger P0 — same fixture used by this file's Task 3
+  // 'DISABLED... byte-identical' control test, so payRent's rent_paid text
+  // can be asserted byte-for-byte against it.
+  function offerDuel(overrides) {
+    return { phase: 'offer', propertyId: 3, ownerId: '1', challengerId: '0', rent: 8, ...overrides };
+  }
+  function responseDuel(overrides) {
+    return { phase: 'response', propertyId: 3, ownerId: '1', challengerId: '0', rent: 8, ...overrides };
+  }
+
+  describe('payRent', () => {
+    test('pays exactly the frozen rent, clears the duel, sets turnPhase done — byte-equal rent_paid text to a control non-duel landing', () => {
+      const G = freshG();
+      G.duel = offerDuel();
+      const p0Before = G.players[0].money;
+      const p1Before = G.players[1].money;
+
+      const result = Monopoly.moves.payRent(G, ctxWithDice('0', []));
+
+      expect(result).not.toBe(INVALID_MOVE);
+      expect(G.duel).toBeNull();
+      expect(G.turnPhase).toBe('done');
+      expect(G.players[0].money).toBe(p0Before - 8);
+      expect(G.players[1].money).toBe(p1Before + 8);
+      const rentPaid = G.events.filter(e => e.type === 'rent_paid');
+      expect(rentPaid).toHaveLength(1);
+      expect(rentPaid[0].data).toEqual({ propertyId: 3, ownerId: '1', amount: 8 });
+      // Byte-identical to this file's Task 3 'DISABLED' control test's
+      // rent_paid message (same board space/rent/actors) — proves payRent's
+      // reuse of payRentAmount produces the exact same text as the ordinary
+      // auto-pay landing path.
+      expect(G.messages).toContain('Paid $8 rent to Player 2 for Baltic Ave.');
+
+      // turnPhase 'done' proof: endTurn now succeeds.
+      G.hasRolled = true;
+      const ctx2 = ctxWithDice('0', []);
+      expect(Monopoly.moves.endTurn(G, ctx2)).not.toBe(INVALID_MOVE);
+      expect(ctx2.events.endTurn).toHaveBeenCalled();
+    });
+
+    test('guards: no duel / wrong phase -> INVALID_MOVE, nothing mutated', () => {
+      const G = freshG();
+      const p0Before = G.players[0].money;
+      expect(Monopoly.moves.payRent(G, ctxWithDice('0', []))).toBe(INVALID_MOVE); // G.duel is null
+      expect(G.players[0].money).toBe(p0Before);
+
+      G.duel = responseDuel(); // wrong phase (already escalated to a duel)
+      expect(Monopoly.moves.payRent(G, ctxWithDice('0', []))).toBe(INVALID_MOVE);
+      expect(G.duel).not.toBeNull();
+      expect(G.players[0].money).toBe(p0Before);
+    });
+  });
+
+  describe('initiateDuel + cooldown', () => {
+    test('offer -> response, records lastDuelTurn, emits duel_initiated, no payment yet', () => {
+      const G = freshG();
+      G.duel = offerDuel();
+      G.totalTurns = 5;
+      const p0Before = G.players[0].money;
+
+      const result = Monopoly.moves.initiateDuel(G, ctxWithDice('0', []));
+
+      expect(result).not.toBe(INVALID_MOVE);
+      expect(G.duel.phase).toBe('response');
+      expect(G.players[0].lastDuelTurn).toBe(5); // challenger is P0
+      expect(G.players[0].money).toBe(p0Before); // untouched — no payment on initiate
+      const initiated = G.events.filter(e => e.type === 'duel_initiated');
+      expect(initiated).toHaveLength(1);
+      expect(initiated[0].actor).toBe('0');
+      expect(initiated[0].data).toEqual({ propertyId: 3, ownerId: '1', rent: 8 });
+    });
+
+    test('cooldown blocks a second initiate within cooldownTurns; payRent still works meanwhile', () => {
+      const G = freshG();
+      G.players[0].lastDuelTurn = 5; // challenger initiated a duel back on turn 5
+      G.totalTurns = 7; // 2 turns later (< cooldownTurns=3)
+      G.duel = offerDuel(); // a fresh offer from landing on the property again
+
+      const result = Monopoly.moves.initiateDuel(G, ctxWithDice('0', []));
+      expect(result).toBe(INVALID_MOVE);
+      expect(G.duel.phase).toBe('offer'); // untouched
+      expect(G.players[0].lastDuelTurn).toBe(5); // untouched
+
+      // payRent carries no cooldown gate — still available as the fallback.
+      const payResult = Monopoly.moves.payRent(G, ctxWithDice('0', []));
+      expect(payResult).not.toBe(INVALID_MOVE);
+      expect(G.duel).toBeNull();
+    });
+
+    test('cooldown expires exactly at cooldownTurns -> initiate allowed again', () => {
+      const G = freshG();
+      G.players[0].lastDuelTurn = 5;
+      G.totalTurns = 8; // 8 - 5 = 3 == cooldownTurns (not <)
+      G.duel = offerDuel();
+
+      const result = Monopoly.moves.initiateDuel(G, ctxWithDice('0', []));
+      expect(result).not.toBe(INVALID_MOVE);
+      expect(G.duel.phase).toBe('response');
+      expect(G.players[0].lastDuelTurn).toBe(8);
+    });
+
+    test('cooldownTurns=0 disables the cooldown entirely', () => {
+      const original = RULES.duel.cooldownTurns;
+      RULES.duel.cooldownTurns = 0;
+      try {
+        const G = freshG();
+        G.players[0].lastDuelTurn = 9;
+        G.totalTurns = 9; // same turn — would fail under the default cooldown
+        G.duel = offerDuel();
+
+        const result = Monopoly.moves.initiateDuel(G, ctxWithDice('0', []));
+        expect(result).not.toBe(INVALID_MOVE);
+        expect(G.duel.phase).toBe('response');
+      } finally {
+        RULES.duel.cooldownTurns = original; // restore the shared live RULES singleton
+      }
+    });
+  });
+
+  describe('respondDuel', () => {
+    test('challenger wins (higher total): rent waived, no payment, full payload, dice arrays length 2', () => {
+      const G = freshG();
+      G.players[0].character = statChar({ stamina: 10, luck: 0 }); // challenger
+      G.players[1].character = statChar({ stamina: 2, luck: 0 });  // owner/defender
+      G.duel = responseDuel();
+      G.hasRolled = true;
+      const p0Before = G.players[0].money;
+      const p1Before = G.players[1].money;
+
+      const ctx = ctxWithDice('1', [6, 6, 1, 1]); // challenger 6+6, defender 1+1
+      const result = Monopoly.moves.respondDuel(G, ctx);
+
+      expect(result).not.toBe(INVALID_MOVE);
+      expect(G.duel).toBeNull();
+      expect(G.turnPhase).toBe('done');
+      expect(G.players[0].money).toBe(p0Before); // waived — no transfer
+      expect(G.players[1].money).toBe(p1Before);
+      expect(G.events.filter(e => e.type === 'rent_paid')).toHaveLength(0);
+
+      const resolved = G.events.filter(e => e.type === 'duel_resolved');
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0].actor).toBe('0'); // challenger
+      const { data } = resolved[0];
+      expect(data.propertyId).toBe(3);
+      expect(data.ownerId).toBe('1');
+      expect(data.winnerId).toBe('0');
+      expect(data.outcome).toBe('waived');
+      expect(data.challengerRoll.dice).toEqual([6, 6]);
+      expect(data.challengerRoll.dice).toHaveLength(2);
+      expect(data.challengerRoll.stamina).toBe(10);
+      expect(data.challengerRoll.luckBonus).toBe(0);
+      expect(data.challengerRoll.total).toBe(22); // 6+6+10+0
+      expect(data.defenderRoll.dice).toEqual([1, 1]);
+      expect(data.defenderRoll.dice).toHaveLength(2);
+      expect(data.defenderRoll.total).toBe(4); // 1+1+2+0
+
+      // turnPhase 'done' proof: endTurn now succeeds.
+      const ctx2 = ctxWithDice('0', []);
+      expect(Monopoly.moves.endTurn(G, ctx2)).not.toBe(INVALID_MOVE);
+      expect(ctx2.events.endTurn).toHaveBeenCalled();
+    });
+
+    test('challenger loses: 2x rent paid to owner, payload outcome "double"', () => {
+      const G = freshG();
+      G.players[0].character = statChar({ stamina: 1, luck: 0 });
+      G.players[1].character = statChar({ stamina: 10, luck: 0 });
+      G.duel = responseDuel();
+      G.hasRolled = true;
+      const p0Before = G.players[0].money;
+      const p1Before = G.players[1].money;
+
+      const ctx = ctxWithDice('1', [1, 1, 6, 6]);
+      const result = Monopoly.moves.respondDuel(G, ctx);
+
+      expect(result).not.toBe(INVALID_MOVE);
+      expect(G.duel).toBeNull();
+      expect(G.turnPhase).toBe('done');
+      expect(G.players[0].money).toBe(p0Before - 16); // loseMultiplier(2) * rent(8)
+      expect(G.players[1].money).toBe(p1Before + 16);
+      const rentPaid = G.events.filter(e => e.type === 'rent_paid');
+      expect(rentPaid).toHaveLength(1);
+      expect(rentPaid[0].data).toEqual({ propertyId: 3, ownerId: '1', amount: 16 });
+      const resolved = G.events.filter(e => e.type === 'duel_resolved');
+      expect(resolved[0].data.outcome).toBe('double');
+      expect(resolved[0].data.winnerId).toBe('1');
+
+      const ctx2 = ctxWithDice('0', []);
+      expect(Monopoly.moves.endTurn(G, ctx2)).not.toBe(INVALID_MOVE);
+    });
+
+    test('challenger loses and cannot cover 2x rent -> bankruptcy; properties transfer to owner; G.duel already null before the payout', () => {
+      const G = freshG();
+      G.players[0].character = statChar({ stamina: 1, luck: 0 });
+      G.players[0].money = 10;
+      G.players[0].properties = [5];
+      G.ownership[5] = '0';
+      G.players[1].character = statChar({ stamina: 10, luck: 0 });
+      G.duel = responseDuel(); // rent 8 -> loss payment 16 > 10 available
+      G.hasRolled = true;
+
+      const ctx = ctxWithDice('1', [1, 1, 6, 6]);
+      const result = Monopoly.moves.respondDuel(G, ctx);
+
+      expect(result).not.toBe(INVALID_MOVE);
+      expect(G.duel).toBeNull();
+      expect(G.players[0].bankrupt).toBe(true);
+      expect(G.players[0].money).toBe(0);
+      expect(G.ownership[5]).toBe('1'); // property transferred to the creditor (duel owner)
+      const bankruptcy = G.events.filter(e => e.type === 'bankruptcy');
+      expect(bankruptcy).toHaveLength(1);
+      expect(bankruptcy[0].data).toEqual({ creditorId: '1' });
+      expect(G.turnPhase).toBe('done');
+    });
+
+    test('tie total (tieGoesToDefender default true): defender/owner wins, loss payment still fires', () => {
+      const G = freshG();
+      G.players[0].character = statChar({ stamina: 4, luck: 0 });
+      G.players[1].character = statChar({ stamina: 4, luck: 0 });
+      G.duel = responseDuel();
+      G.hasRolled = true;
+
+      // Equal dice + equal stats -> equal totals. Engineered by direct stat
+      // assignment (both characters given stamina:4/luck:0 above) and a
+      // symmetric dice sequence, rather than a seed hunt through the real
+      // Client's PRNG — see this describe block's header comment.
+      const ctx = ctxWithDice('1', [3, 3, 3, 3]);
+      const result = Monopoly.moves.respondDuel(G, ctx);
+
+      expect(result).not.toBe(INVALID_MOVE);
+      const resolved = G.events.filter(e => e.type === 'duel_resolved')[0];
+      expect(resolved.data.challengerRoll.total).toBe(resolved.data.defenderRoll.total);
+      expect(resolved.data.winnerId).toBe('1'); // owner/defender wins the tie
+      expect(resolved.data.outcome).toBe('double');
+      expect(G.events.filter(e => e.type === 'rent_paid')).toHaveLength(1); // tie = challenger loses
+    });
+
+    test('guards: no duel / wrong phase (still "offer", not "response") -> INVALID_MOVE', () => {
+      const G = freshG();
+      expect(Monopoly.moves.respondDuel(G, ctxWithDice('1', [3, 3, 3, 3]))).toBe(INVALID_MOVE);
+      G.duel = offerDuel();
+      expect(Monopoly.moves.respondDuel(G, ctxWithDice('1', [3, 3, 3, 3]))).toBe(INVALID_MOVE);
+      expect(G.duel.phase).toBe('offer');
+    });
+  });
+
+  describe('declineDuel', () => {
+    test('pays ordinary (single) rent only, no dice rolled, clears the duel', () => {
+      const G = freshG();
+      G.duel = responseDuel();
+      G.hasRolled = true;
+      const p0Before = G.players[0].money;
+      const p1Before = G.players[1].money;
+
+      const ctx = ctxWithDice('1', []);
+      const result = Monopoly.moves.declineDuel(G, ctx);
+
+      expect(result).not.toBe(INVALID_MOVE);
+      expect(G.duel).toBeNull();
+      expect(G.turnPhase).toBe('done');
+      expect(G.players[0].money).toBe(p0Before - 8); // single rent, not doubled
+      expect(G.players[1].money).toBe(p1Before + 8);
+      expect(G.events.filter(e => e.type === 'duel_resolved')).toHaveLength(0); // no roll happened
+      const declined = G.events.filter(e => e.type === 'duel_declined');
+      expect(declined).toHaveLength(1);
+      expect(declined[0].actor).toBe('1'); // owner
+      expect(declined[0].data).toEqual({ challengerId: '0', propertyId: 3 });
+      const rentPaid = G.events.filter(e => e.type === 'rent_paid');
+      expect(rentPaid).toHaveLength(1);
+      expect(rentPaid[0].data).toEqual({ propertyId: 3, ownerId: '1', amount: 8 });
+
+      // turnPhase 'done' proof: endTurn now succeeds.
+      const ctx2 = ctxWithDice('0', []);
+      expect(Monopoly.moves.endTurn(G, ctx2)).not.toBe(INVALID_MOVE);
+    });
+
+    test('guards: no duel / wrong phase -> INVALID_MOVE', () => {
+      const G = freshG();
+      expect(Monopoly.moves.declineDuel(G, ctxWithDice('1', []))).toBe(INVALID_MOVE);
+      G.duel = offerDuel(); // still 'offer', not 'response'
+      expect(Monopoly.moves.declineDuel(G, ctxWithDice('1', []))).toBe(INVALID_MOVE);
+    });
+  });
+
+  describe('determinism (direct-invocation control)', () => {
+    test('identical dice/stat inputs -> identical dice arrays and totals across two independent runs', () => {
+      function run() {
+        const G = freshG();
+        G.players[0].character = statChar({ stamina: 3, luck: 2 });
+        G.players[1].character = statChar({ stamina: 5, luck: 4 });
+        G.duel = responseDuel();
+        G.hasRolled = true;
+        const ctx = ctxWithDice('1', [2, 5, 4, 1]);
+        Monopoly.moves.respondDuel(G, ctx);
+        return G.events.filter(e => e.type === 'duel_resolved')[0].data;
+      }
+      const a = run();
+      const b = run();
+      expect(a.challengerRoll.dice).toEqual(b.challengerRoll.dice);
+      expect(a.defenderRoll.dice).toEqual(b.defenderRoll.dice);
+      expect(a.challengerRoll.total).toBe(b.challengerRoll.total);
+      expect(a.defenderRoll.total).toBe(b.defenderRoll.total);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 4: end-to-end proof through the REAL boardgame.io Client — the
+// hand-built-G tests above control dice/stats directly; this proves the same
+// four moves wire up correctly when driven through the actual reducer on top
+// of Task 3's real landing-interception flow, and that the real seeded PRNG
+// (not a mocked ctx.random) reproduces identical dice given the identical
+// seed + script.
+// ---------------------------------------------------------------------------
+describe('Duel mechanism — end-to-end via real seeded Client (Task 4)', () => {
+  beforeEach(() => {
+    RULES.duel.enabled = true;
+  });
+  afterEach(() => {
+    RULES.duel.enabled = false; // restore the shared live RULES singleton
+  });
+
+  // Reuses Task 3's landing-interception scenario verbatim (seed 96,
+  // marcus-grayline P0 / sophia-ember P1, P0 buys Oriental Ave, P1 lands on
+  // it owing $11 rent) through to full duel resolution.
+  function playToResolution() {
+    const client = makeClient(2, 96);
+    client.moves.selectCharacter('marcus-grayline'); // P0 (owner)
+    client.moves.selectCharacter('sophia-ember');     // P1 (challenger)
+    client.moves.rollDice();     // P0 lands on Oriental Ave (unowned)
+    client.moves.buyProperty();  // P0 buys it
+    client.moves.endTurn();
+    client.moves.rollDice();     // P1 lands on P0's Oriental Ave -> duel offer
+    client.moves.initiateDuel(); // P1 (challenger) escalates the offer
+    client.moves.respondDuel();  // P0 (owner) rolls to defend
+    return client.getState().G;
+  }
+
+  test('offer -> initiate -> respond resolves through the real Client; turnPhase done; endTurn succeeds', () => {
+    const G = playToResolution();
+    expect(G.duel).toBeNull();
+    expect(G.turnPhase).toBe('done');
+    const resolved = G.events.filter(e => e.type === 'duel_resolved');
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].data.challengerRoll.dice).toHaveLength(2);
+    expect(resolved[0].data.defenderRoll.dice).toHaveLength(2);
+    const initiated = G.events.filter(e => e.type === 'duel_initiated');
+    expect(initiated).toHaveLength(1);
+    expect(initiated[0].data).toEqual({ propertyId: 6, ownerId: '0', rent: 11 });
+  });
+
+  test('same seed run twice -> byte-identical dice arrays and outcome (determinism through the real PRNG)', () => {
+    const run1 = playToResolution();
+    const run2 = playToResolution();
+    const r1 = run1.events.filter(e => e.type === 'duel_resolved')[0].data;
+    const r2 = run2.events.filter(e => e.type === 'duel_resolved')[0].data;
+    expect(r1.challengerRoll.dice).toEqual(r2.challengerRoll.dice);
+    expect(r1.defenderRoll.dice).toEqual(r2.defenderRoll.dice);
+    expect(r1.winnerId).toBe(r2.winnerId);
+    expect(r1.outcome).toBe(r2.outcome);
+  });
+});

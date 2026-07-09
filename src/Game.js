@@ -1850,6 +1850,87 @@ export const Monopoly = {
       }
     },
 
+    // --- Duel (Task 4) ---
+    // Consumes the G.duel envelope Task 3's landing interception creates
+    // (`{phase:'offer', propertyId, ownerId, challengerId, rent}`).
+
+    // payRent: the default response to an offer — challenger pays the owner
+    // the frozen rent. Reuses payRentAmount verbatim (Task 3) so the money
+    // move/event/bankruptcy shape is identical to the ordinary auto-pay path.
+    payRent: (G, ctx) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
+      if (!G.duel || G.duel.phase !== 'offer') return INVALID_MOVE;
+      payRentAmount(G, ctx, G.duel.challengerId, G.duel.ownerId, G.duel.propertyId, G.duel.rent);
+      G.duel = null;
+      G.turnPhase = 'done';
+    },
+
+    // initiateDuel: the challenger (ctx.currentPlayer) escalates the offer
+    // into a duel, gated by a per-challenger cooldown
+    // (RULES.duel.cooldownTurns turns since their lastDuelTurn; 0 disables
+    // the cooldown entirely).
+    initiateDuel: (G, ctx) => {
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
+      if (!G.duel || G.duel.phase !== 'offer') return INVALID_MOVE;
+      const player = G.players[G.duel.challengerId];
+      const cd = RULES.duel.cooldownTurns;
+      if (cd > 0 && player.lastDuelTurn != null && (G.totalTurns - player.lastDuelTurn) < cd) return INVALID_MOVE;
+      player.lastDuelTurn = G.totalTurns;
+      G.duel.phase = 'response';
+      logEvent(G, 'duel_initiated', G.duel.challengerId, { propertyId: G.duel.propertyId, ownerId: G.duel.ownerId, rent: G.duel.rent });
+      if (G.enforceSeats) ctx.events.setActivePlayers({ value: { [G.duel.ownerId]: Stage.NULL, [G.duel.challengerId]: Stage.NULL } });
+    },
+
+    // respondDuel: the owner (defender) accepts the challenge — 2d6 +
+    // statPrimary + floor(statSecondary / secondaryDivisor) per side, pinned
+    // roll order (challenger first, then defender) for determinism. Ties go
+    // to the defender when RULES.duel.tieGoesToDefender (default true).
+    // G.duel existence is checked BEFORE requireActor because the expected-
+    // actor expression dereferences G.duel.ownerId (acceptTrade precedent,
+    // above, does the same for G.trade.targetPlayerId).
+    respondDuel: (G, ctx) => {
+      if (!G.duel || G.duel.phase !== 'response') return INVALID_MOVE;
+      if (!requireActor(G, ctx, G.duel.ownerId)) return INVALID_MOVE;
+      const roll = (p) => {
+        const dice = [];
+        for (let i = 0; i < RULES.duel.diceCount; i++) dice.push(Math.floor(ctx.random.Number() * 6) + 1);
+        const stamina = p.character.stats[RULES.duel.statPrimary];
+        const luckBonus = Math.floor(p.character.stats[RULES.duel.statSecondary] / RULES.duel.secondaryDivisor);
+        return { dice, stamina, luckBonus, total: dice.reduce((a, b) => a + b, 0) + stamina + luckBonus };
+      };
+      const challenger = G.players[G.duel.challengerId];
+      const owner = G.players[G.duel.ownerId];
+      const challengerRoll = roll(challenger);   // pinned order: challenger first
+      const defenderRoll = roll(owner);
+      const challengerWins = RULES.duel.tieGoesToDefender
+        ? challengerRoll.total > defenderRoll.total
+        : challengerRoll.total >= defenderRoll.total;
+      const winnerId = challengerWins ? G.duel.challengerId : G.duel.ownerId;
+      const outcome = challengerWins ? 'waived' : 'double';
+      logEvent(G, 'duel_resolved', G.duel.challengerId, {
+        propertyId: G.duel.propertyId, ownerId: G.duel.ownerId,
+        challengerRoll, defenderRoll, winnerId, outcome,
+      });
+      const duel = G.duel;
+      G.duel = null; // clear BEFORE the payment so the helper's bankruptcy path sees no pending duel
+      if (!challengerWins) payRentAmount(G, ctx, duel.challengerId, duel.ownerId, duel.propertyId, RULES.duel.loseMultiplier * duel.rent);
+      G.turnPhase = 'done';
+      if (G.enforceSeats) ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
+    },
+
+    // declineDuel: the owner refuses the challenge outright — falls back to
+    // ordinary (single) rent, no roll.
+    declineDuel: (G, ctx) => {
+      if (!G.duel || G.duel.phase !== 'response') return INVALID_MOVE;
+      if (!requireActor(G, ctx, G.duel.ownerId)) return INVALID_MOVE;
+      logEvent(G, 'duel_declined', G.duel.ownerId, { challengerId: G.duel.challengerId, propertyId: G.duel.propertyId });
+      const duel = G.duel;
+      G.duel = null;
+      payRentAmount(G, ctx, duel.challengerId, duel.ownerId, duel.propertyId, duel.rent);
+      G.turnPhase = 'done';
+      if (G.enforceSeats) ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
+    },
+
     endTurn: (G, ctx) => {
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.duel) return INVALID_MOVE;
