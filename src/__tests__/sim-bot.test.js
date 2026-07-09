@@ -183,6 +183,100 @@ describe('decideMoves — blocking states', () => {
   });
 });
 
+// --- duel (Task 7 of the duel mechanism) ---------------------------------------
+// duelDecision derives its actors from G.duel.challengerId/ownerId directly (see
+// bot.js), never from the `playerID`/`ctx` args — so every test below passes
+// ctx0/'0' regardless of which side ('0' the challenger, '1' the owner) is
+// actually deciding; only G.duel and the players' character stats matter.
+describe('decideMoves — duel offer (challenger)', () => {
+  function offerG(challengerStats, ownerStats) {
+    const G = baseG({ hasRolled: true, totalTurns: 10 });
+    G.duel = { phase: 'offer', propertyId: 1, ownerId: '1', challengerId: '0', rent: 50 };
+    G.players[0].character = { stats: Object.assign({ stamina: 0, luck: 0 }, challengerStats) };
+    G.players[1].character = { stats: Object.assign({ stamina: 0, luck: 0 }, ownerStats) };
+    return G;
+  }
+
+  test("'never' always pays rent, regardless of stats", () => {
+    const G = offerG({ stamina: 10, luck: 10 }, { stamina: 1, luck: 0 });
+    expect(decideMoves(G, ctx0, '0', { duelPolicy: 'never' })).toEqual([['payRent']]);
+  });
+
+  test("'always' initiates when cooldown allows", () => {
+    const G = offerG({}, {});
+    G.players[0].lastDuelTurn = null; // never dueled before → no cooldown
+    expect(decideMoves(G, ctx0, '0', { duelPolicy: 'always' })).toEqual([['initiateDuel']]);
+  });
+
+  test("'always' falls back to payRent when cooldown blocks (never dispatches an INVALID_MOVE)", () => {
+    const G = offerG({}, {});
+    G.totalTurns = 10;
+    G.players[0].lastDuelTurn = 9; // 10-9=1 < default cooldownTurns 3 → blocked
+    expect(decideMoves(G, ctx0, '0', { duelPolicy: 'always' })).toEqual([['payRent']]);
+  });
+
+  test("'always' initiates once the cooldown has elapsed", () => {
+    const G = offerG({}, {});
+    G.totalTurns = 10;
+    G.players[0].lastDuelTurn = 5; // 10-5=5 >= 3 → not blocked
+    expect(decideMoves(G, ctx0, '0', { duelPolicy: 'always' })).toEqual([['initiateDuel']]);
+  });
+
+  test("'strength' initiates when challenger strictly stronger (stamina + floor(luck/2))", () => {
+    // challenger: 6 + floor(4/2) = 8; owner: 5 + floor(2/2) = 6
+    const G = offerG({ stamina: 6, luck: 4 }, { stamina: 5, luck: 2 });
+    expect(decideMoves(G, ctx0, '0', { duelPolicy: 'strength' })).toEqual([['initiateDuel']]);
+  });
+
+  test("'strength' pays rent on a tie (strict > required, ties lose)", () => {
+    const G = offerG({ stamina: 5, luck: 0 }, { stamina: 5, luck: 0 });
+    expect(decideMoves(G, ctx0, '0', { duelPolicy: 'strength' })).toEqual([['payRent']]);
+  });
+
+  test("'strength' pays rent when challenger is weaker", () => {
+    const G = offerG({ stamina: 3, luck: 0 }, { stamina: 5, luck: 4 });
+    expect(decideMoves(G, ctx0, '0', { duelPolicy: 'strength' })).toEqual([['payRent']]);
+  });
+});
+
+describe('decideMoves — duel response (owner), policy-independent', () => {
+  function responseG(challengerStats, ownerStats) {
+    const G = baseG({ hasRolled: true });
+    G.duel = { phase: 'response', propertyId: 1, ownerId: '1', challengerId: '0', rent: 50 };
+    G.players[0].character = { stats: Object.assign({ stamina: 0, luck: 0 }, challengerStats) };
+    G.players[1].character = { stats: Object.assign({ stamina: 0, luck: 0 }, ownerStats) };
+    return G;
+  }
+
+  test('defender strictly stronger → respondDuel (fight)', () => {
+    const G = responseG({ stamina: 3, luck: 0 }, { stamina: 6, luck: 4 });
+    expect(decideMoves(G, ctx0, '0', { duelPolicy: 'never' })).toEqual([['respondDuel']]);
+  });
+
+  test('tie → respondDuel (matches engine tieGoesToDefender default)', () => {
+    const G = responseG({ stamina: 5, luck: 0 }, { stamina: 5, luck: 0 });
+    expect(decideMoves(G, ctx0, '0', { duelPolicy: 'never' })).toEqual([['respondDuel']]);
+  });
+
+  test('defender weaker → declineDuel', () => {
+    const G = responseG({ stamina: 8, luck: 4 }, { stamina: 3, luck: 0 });
+    expect(decideMoves(G, ctx0, '0', { duelPolicy: 'always' })).toEqual([['declineDuel']]);
+  });
+
+  test("owner's duelPolicy value never changes the response decision", () => {
+    const strong = responseG({ stamina: 1, luck: 0 }, { stamina: 9, luck: 8 });
+    const weak = responseG({ stamina: 1, luck: 0 }, { stamina: 9, luck: 8 });
+    expect(decideMoves(strong, ctx0, '0', { duelPolicy: 'strength' }))
+      .toEqual(decideMoves(weak, ctx0, '0', { duelPolicy: 'never' }));
+  });
+});
+
+describe('DEFAULT_POLICY.duelPolicy', () => {
+  test("defaults to 'never' (existing sim runs are byte-identical unless overridden)", () => {
+    expect(DEFAULT_POLICY.duelPolicy).toBe('never');
+  });
+});
+
 describe('decideMoves — mortgage to survive', () => {
   test('mortgages lowest-value holding when money is negative', () => {
     const G = baseG({ hasRolled: true });

@@ -23,6 +23,7 @@
 //   - Win attribution: map the winning SEAT back to the contestant that occupied it.
 
 import { runMatch } from './match';
+import { RULES } from '../../mods/active-rules';
 
 // 60/40 fairness gate: the dominant contestant's win% must be <= 60% (equivalently
 // both >= 40%). Tunable via spec.gate.{maxWinPct} so a stricter/looser bar is config.
@@ -78,6 +79,65 @@ export function evaluateGate(rows, gate) {
   };
 }
 
+// === Duel economics (Task 7 of the duel mechanism) ============================
+// Per-CHARACTER duel cashflow, folded across every game of a tournament. Silent
+// (an empty accumulator) unless RULES.duel.enabled produced at least one duel —
+// runs on duel-free maps/policies see zero events and the table stays empty, so
+// printTournament (cli.js) can skip it entirely and leave existing output
+// byte-identical.
+
+function emptyDuelRow() {
+  return { duelsInitiated: 0, duelsWon: 0, rentWaived: 0, rentDoubledPaid: 0 };
+}
+
+function duelRowFor(acc, charId) {
+  return acc[charId] || (acc[charId] = emptyDuelRow());
+}
+
+// Scan ONE match's G.events (runMatch's result.events — Task 7 addition to
+// match.js) for duel_initiated/duel_resolved and fold the counts into `acc`
+// (mutated in place, keyed by CHARACTER id, not seat). `charIds` is the
+// per-seat character array for THIS game — the same array runTournament
+// already builds per game (charIds[aSeat]/[bSeat]) to launch runMatch.
+//
+// duel_offered/duel_declined are deliberately NOT scanned: an offer alone
+// isn't a duel (no roll happened), and a decline falls back to ordinary
+// single rent — neither produces duel cashflow to report.
+//
+// rent is carried on duel_initiated's payload (frozen G.duel.rent) but NOT on
+// duel_resolved's (see src/events.js) — the two events are always adjacent for
+// the SAME duel (G.duel is a singleton; a new duel cannot start before the
+// previous one resolves), so `pendingRent` correlates them by sequence.
+export function accumulateDuelStats(acc, events, charIds) {
+  let pendingRent = null;
+  (events || []).forEach(ev => {
+    if (ev.type === 'duel_initiated') {
+      pendingRent = ev.data.rent;
+      duelRowFor(acc, charIds[parseInt(ev.actor)]).duelsInitiated++;
+    } else if (ev.type === 'duel_resolved') {
+      const rent = pendingRent != null ? pendingRent : 0;
+      pendingRent = null;
+      duelRowFor(acc, charIds[parseInt(ev.data.winnerId)]).duelsWon++;
+      // challenger-centric cashflow: what THIS duel cost/saved the challenger
+      // (actor on duel_resolved is always the challenger — see Game.js respondDuel).
+      const challengerRow = duelRowFor(acc, charIds[parseInt(ev.actor)]);
+      if (ev.data.outcome === 'waived') {
+        challengerRow.rentWaived += rent;
+      } else {
+        challengerRow.rentDoubledPaid += RULES.duel.loseMultiplier * rent;
+      }
+    }
+  });
+  return acc;
+}
+
+// Format an accumulator into a sorted table for printing/asserting. Rows sorted
+// by charId so output is deterministic regardless of Object.keys iteration
+// order guarantees.
+export function duelStatsTable(acc) {
+  return Object.keys(acc).sort().map(charId => Object.assign({ charId }, acc[charId]));
+}
+
 // Run the full tournament.
 //   spec = {
 //     world,            // atlas world object or null (classic)
@@ -104,6 +164,7 @@ export function runTournament(spec) {
   const labels = [A.label, B.label];
   const wins = { [A.label]: 0, [B.label]: 0 };
   let draws = 0;
+  const duelStats = {};
 
   for (let i = 0; i < games; i++) {
     const aSeat = seatOfA(i, games);
@@ -122,6 +183,8 @@ export function runTournament(spec) {
       maxTurns,
     });
 
+    accumulateDuelStats(duelStats, result.events, charIds);
+
     // Attribute the win to the contestant occupying the winning seat.
     if (result.winner === null || result.winner === undefined) {
       draws++;
@@ -135,6 +198,9 @@ export function runTournament(spec) {
   const decisive = games - draws;
   const table = aggregate(wins, decisive, labels);
   const gateResult = evaluateGate(table, gate);
+  // null (not []) when duel-free, so callers can `if (result.duelTable)` rather
+  // than checking .length — and printTournament stays silent on duel-free runs.
+  const duelTable = Object.keys(duelStats).length > 0 ? duelStatsTable(duelStats) : null;
 
   return {
     table,
@@ -144,6 +210,7 @@ export function runTournament(spec) {
     draws,
     seed: baseSeed,
     world: world ? world.id : 'classic',
+    duelTable,
   };
 }
 
@@ -213,5 +280,23 @@ export function runStrategyTournament(spec) {
     // Per-character-assignment breakdown, so a reviewer can see the confound is gone:
     // if strategyA wins regardless of which character carries it, the effect is real.
     subTournaments: { charAisStrategyA: subA.table, charBisStrategyA: subB.table },
+    duelTable: mergeDuelTables(subA.duelTable, subB.duelTable),
   };
+}
+
+// Combine two duelTable arrays (each already deduped+sorted by charId — see
+// duelStatsTable) by summing rows sharing a charId. Either/both may be null
+// (duel-free sub-run); the result is null only when BOTH are, so a duel that
+// only occurred in one of the two character→strategy assignments still shows.
+export function mergeDuelTables(a, b) {
+  if (!a && !b) return null;
+  const acc = {};
+  (a || []).concat(b || []).forEach(row => {
+    const r = duelRowFor(acc, row.charId);
+    r.duelsInitiated += row.duelsInitiated;
+    r.duelsWon += row.duelsWon;
+    r.rentWaived += row.rentWaived;
+    r.rentDoubledPaid += row.rentDoubledPaid;
+  });
+  return duelStatsTable(acc);
 }

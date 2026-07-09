@@ -34,6 +34,19 @@ export const DEFAULT_POLICY = {
   useRedraws: false,
   // Route strategy on atlas forks: 'camper' | 'tourer' (D4). No-op on loop maps.
   routeStrategy: 'camper',
+  // Challenger's response to a rent-duel offer (Task 7 of the duel mechanism;
+  // no-op unless RULES.duel.enabled, so this default leaves every duel-free
+  // sim run byte-identical): 'never' always pays rent (no duel ever offered
+  // by this bot); 'always' always initiates (falling back to payRent only
+  // when the challenger's cooldown blocks it — an INVALID_MOVE must never be
+  // dispatched); 'strength' initiates only when the challenger's duel
+  // strength (statPrimary + floor(statSecondary / secondaryDivisor), per
+  // RULES.duel) strictly exceeds the owner's, else pays rent. Deliberately
+  // named 'strength', not 'ev' — these are stat heuristics, not a true
+  // expected-value calculation. The OWNER's fight-vs-decline response is
+  // NOT gated by this knob (see duelDecision below): every policy value
+  // must still answer sensibly when acting as the defender.
+  duelPolicy: 'never',
 };
 
 // Merge a partial policy over the defaults (shallow — all keys are scalars).
@@ -166,16 +179,18 @@ export function chooseRoute(G, ctx, choices, strategy) {
 // roll case, the immediate follow-up commit), then the runner re-reads G and calls
 // again until decideMoves returns [['endTurn']] (or an empty list if stuck).
 //
-// Priority order (D3):
+// Priority order (D3; duel resolution added Task 7 of the duel mechanism):
 //   1. jail (not yet rolled): pay fine if affordable+policy, else roll to escape
 //   2. roll: rollOnly+commitRoute (atlas) or rollDice (loop), once per turn
 //   3. resolve blocking card: acceptCard
-//   4. resolve auction: bid up to cap, else passAuction
-//   5. resolve buy decision: buyProperty if affordable above buffer, else passProperty
-//   6. build: upgrade cheapest eligible full-group space while buffer allows
-//   7. survive: mortgage lowest-value holdings if money < 0 (shouldn't normally
+//   4. resolve duel: challenger offer (payRent/initiateDuel per duelPolicy) or
+//      owner response (respondDuel/declineDuel by strength, policy-independent)
+//   5. resolve auction: bid up to cap, else passAuction
+//   6. resolve buy decision: buyProperty if affordable above buffer, else passProperty
+//   7. build: upgrade cheapest eligible full-group space while buffer allows
+//   8. survive: mortgage lowest-value holdings if money < 0 (shouldn't normally
 //      happen post-resolution, but covers a card/tax that dipped us negative)
-//   8. endTurn
+//   9. endTurn
 export function decideMoves(G, ctx, playerID, policy) {
   const pol = resolvePolicy(policy);
   const player = G.players[parseInt(playerID)];
@@ -186,6 +201,15 @@ export function decideMoves(G, ctx, playerID, policy) {
   // take precedence over a fresh roll.
   if (G.pendingCard) {
     return [['acceptCard']];
+  }
+  // Duel (Task 7): both sub-phases block endTurn (engine 8-move guard list),
+  // so this must resolve before anything else, same tier as auction/canBuy.
+  // duelDecision derives the acting player directly from G.duel.challengerId/
+  // ownerId rather than the `playerID` argument (mirrors auctionDecision's
+  // acting-bidder derivation below) — correct regardless of which seat the
+  // runner's actingSeat computation currently points at.
+  if (G.duel) {
+    return duelDecision(G, pol);
   }
   if (G.auction) {
     return auctionDecision(G, ctx, pol);
@@ -274,4 +298,48 @@ function auctionDecision(G, ctx, pol) {
     return [['placeBid', minBid]];
   }
   return [['passAuction']];
+}
+
+// === Duel decision (Task 7) ==================================================
+// A rent-duel offer/response, per RULES.duel §engine spec. G.duel is a singleton
+// envelope: {phase:'offer'|'response', propertyId, ownerId, challengerId, rent}.
+// Both branches derive their actors from G.duel itself (never from a `playerID`
+// argument) so the decision is correct regardless of which seat the runner
+// happens to be iterating — same reasoning as auctionDecision above deriving the
+// acting bidder from G.auction rather than trusting the caller's seat.
+function duelDecision(G, pol) {
+  const duel = G.duel;
+  if (duel.phase === 'offer') {
+    if (pol.duelPolicy === 'never') return [['payRent']];
+    if (pol.duelPolicy === 'always') {
+      return duelCooldownBlocked(G, duel) ? [['payRent']] : [['initiateDuel']];
+    }
+    // 'strength': initiate only on a strict advantage; ties/weakness pay rent.
+    const chalStrength = duelStrength(G, duel.challengerId);
+    const ownerStrength = duelStrength(G, duel.ownerId);
+    return chalStrength > ownerStrength ? [['initiateDuel']] : [['payRent']];
+  }
+  // phase 'response': the owner (defender) decides. Policy-independent by spec —
+  // every duelPolicy value ('never' included, since a 'never' bot never
+  // INITIATES but can still be challenged as an owner) answers with the same
+  // strength rule: fight when at least as strong as the challenger (matches the
+  // engine's tieGoesToDefender default), else decline.
+  const chalStrength = duelStrength(G, duel.challengerId);
+  const defStrength = duelStrength(G, duel.ownerId);
+  return defStrength >= chalStrength ? [['respondDuel']] : [['declineDuel']];
+}
+
+// Mirrors the engine's respondDuel roll() stat term (Game.js), minus the dice:
+// statPrimary + floor(statSecondary / secondaryDivisor), per RULES.duel.
+function duelStrength(G, playerId) {
+  const stats = G.players[playerId].character.stats;
+  return stats[RULES.duel.statPrimary] + Math.floor(stats[RULES.duel.statSecondary] / RULES.duel.secondaryDivisor);
+}
+
+// Mirrors the engine's initiateDuel cooldown guard (Game.js) exactly, so the
+// bot never dispatches an initiateDuel the engine would reject as INVALID_MOVE.
+function duelCooldownBlocked(G, duel) {
+  const challenger = G.players[duel.challengerId];
+  const cd = RULES.duel.cooldownTurns;
+  return cd > 0 && challenger.lastDuelTurn != null && (G.totalTurns - challenger.lastDuelTurn) < cd;
 }

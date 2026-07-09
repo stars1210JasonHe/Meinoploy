@@ -1,4 +1,7 @@
-import { seatOfA, ci95, aggregate, evaluateGate, DEFAULT_GATE, runStrategyTournament } from '../sim/tournament';
+import {
+  seatOfA, ci95, aggregate, evaluateGate, DEFAULT_GATE, runStrategyTournament,
+  accumulateDuelStats, duelStatsTable, mergeDuelTables,
+} from '../sim/tournament';
 import { rankStandings, getTotalAssets } from '../sim/standings';
 import { TERRA_CIRCUIT } from '../../mods/dominion/atlas/worlds/terra-circuit';
 
@@ -198,5 +201,112 @@ describe('runStrategyTournament — character-confound removal', () => {
     const a = runStrategyTournament(base);
     const b = runStrategyTournament(base);
     expect(b.table).toEqual(a.table);
+  });
+});
+
+// --- duel economics accumulation (Task 7 of the duel mechanism) ---------------
+// Unit-tested against CRAFTED events (a stand-in for a real runMatch result's
+// `.events`), not a full tournament — real duel activity requires
+// RULES.duel.enabled (off by default) plus a non-'never' duelPolicy, and
+// driving that through real games in jest would be slow; the accumulation
+// LOGIC itself is what's under test here.
+describe('accumulateDuelStats / duelStatsTable — duel cashflow per character', () => {
+  const charIds = ['albert-victor', 'lia-startrace']; // seat 0, seat 1
+
+  test('challenger wins (outcome waived): rentWaived credited to the challenger, duelsWon too', () => {
+    const events = [
+      { type: 'duel_offered', actor: '0', data: { propertyId: 3, ownerId: '1', rent: 40 } },
+      { type: 'duel_initiated', actor: '0', data: { propertyId: 3, ownerId: '1', rent: 40 } },
+      { type: 'duel_resolved', actor: '0', data: { propertyId: 3, ownerId: '1', winnerId: '0', outcome: 'waived' } },
+    ];
+    const acc = accumulateDuelStats({}, events, charIds);
+    expect(acc['albert-victor']).toEqual({ duelsInitiated: 1, duelsWon: 1, rentWaived: 40, rentDoubledPaid: 0 });
+    expect(acc['lia-startrace']).toBeUndefined(); // owner never referenced by an event
+  });
+
+  test("defender wins (outcome double): rentDoubledPaid = loseMultiplier x rent, credited to the CHALLENGER; duelsWon to the defender", () => {
+    const events = [
+      { type: 'duel_initiated', actor: '0', data: { propertyId: 5, ownerId: '1', rent: 30 } },
+      { type: 'duel_resolved', actor: '0', data: { propertyId: 5, ownerId: '1', winnerId: '1', outcome: 'double' } },
+    ];
+    const acc = accumulateDuelStats({}, events, charIds);
+    // RULES.duel.loseMultiplier default is 2 → 2 * 30 = 60.
+    expect(acc['albert-victor']).toEqual({ duelsInitiated: 1, duelsWon: 0, rentWaived: 0, rentDoubledPaid: 60 });
+    expect(acc['lia-startrace']).toEqual({ duelsInitiated: 0, duelsWon: 1, rentWaived: 0, rentDoubledPaid: 0 });
+  });
+
+  test('a declined offer (no duel_initiated/duel_resolved) contributes nothing', () => {
+    const events = [
+      { type: 'duel_offered', actor: '0', data: { propertyId: 2, ownerId: '1', rent: 25 } },
+      { type: 'duel_declined', actor: '1', data: { challengerId: '0', propertyId: 2 } },
+    ];
+    expect(accumulateDuelStats({}, events, charIds)).toEqual({});
+  });
+
+  test('folds across MULTIPLE games (calls) into the SAME accumulator, keyed by character not seat', () => {
+    // Game 1: albert-victor in seat 0 initiates and wins.
+    const game1 = [
+      { type: 'duel_initiated', actor: '0', data: { propertyId: 1, ownerId: '1', rent: 10 } },
+      { type: 'duel_resolved', actor: '0', data: { propertyId: 1, ownerId: '1', winnerId: '0', outcome: 'waived' } },
+    ];
+    // Game 2: seats rotate — albert-victor now in seat 1, still initiates (as owner-seat
+    // this time is irrelevant to accumulation; only the actor's mapped charId matters)
+    // and loses.
+    const rotatedCharIds = ['lia-startrace', 'albert-victor'];
+    const game2 = [
+      { type: 'duel_initiated', actor: '1', data: { propertyId: 2, ownerId: '0', rent: 20 } },
+      { type: 'duel_resolved', actor: '1', data: { propertyId: 2, ownerId: '0', winnerId: '0', outcome: 'double' } },
+    ];
+    let acc = {};
+    acc = accumulateDuelStats(acc, game1, charIds);
+    acc = accumulateDuelStats(acc, game2, rotatedCharIds);
+    expect(acc['albert-victor']).toEqual({ duelsInitiated: 2, duelsWon: 1, rentWaived: 10, rentDoubledPaid: 40 });
+    expect(acc['lia-startrace']).toEqual({ duelsInitiated: 0, duelsWon: 1, rentWaived: 0, rentDoubledPaid: 0 });
+  });
+
+  test('no events → accumulator untouched; empty acc → no table rows', () => {
+    expect(accumulateDuelStats({}, [], charIds)).toEqual({});
+    expect(accumulateDuelStats({}, null, charIds)).toEqual({});
+    expect(duelStatsTable({})).toEqual([]);
+  });
+
+  test('duelStatsTable sorts rows by charId and includes the charId field', () => {
+    const acc = {
+      'lia-startrace': { duelsInitiated: 1, duelsWon: 0, rentWaived: 0, rentDoubledPaid: 20 },
+      'albert-victor': { duelsInitiated: 2, duelsWon: 2, rentWaived: 30, rentDoubledPaid: 0 },
+    };
+    expect(duelStatsTable(acc)).toEqual([
+      { charId: 'albert-victor', duelsInitiated: 2, duelsWon: 2, rentWaived: 30, rentDoubledPaid: 0 },
+      { charId: 'lia-startrace', duelsInitiated: 1, duelsWon: 0, rentWaived: 0, rentDoubledPaid: 20 },
+    ]);
+  });
+});
+
+describe('mergeDuelTables — combining two sub-tournament duel tables', () => {
+  test('both null → null', () => {
+    expect(mergeDuelTables(null, null)).toBeNull();
+  });
+
+  test('one null → the other, unchanged (still passes through duelStatsTable shape)', () => {
+    const table = duelStatsTable({ 'albert-victor': { duelsInitiated: 1, duelsWon: 1, rentWaived: 10, rentDoubledPaid: 0 } });
+    expect(mergeDuelTables(table, null)).toEqual(table);
+    expect(mergeDuelTables(null, table)).toEqual(table);
+  });
+
+  test('sums rows sharing a charId across both tables', () => {
+    const a = duelStatsTable({ 'albert-victor': { duelsInitiated: 1, duelsWon: 1, rentWaived: 10, rentDoubledPaid: 0 } });
+    const b = duelStatsTable({ 'albert-victor': { duelsInitiated: 2, duelsWon: 0, rentWaived: 0, rentDoubledPaid: 40 } });
+    expect(mergeDuelTables(a, b)).toEqual([
+      { charId: 'albert-victor', duelsInitiated: 3, duelsWon: 1, rentWaived: 10, rentDoubledPaid: 40 },
+    ]);
+  });
+
+  test('rows for a charId present in only ONE table still show up', () => {
+    const a = duelStatsTable({ 'albert-victor': { duelsInitiated: 1, duelsWon: 1, rentWaived: 10, rentDoubledPaid: 0 } });
+    const b = duelStatsTable({ 'lia-startrace': { duelsInitiated: 1, duelsWon: 0, rentWaived: 0, rentDoubledPaid: 20 } });
+    expect(mergeDuelTables(a, b)).toEqual([
+      { charId: 'albert-victor', duelsInitiated: 1, duelsWon: 1, rentWaived: 10, rentDoubledPaid: 0 },
+      { charId: 'lia-startrace', duelsInitiated: 1, duelsWon: 0, rentWaived: 0, rentDoubledPaid: 20 },
+    ]);
   });
 });

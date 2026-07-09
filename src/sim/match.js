@@ -184,6 +184,12 @@ function buildResult(client, capped, maxTurns) {
       standings: over.standings,
       turns: G.totalTurns,
       capped: false,
+      // Full engine event log (Task 7 of the duel mechanism): lets tournament.js
+      // scan for duel_initiated/duel_resolved post-game without the sim owning
+      // any engine knowledge itself. Purely additive — no existing consumer of
+      // runMatch's result reads/asserts against its key set, so this cannot
+      // regress prior sim behavior.
+      events: G.events,
     };
   }
   // Sim turn cap (or engine gameover coinciding with cap): net-worth tiebreak over
@@ -196,5 +202,6 @@ function buildResult(client, capped, maxTurns) {
     standings,
     turns: G.totalTurns,
     capped: true,
+    events: G.events,
   };
 }

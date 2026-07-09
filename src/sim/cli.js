@@ -9,11 +9,18 @@
 //   --strategy s     route strategy for the CHARACTER pairing on atlas maps
 //                    ('camper' default). The STRATEGY pairing (camper vs tourer)
 //                    is run automatically on atlas maps regardless.
+//   --duel-policy p  duelPolicy for BOTH contestants in every tournament this
+//                    run drives ('never' default, matching bot.js's
+//                    DEFAULT_POLICY — a no-op unless the active mod has
+//                    RULES.duel.enabled). 'always' | 'strength' also accepted
+//                    (see src/sim/bot.js DEFAULT_POLICY.duelPolicy).
 //
 // Prints, for each fairness question the map supports:
 //   1. best-fit vs worst-fit CHARACTER win% (both maps)
 //   2. camper vs tourer STRATEGY win% (atlas maps only — meaningless on a loop)
-// each with a 95% CI and a PASS/FAIL on the 60/40 gate.
+// each with a 95% CI and a PASS/FAIL on the 60/40 gate, plus (Task 7 of the
+// duel mechanism) a per-character duel-cashflow table whenever any duel
+// occurred during the run — silent otherwise, so duel-free runs are unchanged.
 
 import { runTournament, runStrategyTournament } from './tournament';
 import { CHARACTERS_DATA } from '../../mods/dominion/characters-data';
@@ -40,6 +47,7 @@ function parseArgs(argv) {
     maxTurns: 300,
     chars: null,
     strategy: 'camper',
+    duelPolicy: 'never',
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -53,6 +61,7 @@ function parseArgs(argv) {
       case 'maxTurns': out.maxTurns = parseInt(val, 10); i++; break;
       case 'chars': out.chars = val.split(',').map(s => s.trim()); i++; break;
       case 'strategy': out.strategy = val; i++; break;
+      case 'duel-policy': out.duelPolicy = val; i++; break;
       default: break;
     }
   }
@@ -100,6 +109,28 @@ function printTournament(title, result) {
   let line = `  GATE 60/40: ${verdict}  (leader ${g.leader} ${pct(g.maxWinPct)}, threshold ${pct(g.threshold)})`;
   if (g.ciStraddles50) line += '  [CI straddles 50% — not statistically separated]';
   console.log(line);
+  printDuelStats(result.duelTable);
+}
+
+// Duel-cashflow table (Task 7 of the duel mechanism): per-character
+// duelsInitiated/duelsWon/rentWaived/rentDoubledPaid, folded across the whole
+// run. Silent (prints nothing) when duelTable is null — i.e. every duel-free
+// run (RULES.duel.enabled off, or every contestant's duelPolicy is 'never')
+// leaves this function's output identical to before Task 7 existed.
+function printDuelStats(duelTable) {
+  if (!duelTable || duelTable.length === 0) return;
+  console.log('  --- duel cashflow ---');
+  const w = Math.max.apply(null, duelTable.map(r => r.charId.length).concat([9]));
+  console.log('  ' + 'character'.padEnd(w) + '   initiated   won   rentWaived   rentDoubledPaid');
+  duelTable.forEach(r => {
+    console.log(
+      '  ' + r.charId.padEnd(w) + '   '
+      + String(r.duelsInitiated).padStart(9) + '   '
+      + String(r.duelsWon).padStart(3) + '   '
+      + ('$' + r.rentWaived).padStart(10) + '   '
+      + ('$' + r.rentDoubledPaid).padStart(15)
+    );
+  });
 }
 
 // --- main ----------------------------------------------------------------------
@@ -129,8 +160,8 @@ function main() {
   const charResult = runTournament({
     world,
     contestants: [
-      { label: `best-fit:${bestId}`, charId: bestId, policy: { routeStrategy: charStrategy } },
-      { label: `worst-fit:${worstId}`, charId: worstId, policy: { routeStrategy: charStrategy } },
+      { label: `best-fit:${bestId}`, charId: bestId, policy: { routeStrategy: charStrategy, duelPolicy: args.duelPolicy } },
+      { label: `worst-fit:${worstId}`, charId: worstId, policy: { routeStrategy: charStrategy, duelPolicy: args.duelPolicy } },
     ],
     games: args.games,
     baseSeed: args.seed,
@@ -153,6 +184,7 @@ function main() {
       charB: charY,
       strategyA: 'camper',
       strategyB: 'tourer',
+      policyBase: { duelPolicy: args.duelPolicy },
       games: args.games,
       baseSeed: args.seed,
       maxTurns: args.maxTurns,
