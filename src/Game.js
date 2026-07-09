@@ -1063,7 +1063,7 @@ function performMove(G, ctx, route) {
   handleLanding(G, ctx);
 
   // Set turnPhase based on what happened
-  if (G.turnPhase !== 'card') {
+  if (G.turnPhase !== 'card' && G.turnPhase !== 'duel') {
     G.turnPhase = G.canBuy ? 'act' : 'done';
   }
   return true;
@@ -1318,6 +1318,7 @@ export const Monopoly = {
     // --- Reroll (Stamina ability) ---
     useReroll: (G, ctx) => {
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
+      if (G.duel) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       if (!G.hasRolled) return INVALID_MOVE;
       const player = G.players[ctx.currentPlayer];
@@ -1364,7 +1365,7 @@ export const Monopoly = {
       applyCard(G, ctx, player, card, deck, cardIndex);
       // applyCard can chain a NEW pending card (atlas moveTo onto a card
       // space) — don't clobber it or the card phase.
-      if (G.turnPhase !== 'card') {
+      if (G.turnPhase !== 'card' && G.turnPhase !== 'duel') {
         G.turnPhase = G.canBuy ? 'act' : 'done';
       }
     },
@@ -1388,7 +1389,7 @@ export const Monopoly = {
       applyCard(G, ctx, player, newCard, deckId, cardIndex);
       // applyCard can chain a NEW pending card (atlas moveTo onto a card
       // space) — don't clobber it or the card phase.
-      if (G.turnPhase !== 'card') {
+      if (G.turnPhase !== 'card' && G.turnPhase !== 'duel') {
         G.turnPhase = G.canBuy ? 'act' : 'done';
       }
     },
@@ -1396,6 +1397,7 @@ export const Monopoly = {
     // --- Knox: Regulate property ---
     regulateProperty: (G, ctx, propertyId) => {
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
+      if (G.duel) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       const player = G.players[ctx.currentPlayer];
       if (getPassive(player) !== 'enforcer') return INVALID_MOVE;
@@ -1410,6 +1412,7 @@ export const Monopoly = {
     // --- Property upgrades ---
     upgradeProperty: (G, ctx, propertyId) => {
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
+      if (G.duel) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       if (!G.hasRolled) return INVALID_MOVE;
 
@@ -1443,6 +1446,7 @@ export const Monopoly = {
 
     mortgageProperty: (G, ctx, propertyId) => {
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
+      if (G.duel) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
 
       const player = G.players[ctx.currentPlayer];
@@ -1471,6 +1475,7 @@ export const Monopoly = {
 
     unmortgageProperty: (G, ctx, propertyId) => {
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
+      if (G.duel) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
 
       const player = G.players[ctx.currentPlayer];
@@ -1490,6 +1495,7 @@ export const Monopoly = {
 
     sellBuilding: (G, ctx, propertyId) => {
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
+      if (G.duel) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       if (!G.hasRolled) return INVALID_MOVE;
 
@@ -1604,6 +1610,7 @@ export const Monopoly = {
     // --- Trading ---
     proposeTrade: (G, ctx, proposal) => {
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
+      if (G.duel) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       if (!RULES.trading.enabled) return INVALID_MOVE;
       if (!G.hasRolled) return INVALID_MOVE;
@@ -1820,6 +1827,7 @@ export const Monopoly = {
 
     endTurn: (G, ctx) => {
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
+      if (G.duel) return INVALID_MOVE;
       if (G.phase === 'characterSelect') return INVALID_MOVE;
       if (!G.hasRolled) return INVALID_MOVE;
       if (G.canBuy) return INVALID_MOVE;
