@@ -24,7 +24,7 @@ const TYPE_LIST = [
   'reroll_used', 'trade_proposed', 'trade_accepted', 'trade_rejected',
   'trade_cancelled', 'auction_started', 'auction_turn', 'bid_placed',
   'auction_passed', 'auction_ended', 'bankruptcy', 'season_changed', 'game_over',
-  'jail_reminder',
+  'jail_reminder', 'duel_offered', 'duel_initiated', 'duel_declined', 'duel_resolved',
 ];
 export const ENGINE_EVENTS = Object.freeze(Object.fromEntries(TYPE_LIST.map(t => [t, t])));
 
@@ -334,6 +334,27 @@ export function formatEventMessage(type, actor, data, G) {
     // event-only by design — always null, not merely unhandled.
     case 'game_over':
       return null;
+
+    case 'duel_offered':
+      return null; // UI prompt, no log line (game_over precedent)
+
+    case 'duel_initiated': {
+      const c = G.players[actor];
+      const o = G.players[data.ownerId];
+      return `${playerName(c)} challenges ${playerName(o)} to a duel for ${G.board.spaces[data.propertyId].name}!`;
+    }
+
+    case 'duel_declined': {
+      const o = G.players[actor];
+      return `${playerName(o)} declines the duel.`;
+    }
+
+    case 'duel_resolved': {
+      const c = G.players[actor];
+      const o = G.players[data.ownerId];
+      const w = G.players[data.winnerId];
+      return `Duel! ${playerName(c)} ${data.challengerRoll.total} vs ${playerName(o)} ${data.defenderRoll.total} — ${playerName(w)} wins!`;
+    }
 
     default:
       return null;

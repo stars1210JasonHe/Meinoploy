@@ -172,6 +172,7 @@ function createPlayer(id) {
     regulatedProperty: null,
     distanceTraveled: 0,
     affinityBonus: 0,
+    lastDuelTurn: null,
   };
 }
 
@@ -1173,6 +1174,7 @@ export const Monopoly = {
       totalTurns: 0,
       trade: null,
       auction: null,
+      duel: null,
       freeParkingPot: 0,
       victory: resolveVictory(),
       _resumeLoad: false, // one-shot: set true by loadGame so the first onBegin doesn't bump turn/season

@@ -54,10 +54,73 @@ describe('resetMessages', () => {
 });
 
 describe('ENGINE_EVENTS registry', () => {
-  test('contains the 38 spec types and is frozen', () => {
-    expect(Object.keys(ENGINE_EVENTS)).toHaveLength(38);
+  test('contains the 42 spec types and is frozen', () => {
+    expect(Object.keys(ENGINE_EVENTS)).toHaveLength(42);
     expect(ENGINE_EVENTS.dice_rolled).toBe('dice_rolled');
     expect(ENGINE_EVENTS.jail_reminder).toBe('jail_reminder');
+    expect(ENGINE_EVENTS.duel_offered).toBe('duel_offered');
+    expect(ENGINE_EVENTS.duel_initiated).toBe('duel_initiated');
+    expect(ENGINE_EVENTS.duel_declined).toBe('duel_declined');
+    expect(ENGINE_EVENTS.duel_resolved).toBe('duel_resolved');
     expect(Object.isFrozen(ENGINE_EVENTS)).toBe(true);
+  });
+});
+
+describe('formatEventMessage for duel events', () => {
+  const duelG = () => ({
+    events: [],
+    eventSeq: 0,
+    messages: [],
+    totalTurns: 3,
+    players: [
+      { id: '0', character: { name: 'Character A' } },
+      { id: '1', character: { name: 'Character B' } },
+    ],
+    board: {
+      spaces: [
+        { id: 0, name: 'Space 0' },
+        { id: 1, name: 'Property 1' },
+      ],
+    },
+  });
+
+  test('duel_offered returns null (UI prompt, not logged)', () => {
+    const G = duelG();
+    const msg = formatEventMessage('duel_offered', '0', {}, G);
+    expect(msg).toBeNull();
+  });
+
+  test('duel_initiated formats challenger vs owner for property', () => {
+    const G = duelG();
+    const msg = formatEventMessage('duel_initiated', '0', { ownerId: '1', propertyId: 1 }, G);
+    expect(msg).toBe('Character A challenges Character B to a duel for Property 1!');
+  });
+
+  test('duel_declined formats owner declining', () => {
+    const G = duelG();
+    const msg = formatEventMessage('duel_declined', '1', {}, G);
+    expect(msg).toBe('Character B declines the duel.');
+  });
+
+  test('duel_resolved formats challenger vs owner with winner and rolls', () => {
+    const G = duelG();
+    const msg = formatEventMessage('duel_resolved', '0', {
+      ownerId: '1',
+      winnerId: '0',
+      challengerRoll: { total: 8 },
+      defenderRoll: { total: 5 },
+    }, G);
+    expect(msg).toBe('Duel! Character A 8 vs Character B 5 — Character A wins!');
+  });
+
+  test('duel_resolved formats when defender wins', () => {
+    const G = duelG();
+    const msg = formatEventMessage('duel_resolved', '0', {
+      ownerId: '1',
+      winnerId: '1',
+      challengerRoll: { total: 3 },
+      defenderRoll: { total: 9 },
+    }, G);
+    expect(msg).toBe('Duel! Character A 3 vs Character B 9 — Character B wins!');
   });
 });

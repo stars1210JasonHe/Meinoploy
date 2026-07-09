@@ -143,6 +143,18 @@ export const RULES = {
     auctionOnPass: true,
   },
 
+  // ── Rent Duel System ────────────────────────────────────
+  duel: {
+    enabled: false,
+    loseMultiplier: 2,
+    cooldownTurns: 3,
+    diceCount: 2,
+    statPrimary: 'stamina',
+    statSecondary: 'luck',
+    secondaryDivisor: 2,
+    tieGoesToDefender: true,
+  },
+
   // ── Victory Conditions ──────────────────────────────────
   // primary: how the winner is decided.
   //   'survival' — last non-bankrupt player wins (last standing).
