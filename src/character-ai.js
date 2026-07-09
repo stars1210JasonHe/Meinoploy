@@ -18,6 +18,7 @@ export const EVENT_TYPES = {
   BANKRUPTCY: 'bankruptcy',
   SEASON_CHANGE: 'season_change',
   GAME_OVER: 'game_over',
+  DUEL: 'duel',
 };
 
 // Events considered "major" for the "Major events only" verbosity mode
@@ -33,6 +34,7 @@ const MAJOR_EVENTS = new Set([
   EVENT_TYPES.BANKRUPTCY,
   EVENT_TYPES.SEASON_CHANGE,
   EVENT_TYPES.GAME_OVER,
+  EVENT_TYPES.DUEL,
 ]);
 
 // Verbosity modes
@@ -151,6 +153,17 @@ export function mapEngineEventToAi(event, G) {
       const winnerId = data.result && data.result.winner;
       const winnerName = (winnerId !== undefined && winnerId !== null) ? playerName(G.players[winnerId]) : '';
       return { eventType: EVENT_TYPES.GAME_OVER, eventData: { winnerName } };
+    }
+
+    case 'duel_resolved': {
+      const space = G.board.spaces[data.propertyId];
+      const challengerName = playerName(G.players[actor]);
+      const defenderName = playerName(G.players[data.ownerId]);
+      const winnerName = playerName(G.players[data.winnerId]);
+      return {
+        eventType: EVENT_TYPES.DUEL,
+        eventData: { challengerName, defenderName, winnerName, outcome: data.outcome, propertyName: space.name },
+      };
     }
 
     default:
@@ -320,6 +333,9 @@ export class CharacterAI {
         break;
       case EVENT_TYPES.GAME_OVER:
         parts.push(`Game over! ${eventData.winnerName} wins!`);
+        break;
+      case EVENT_TYPES.DUEL:
+        parts.push(`Duel at ${eventData.propertyName}: ${eventData.challengerName} challenged ${eventData.defenderName} — ${eventData.winnerName} won (${eventData.outcome === 'waived' ? 'rent waived' : 'double rent'}).`);
         break;
     }
 

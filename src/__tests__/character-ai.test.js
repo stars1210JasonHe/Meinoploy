@@ -98,6 +98,7 @@ describe('CharacterAI', () => {
       expect(ai.shouldRespond(EVENT_TYPES.GO_TO_JAIL)).toBe(true);
       expect(ai.shouldRespond(EVENT_TYPES.BANKRUPTCY)).toBe(true);
       expect(ai.shouldRespond(EVENT_TYPES.GAME_OVER)).toBe(true);
+      expect(ai.shouldRespond(EVENT_TYPES.DUEL)).toBe(true);
     });
 
     test('returns false for minor events in MAJOR mode', () => {
@@ -173,6 +174,38 @@ describe('CharacterAI', () => {
       const prompt = ai.buildSystemPrompt(mockCharacter, null);
       expect(prompt).toBeTruthy();
       expect(prompt).toContain('Albert Victor');
+    });
+  });
+
+  describe('_formatEventContext', () => {
+    test('DUEL case renders with all five fields (names + outcome wording)', () => {
+      const ai = new CharacterAI('sk-test');
+      const context = ai._formatEventContext(EVENT_TYPES.DUEL, {
+        challengerName: 'Albert Victor',
+        defenderName: 'Lia Frost',
+        winnerName: 'Albert Victor',
+        outcome: 'waived',
+        propertyName: 'Reading Railroad',
+      }, { turnNumber: 5, season: 'Summer' });
+      expect(context).toContain('Reading Railroad');
+      expect(context).toContain('Albert Victor');
+      expect(context).toContain('Lia Frost');
+      expect(context).toContain('rent waived');
+    });
+
+    test('DUEL case renders double rent outcome', () => {
+      const ai = new CharacterAI('sk-test');
+      const context = ai._formatEventContext(EVENT_TYPES.DUEL, {
+        challengerName: 'Ophelia Nightveil',
+        defenderName: 'Marcus Kodak',
+        winnerName: 'Marcus Kodak',
+        outcome: 'double',
+        propertyName: 'Boardwalk',
+      }, {});
+      expect(context).toContain('Boardwalk');
+      expect(context).toContain('Ophelia Nightveil');
+      expect(context).toContain('Marcus Kodak');
+      expect(context).toContain('double rent');
     });
   });
 
@@ -377,6 +410,7 @@ describe('VERBOSITY', () => {
 function makeG() {
   const spaces = [];
   spaces[0] = { id: 0, name: 'GO' };
+  spaces[3] = { id: 3, name: 'Reading Railroad' };
   spaces[5] = { id: 5, name: 'Park Place' };
   spaces[10] = { id: 10, name: 'Boardwalk' };
   return {
@@ -494,6 +528,43 @@ describe('mapEngineEventToAi', () => {
     );
     expect(result).toEqual({ eventType: EVENT_TYPES.GAME_OVER, eventData: { winnerName: 'Albert Victor' } });
   });
+
+  test('duel_resolved -> DUEL with all five eventData fields (challengerName, defenderName, winnerName, outcome, propertyName)', () => {
+    const result = mapEngineEventToAi(
+      {
+        seq: 15,
+        type: 'duel_resolved',
+        actor: '0',
+        data: {
+          propertyId: 3,
+          ownerId: '1',
+          winnerId: '0',
+          outcome: 'waived',
+          challengerRoll: { dice: [6, 6], stamina: 10, luckBonus: 0, total: 22 },
+          defenderRoll: { dice: [1, 1], stamina: 2, luckBonus: 0, total: 4 },
+        },
+      },
+      G
+    );
+    expect(result).toEqual({
+      eventType: EVENT_TYPES.DUEL,
+      eventData: {
+        challengerName: 'Albert Victor',
+        defenderName: 'Lia Frost',
+        winnerName: 'Albert Victor',
+        outcome: 'waived',
+        propertyName: 'Reading Railroad',
+      },
+    });
+  });
+
+  test.each(['duel_offered', 'duel_initiated', 'duel_declined'])(
+    'unmapped duel type %s -> null (no AI reaction)',
+    (type) => {
+      const result = mapEngineEventToAi({ seq: 99, type, actor: '0', data: {} }, G);
+      expect(result).toBeNull();
+    }
+  );
 
   test.each([
     'route_committed', 'moved', 'passive_triggered', 'property_passed', 'card_prompt',
