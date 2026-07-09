@@ -2,6 +2,7 @@ import { INVALID_MOVE } from 'boardgame.io/core';
 import { Monopoly } from '../Game';
 import { RULES } from '../../mods/active-rules';
 import { COLOR_GROUPS } from '../../mods/dominion';
+import { makeClient } from './helpers/drive';
 
 describe('Duel mechanism — Game.js setup + state initialization', () => {
   test('G.duel initialized to null', () => {
@@ -315,5 +316,187 @@ describe('Duel mechanism — turnPhase clobber-site preservation (Task 2)', () =
     expect(G.players[0].money).toBe(moneyBefore + 25); // sanity: the new card applied
     expect(G.pendingCard).toBeNull();
     expect(G.turnPhase).toBe('duel'); // NOT clobbered to 'act'/'done'
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 3: payRentAmount helper + landing interception.
+//
+// Golden-gate proof that the helper extraction is invisible (DISABLED, the
+// default) lives in `npx jest golden-messages` — RULES.duel.enabled is false
+// by default, so every golden scenario's rent payments already flow through
+// the new payRentAmount helper unmodified; 10/10 byte-identical after this
+// task's edits is the "step 1(a)" gate, not duplicated here.
+//
+// The tests below cover the ENABLED behavior (offer creation), the
+// eligibility matrix (mortgaged / own-property / disabled), and the
+// card-moveTo landing path — using the RULES-mutation idiom established by
+// engine-events-emit.test.js (`RULES.core.freeParkingPot = true` in a
+// try/finally, or here a describe-scoped beforeEach/afterEach, since RULES is
+// the shared live singleton mutated in place).
+// ---------------------------------------------------------------------------
+describe('Duel mechanism — landing interception (Task 3)', () => {
+  function freshG() {
+    const ctx = { numPlayers: 2, playOrder: ['0', '1'] };
+    const G = Monopoly.setup(ctx);
+    G.phase = 'play'; // skip character selection for gameplay tests
+    return G;
+  }
+
+  function valForDie(n) {
+    return (n - 1) / 6 + 0.01;
+  }
+
+  function makeCtx(currentPlayer = '0', d1 = 1, d2 = 2) {
+    let i = 0;
+    const values = [valForDie(d1), valForDie(d2)];
+    return {
+      currentPlayer,
+      numPlayers: 2,
+      random: { Number: () => values[i++ % values.length] },
+      events: { endTurn: jest.fn(), setActivePlayers: jest.fn() },
+    };
+  }
+
+  describe('ENABLED', () => {
+    beforeEach(() => {
+      RULES.duel.enabled = true;
+    });
+    afterEach(() => {
+      RULES.duel.enabled = false; // restore the shared live RULES singleton
+    });
+
+    // Reuses golden-messages' 'rent-and-tax' scenario precondition VERBATIM
+    // (same seed 96, same character picks, same script up to P1's rent-due
+    // landing) — with the golden gate (duel disabled) that same script
+    // produces "Paid $11 rent to Marcus Grayline for Oriental Ave." at this
+    // exact step (fixtures/golden-messages.json, 'rent-and-tax' snapshot[5]).
+    // Driven through the REAL boardgame.io Client (not direct move
+    // invocation) so the assertion on G.turnPhase AFTER the move returns is
+    // an honest proof that the Task 2 clobber-site fix survives Immer's
+    // produce() wrapping the move, not just a hand-mutated G.
+    test('seeded landing on an opponent property creates a duel OFFER instead of auto-paying rent', () => {
+      const client = makeClient(2, 96);
+      client.moves.selectCharacter('marcus-grayline'); // P0
+      client.moves.selectCharacter('sophia-ember');     // P1
+      client.moves.rollDice();     // P0 rolls 1+5=6, lands on Oriental Ave (unowned)
+      client.moves.buyProperty();  // P0 buys Oriental Ave for $93
+      client.moves.endTurn();
+      client.moves.rollDice();     // P1 rolls 1+5=6, lands on P0's Oriental Ave -> rent $11 due
+
+      const G = client.getState().G;
+
+      // G.duel populated, rent frozen at landing time.
+      expect(G.duel).toEqual({
+        phase: 'offer', propertyId: 6, ownerId: '0', challengerId: '1', rent: 11,
+      });
+      // Behavioral clobber-fix proof: turnPhase is STILL 'duel' after the
+      // move has fully returned (rollDice's own tail would otherwise set it
+      // to 'act'/'done').
+      expect(G.turnPhase).toBe('duel');
+
+      // No rent_paid emitted — the money never moved.
+      expect(G.events.filter(e => e.type === 'rent_paid')).toHaveLength(0);
+      const p0 = G.players[0];
+      expect(p0.money).toBe(1800 - 93); // starting money minus the Oriental Ave purchase only
+
+      // Exactly one duel_offered event, full payload, correct actor (the challenger).
+      const offered = G.events.filter(e => e.type === 'duel_offered');
+      expect(offered).toHaveLength(1);
+      expect(offered[0].actor).toBe('1');
+      expect(offered[0].data).toEqual({ propertyId: 6, ownerId: '0', rent: 11 });
+
+      // duel_offered's formatter returns null (Task 1) — no "Paid $X rent" line either.
+      expect(G.messages.some(m => /rent/i.test(m))).toBe(false);
+    });
+
+    test('mortgaged property: rent is 0, auto-pays with no offer even when enabled', () => {
+      const G = freshG();
+      G.ownership[3] = '1'; // Baltic Ave owned by P1
+      G.mortgaged[3] = true;
+      const p0Money = G.players[0].money;
+      const p1Money = G.players[1].money;
+
+      Monopoly.moves.rollDice(G, makeCtx('0', 1, 2)); // P0 lands on Baltic Ave (id 3)
+
+      expect(G.duel).toBeNull();
+      expect(G.turnPhase).not.toBe('duel');
+      expect(G.events.filter(e => e.type === 'duel_offered')).toHaveLength(0);
+      const rentPaid = G.events.filter(e => e.type === 'rent_paid');
+      expect(rentPaid).toHaveLength(1);
+      expect(rentPaid[0].data).toEqual({ propertyId: 3, ownerId: '1', amount: 0 });
+      expect(G.players[0].money).toBe(p0Money); // no money moved, rent is 0
+      expect(G.players[1].money).toBe(p1Money);
+    });
+
+    test('landing on own property: no offer created (rent branch never entered)', () => {
+      const G = freshG();
+      G.ownership[3] = '0'; // P0 already owns Baltic Ave
+
+      Monopoly.moves.rollDice(G, makeCtx('0', 1, 2));
+
+      expect(G.duel).toBeNull();
+      expect(G.turnPhase).not.toBe('duel');
+      expect(G.events.filter(e => e.type === 'duel_offered')).toHaveLength(0);
+      expect(G.events.filter(e => e.type === 'rent_paid')).toHaveLength(0);
+    });
+
+    // Card-moveTo landing (acceptCard path, mirrors this file's Task 2
+    // acceptCard-clobber test): a moveTo card teleports P0 onto Baltic Ave
+    // (owned by P1, unmortgaged, rent $8) via applyCard -> handleLanding.
+    // Proves the offer is created from a card-driven landing too, and that
+    // acceptCard's own turnPhase clobber line (Task 2 fix) preserves 'duel'
+    // through the full move, including the chained applyCard call.
+    test('card-moveTo landing on a rent-due opponent space creates an offer; turnPhase survives acceptCard', () => {
+      const G = freshG();
+      G.ownership[3] = '1'; // Baltic Ave owned by P1
+      // A moveTo landing reaches calculateRent's diceTotal arg via G.lastDice
+      // (irrelevant for a 'property' space — only railroad/utility rent use
+      // it — but the property read itself needs a non-null G.lastDice, as it
+      // would be in real play from the roll that drew this card).
+      G.lastDice = { d1: 1, d2: 2, total: 3 };
+      const card = { text: 'Advance to Baltic Ave', action: 'moveTo', value: 3 };
+      G.pendingCard = { card, deck: 'chance', cardIndex: 0 };
+      const p0Money = G.players[0].money;
+
+      Monopoly.moves.acceptCard(G, makeCtx('0'));
+
+      expect(G.pendingCard).toBeNull(); // sanity: the card was consumed
+      expect(G.duel).toEqual({
+        phase: 'offer', propertyId: 3, ownerId: '1', challengerId: '0', rent: 8,
+      });
+      expect(G.turnPhase).toBe('duel'); // NOT clobbered to 'act'/'done' by acceptCard's tail
+      expect(G.players[0].money).toBe(p0Money); // no rent auto-paid
+      expect(G.events.filter(e => e.type === 'rent_paid')).toHaveLength(0);
+      expect(G.events.filter(e => e.type === 'duel_offered')).toHaveLength(1);
+    });
+  });
+
+  describe('DISABLED (explicit control)', () => {
+    beforeEach(() => {
+      RULES.duel.enabled = false; // explicit — this is already the default, asserted for clarity
+    });
+
+    // Control run: identical scenario/seed to engine-events-emit.test.js's
+    // pinned 'rent_paid' test (written before this task's helper extraction),
+    // proving payRentAmount's lift is byte-identical to the pre-extraction
+    // inline code it replaced.
+    test('auto-pay path (via the new payRentAmount helper) is byte-identical to the pre-extraction message', () => {
+      const G = freshG();
+      G.ownership[3] = '1'; // Baltic Ave owned by P1
+      const p0Money = G.players[0].money;
+      const p1Money = G.players[1].money;
+
+      Monopoly.moves.rollDice(G, makeCtx('0', 1, 2)); // P0 lands on Baltic Ave, rent $8
+
+      expect(G.duel).toBeNull();
+      expect(G.turnPhase).not.toBe('duel');
+      const rentPaid = G.events.filter(e => e.type === 'rent_paid');
+      expect(rentPaid).toHaveLength(1);
+      expect(rentPaid[0].data).toEqual({ propertyId: 3, ownerId: '1', amount: 8 });
+      expect(G.players[0].money).toBe(p0Money - 8);
+      expect(G.players[1].money).toBe(p1Money + 8);
+      expect(G.messages).toContain('Paid $8 rent to Player 2 for Baltic Ave.');
+    });
   });
 });

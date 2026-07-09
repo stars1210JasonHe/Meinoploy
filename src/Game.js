@@ -493,6 +493,21 @@ function sendToJail(G, player) {
   player.jailTurns = 0;
 }
 
+// Pay rent from payer to owner. Extracted verbatim from handleLanding's rent
+// branch (Task 3 of the duel mechanism) so the duel loser-payout (a later
+// task) can reuse the exact same money-move/event/bankruptcy shape as the
+// ordinary auto-pay landing path — no recomputation of rent happens here,
+// the caller must have already computed `amount`.
+function payRentAmount(G, ctx, payerId, ownerId, propertyId, amount) {
+  const payer = G.players[payerId];
+  payer.money -= amount;
+  G.players[ownerId].money += amount;
+  logEvent(G, 'rent_paid', payerId, { propertyId, ownerId, amount });
+  if (payer.money <= 0) {
+    handleBankruptcy(G, ctx, payer, ownerId);
+  }
+}
+
 // --- Landing ---
 
 function handleLanding(G, ctx) {
@@ -518,11 +533,21 @@ function handleLanding(G, ctx) {
         }
       } else if (owner !== ctx.currentPlayer) {
         const rent = calculateRent(G, space, G.lastDice.total, player);
-        player.money -= rent;
-        G.players[owner].money += rent;
-        logEvent(G, 'rent_paid', ctx.currentPlayer, { propertyId: space.id, ownerId: owner, amount: rent });
-        if (player.money <= 0) {
-          handleBankruptcy(G, ctx, player, owner);
+        // Duel eligibility (Task 3): rent-due landing on a live opponent's
+        // property offers a duel instead of auto-paying, when the rule is on.
+        // `owner !== ctx.currentPlayer` is already guaranteed by this `else
+        // if`, but is repeated here per spec as a defensive belt-and-braces
+        // check; `!G.players[owner].bankrupt` likewise defensive — a bankrupt
+        // owner's properties transfer away on bankruptcy, so `owner` should
+        // never resolve to a bankrupt player in practice.
+        if (RULES.duel.enabled && rent > 0 && owner !== ctx.currentPlayer && !G.players[owner].bankrupt) {
+          G.duel = {
+            phase: 'offer', propertyId: space.id, ownerId: owner, challengerId: ctx.currentPlayer, rent,
+          };
+          G.turnPhase = 'duel';
+          logEvent(G, 'duel_offered', ctx.currentPlayer, { propertyId: space.id, ownerId: owner, rent });
+        } else {
+          payRentAmount(G, ctx, ctx.currentPlayer, owner, space.id, rent);
         }
       } else {
         logEvent(G, 'landing_notice', ctx.currentPlayer, { note: 'owned', propertyId: space.id });
