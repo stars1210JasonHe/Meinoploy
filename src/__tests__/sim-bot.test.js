@@ -228,6 +228,16 @@ describe('decideMoves — duel offer (challenger)', () => {
     expect(decideMoves(G, ctx0, '0', { duelPolicy: 'strength' })).toEqual([['initiateDuel']]);
   });
 
+  test("'strength', strictly stronger, cooldown-blocked → payRent", () => {
+    // challenger: 6 + floor(4/2) = 8; owner: 5 + floor(2/2) = 6 (strictly stronger)
+    // but the challenger is cooldown-blocked, so 'strength' must fall back to
+    // payRent just like 'always' does — never dispatch an INVALID_MOVE.
+    const G = offerG({ stamina: 6, luck: 4 }, { stamina: 5, luck: 2 });
+    G.totalTurns = 10;
+    G.players[0].lastDuelTurn = 9; // 10-9=1 < default cooldownTurns 3 → blocked
+    expect(decideMoves(G, ctx0, '0', { duelPolicy: 'strength' })).toEqual([['payRent']]);
+  });
+
   test("'strength' pays rent on a tie (strict > required, ties lose)", () => {
     const G = offerG({ stamina: 5, luck: 0 }, { stamina: 5, luck: 0 });
     expect(decideMoves(G, ctx0, '0', { duelPolicy: 'strength' })).toEqual([['payRent']]);

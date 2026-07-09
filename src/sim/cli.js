@@ -29,6 +29,7 @@ import { ARCHETYPES } from '../../mods/dominion/atlas/archetypes';
 import { TERRA_CIRCUIT } from '../../mods/dominion/atlas/worlds/terra-circuit';
 import { TERRA_GLOBE } from '../../mods/dominion/atlas/worlds/terra-globe';
 import { TERRA_TITANS } from '../../mods/dominion/atlas/worlds/terra-titans';
+import { RULES } from '../../mods/active-rules';
 
 // Map registry — name → atlas world object (null = classic).
 const WORLDS = {
@@ -143,6 +144,17 @@ function main() {
   }
   const isAtlas = !!world;
   const traits = isAtlas ? loadWorld(world, ARCHETYPES).traits : null;
+
+  // --duel-policy selects the BOTS' behavior, but duels are also gated by
+  // RULES.duel.enabled — and this CLI never calls setActiveMod (the --map flag
+  // picks an atlas WORLD, e.g. terra-titans, which is unrelated to the
+  // terra-titans MOD that flips duel.enabled on). Without this, --duel-policy
+  // silently runs zero duels against Dominion's default RULES.duel.enabled=false.
+  // One-shot CLI process — no restore needed.
+  if (args.duelPolicy && args.duelPolicy !== 'never') {
+    RULES.duel.enabled = true;
+    console.log(`Note: --duel-policy=${args.duelPolicy} forces RULES.duel.enabled=true for this run.`);
+  }
 
   console.log('Atlas Balance Simulator');
   console.log(`map=${args.map}  games=${args.games}  baseSeed=${args.seed}  maxTurns=${args.maxTurns}`);

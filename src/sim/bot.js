@@ -315,9 +315,14 @@ function duelDecision(G, pol) {
       return duelCooldownBlocked(G, duel) ? [['payRent']] : [['initiateDuel']];
     }
     // 'strength': initiate only on a strict advantage; ties/weakness pay rent.
+    // Also gated by the cooldown guard (matches the 'always' branch above) — a
+    // strictly-stronger challenger who is cooldown-blocked must still pay rent,
+    // otherwise the bot dispatches an INVALID_MOVE the runner's stuck-detector
+    // silently truncates the whole match on.
     const chalStrength = duelStrength(G, duel.challengerId);
     const ownerStrength = duelStrength(G, duel.ownerId);
-    return chalStrength > ownerStrength ? [['initiateDuel']] : [['payRent']];
+    if (chalStrength > ownerStrength && !duelCooldownBlocked(G, duel)) return [['initiateDuel']];
+    return [['payRent']];
   }
   // phase 'response': the owner (defender) decides. Policy-independent by spec —
   // every duelPolicy value ('never' included, since a 'never' bot never
