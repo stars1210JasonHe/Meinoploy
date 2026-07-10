@@ -1302,7 +1302,25 @@ class MonopolyBoard {
     const player = G.players[ctx.currentPlayer];
     const choices = routeChoices(G.board.edges, player.position, G.lastDice.total);
     if (choices.length <= 1) {
-      this.client.moves.commitRoute(choices.length ? choices[0].route : []);
+      // PRODUCTION FIX (MT2-SP2 Task 10, instrumented + confirmed via a standalone repro):
+      // dispatching commitRoute SYNCHRONOUSLY here re-enters update() — this function runs
+      // inside _updateGlobeOverlay, itself inside _renderGlobeBoard/renderBoard, itself
+      // inside the CURRENT update(state) call (the client.subscribe callback). boardgame.io's
+      // client notifies subscribers synchronously on dispatch, so `this.client.moves.commitRoute`
+      // immediately invokes a NESTED update(newState) that renders the post-fork state
+      // correctly — but then control returns here, and the OUTER (now-stale) update(state)
+      // call resumes and keeps rendering with its stale `G`/`ctx` closures (renderTokens,
+      // renderPlayerInfo, renderTurnbox, ...), overwriting the correct nested render with the
+      // pre-fork one. The ENGINE state is right (awaitingRoute already false — verified via
+      // this.client.getState() at the moment of the bug), but the DOM is permanently stuck
+      // showing "CHOOSE YOUR ROUTE" with no fork target to click, because nothing ever
+      // triggers another render afterward. Deferring the dispatch past the current
+      // synchronous render (microtask) means the nested update() fires with NOTHING left to
+      // stomp it afterward.
+      const route = choices.length ? choices[0].route : [];
+      Promise.resolve().then(() => {
+        if (this.client) this.client.moves.commitRoute(route);
+      });
       return null;
     }
     const t = {};
