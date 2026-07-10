@@ -13,16 +13,19 @@
     "sim": "node -r esm src/sim/cli.js",
     "create-mod": "node -r esm scripts/create-mod.js",
     "extract-facts": "node -r esm scripts/extract-facts.js",
-    "gen-portraits": "node -r esm scripts/gen-portraits.js"
+    "gen-portraits": "node -r esm scripts/gen-portraits.js",
+    "mcp": "node scripts/mcp-server.js"
   },
   "browserslist": "defaults and supports async-functions",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "boardgame.io": "0.45.0",
     "esm": "^3.2.25",
     "globe.gl": "^2.46.1",
     "koa-static": "^5.0.0",
     "pngjs": "^7.0.0",
-    "three": "^0.184.0"
+    "three": "^0.184.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
