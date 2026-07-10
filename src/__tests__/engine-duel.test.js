@@ -1,4 +1,5 @@
 import { INVALID_MOVE } from 'boardgame.io/core';
+import { Client } from 'boardgame.io/client';
 import { Monopoly } from '../Game';
 import { RULES } from '../../mods/active-rules';
 import { COLOR_GROUPS } from '../../mods/dominion';
@@ -47,9 +48,12 @@ describe('Duel mechanism — Game.js setup + state initialization', () => {
 // Task 2: mid-duel move guards + turnPhase clobber preservation.
 //
 // No duel can actually be CREATED yet (Task 3's job — landing interception).
-// These tests craft G.duel directly to prove the 8 guards are un-bypassable
-// and inert-when-null, and that the 3 turnPhase-clobber sites in Game.js now
-// preserve 'duel' the same way they already preserved 'card'.
+// These tests craft G.duel directly to prove the original 8 non-roll guards
+// are un-bypassable and inert-when-null, and that the 3 turnPhase-clobber
+// sites in Game.js now preserve 'duel' the same way they already preserved
+// 'card'. rollDice/rollOnly's own (defensive, final-review Fix 1b) guards are
+// covered separately below — they need G.hasRolled=false to even be
+// reachable, a precondition the other 8 moves don't share.
 //
 // Driving style matches engine-seats-unit.test.js's precedent (direct
 // `Monopoly.moves.X(G, ctx, ...)` invocation against a hand-built G) rather
@@ -234,6 +238,43 @@ describe('Duel mechanism — mid-duel move guards (Task 2)', () => {
     const result = Monopoly.moves.regulateProperty(G, makeCtx('0'), 1);
     expect(result).not.toBe(INVALID_MOVE);
     expect(G.players[0].regulatedProperty).toBe(1);
+  });
+
+  // Final-review Fix 1b: rollDice/rollOnly gain a defensive `if (G.duel)
+  // return INVALID_MOVE;`, same shape as the 8 guards above. Needs
+  // G.hasRolled=false to even reach the new guard line (rollDice/rollOnly's
+  // own pre-existing `if (G.hasRolled) return INVALID_MOVE;` would otherwise
+  // block first) — every real-play path that sets G.duel already has
+  // hasRolled=true, so this only matters for defense-in-depth / a
+  // not-yet-onBegin-cleared stale G.duel with hasRolled reset independently.
+  test('rollDice: rejected when G.duel is set even with hasRolled=false, succeeds once G.duel clears', () => {
+    const G = freshG();
+    G.hasRolled = false;
+    G.duel = activeDuel();
+
+    const blocked = Monopoly.moves.rollDice(G, makeCtx('0', 1, 2));
+    expect(blocked).toBe(INVALID_MOVE);
+    expect(G.hasRolled).toBe(false);
+
+    G.duel = null;
+    const result = Monopoly.moves.rollDice(G, makeCtx('0', 1, 2));
+    expect(result).not.toBe(INVALID_MOVE);
+    expect(G.hasRolled).toBe(true);
+  });
+
+  test('rollOnly: rejected when G.duel is set even with hasRolled=false, succeeds once G.duel clears', () => {
+    const G = freshG();
+    G.hasRolled = false;
+    G.duel = activeDuel();
+
+    const blocked = Monopoly.moves.rollOnly(G, makeCtx('0', 1, 2));
+    expect(blocked).toBe(INVALID_MOVE);
+    expect(G.hasRolled).toBe(false);
+
+    G.duel = null;
+    const result = Monopoly.moves.rollOnly(G, makeCtx('0', 1, 2));
+    expect(result).not.toBe(INVALID_MOVE);
+    expect(G.hasRolled).toBe(true);
   });
 });
 
@@ -704,6 +745,9 @@ describe('Duel mechanism — resolution moves (Task 4)', () => {
       expect(data.ownerId).toBe('1');
       expect(data.winnerId).toBe('0');
       expect(data.outcome).toBe('waived');
+      // rent (final-review Fix 2a): duel_resolved now carries its own frozen
+      // rent, additive to the prior payload — no longer only on duel_initiated.
+      expect(data.rent).toBe(8);
       expect(data.challengerRoll.dice).toEqual([6, 6]);
       expect(data.challengerRoll.dice).toHaveLength(2);
       expect(data.challengerRoll.stamina).toBe(10);
@@ -742,6 +786,7 @@ describe('Duel mechanism — resolution moves (Task 4)', () => {
       const resolved = G.events.filter(e => e.type === 'duel_resolved');
       expect(resolved[0].data.outcome).toBe('double');
       expect(resolved[0].data.winnerId).toBe('1');
+      expect(resolved[0].data.rent).toBe(8); // final-review Fix 2a
 
       const ctx2 = ctxWithDice('0', []);
       expect(Monopoly.moves.endTurn(G, ctx2)).not.toBe(INVALID_MOVE);
@@ -790,6 +835,7 @@ describe('Duel mechanism — resolution moves (Task 4)', () => {
       expect(resolved.data.challengerRoll.total).toBe(resolved.data.defenderRoll.total);
       expect(resolved.data.winnerId).toBe('1'); // owner/defender wins the tie
       expect(resolved.data.outcome).toBe('double');
+      expect(resolved.data.rent).toBe(8); // final-review Fix 2a
       expect(G.events.filter(e => e.type === 'rent_paid')).toHaveLength(1); // tie = challenger loses
     });
 
@@ -902,6 +948,7 @@ describe('Duel mechanism — end-to-end via real seeded Client (Task 4)', () => 
     expect(resolved).toHaveLength(1);
     expect(resolved[0].data.challengerRoll.dice).toHaveLength(2);
     expect(resolved[0].data.defenderRoll.dice).toHaveLength(2);
+    expect(resolved[0].data.rent).toBe(11); // final-review Fix 2a — real-Client proof
     const initiated = G.events.filter(e => e.type === 'duel_initiated');
     expect(initiated).toHaveLength(1);
     expect(initiated[0].data).toEqual({ propertyId: 6, ownerId: '0', rent: 11 });
@@ -916,5 +963,151 @@ describe('Duel mechanism — end-to-end via real seeded Client (Task 4)', () => 
     expect(r1.defenderRoll.dice).toEqual(r2.defenderRoll.dice);
     expect(r1.winnerId).toBe(r2.winnerId);
     expect(r1.outcome).toBe(r2.outcome);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Final-review Fix 1 — mid-duel save/load soft-lock.
+//
+// turn.onBegin resets turnPhase/hasRolled/pendingCard for the new turn but
+// (pre-fix) left G.duel untouched. A save taken while a duel offer/response
+// was pending, then loaded later, would resurrect a G.duel envelope frozen at
+// save time while turnPhase/hasRolled had already been reset to a fresh
+// 'roll' turn by the SAME onBegin call that fires once at load (App.js's
+// _resumeLoad convention — see Game.test.js's "load resume" describe block).
+// Every OTHER move stays permanently blocked by the mid-duel guards (this
+// file's Task 2 section, now 10 guards with Fix 1b's rollDice/rollOnly
+// additions) with no legal way left to ever clear G.duel again (the four
+// duel-resolution moves all require G.duel.phase to be 'offer'/'response',
+// but nothing in a post-load turn can ever RE-CREATE that exact envelope) —
+// a permanent soft-lock.
+//
+// Fix 1a clears G.duel unconditionally in onBegin, justified by: endTurn is
+// unconditionally blocked while G.duel is set, so live play can never reach
+// onBegin (a NEW turn beginning) with G.duel still non-null — a non-null
+// G.duel observed AT onBegin time is therefore PROVABLY stale (loaded), never
+// a live in-progress duel, making the unconditional clear safe.
+//
+// These tests reconstruct the real App.js loadGame reload path (JSON
+// round-trip + the stub-setup Client shape — mirrors this same file's sibling
+// engine-events-emit.test.js "loadGame backfill for old saves" test and the
+// literal in App.js's loadGame, ~line 2488) for BOTH points a save could
+// freeze a duel: mid-OFFER (before initiateDuel) and mid-RESPONSE (after
+// initiateDuel, before respondDuel) — per the brief's "repeat for mid-response
+// phase" requirement.
+// ---------------------------------------------------------------------------
+describe('Duel mechanism — mid-duel save/load soft-lock (final-review Fix 1)', () => {
+  beforeEach(() => {
+    RULES.duel.enabled = true;
+  });
+  afterEach(() => {
+    RULES.duel.enabled = false; // restore the shared live RULES singleton
+  });
+
+  // Reuses the Task 3/Task 4 seed-96 scenario verbatim: P0 (marcus-grayline)
+  // buys Oriental Ave, P1 (sophia-ember) lands on it owing $11 rent -> offer.
+  function playToOffer() {
+    const client = makeClient(2, 96);
+    client.moves.selectCharacter('marcus-grayline'); // P0 (owner)
+    client.moves.selectCharacter('sophia-ember');     // P1 (challenger)
+    client.moves.rollDice();     // P0 lands on Oriental Ave (unowned)
+    client.moves.buyProperty();  // P0 buys it
+    client.moves.endTurn();
+    client.moves.rollDice();     // P1 lands on P0's Oriental Ave -> duel offer
+    return client;
+  }
+
+  function playToResponse() {
+    const client = playToOffer();
+    client.moves.initiateDuel(); // P1 (challenger) escalates offer -> response
+    return client;
+  }
+
+  // Mirrors App.js's loadGame() setup-override literal (~line 2488) exactly,
+  // including the JSON round-trip (real saves go through localStorage's
+  // JSON.stringify/JSON.parse, which is also what strips functions/undefined
+  // and proves G is plain-data-serializable).
+  function reloadFrom(G, numPlayers) {
+    const savedG = JSON.parse(JSON.stringify(G));
+    const LoadedGame = {
+      ...Monopoly,
+      setup: () => ({
+        ...savedG,
+        events: savedG.events || [],
+        eventSeq: savedG.eventSeq || 0,
+        enforceSeats: savedG.enforceSeats || false,
+        _resumeLoad: true,
+      }),
+    };
+    const client = Client({ game: LoadedGame, numPlayers, debug: false });
+    client.start();
+    return client;
+  }
+
+  // Rolls, then resolves whatever gates the roll lands on (pendingCard /
+  // canBuy / a legitimate NEW duel offer — RULES.duel.enabled is left ON
+  // through this helper so it's honest about what a real post-load turn
+  // could hit), then ends the turn — asserting each step is NOT blocked.
+  // The turn actually advancing (ctx.turn increments) is the end-to-end
+  // "the game is playable again" proof the brief asks for.
+  function driveOneFullTurn(client) {
+    client.moves.rollDice();
+    expect(client.getState().G.hasRolled).toBe(true); // rollDice was NOT blocked
+
+    for (let i = 0; i < 6; i++) {
+      const G = client.getState().G;
+      if (G.pendingCard) { client.moves.acceptCard(); continue; }
+      // buyProperty, not passProperty — passing sends the property to auction,
+      // a whole separate sub-state-machine this helper isn't trying to drive;
+      // both seats start with plenty of cash for any early-board price.
+      if (G.canBuy) { client.moves.buyProperty(); continue; }
+      if (G.duel && G.duel.phase === 'offer') { client.moves.payRent(); continue; }
+      break;
+    }
+
+    const turnBefore = client.getState().ctx.turn;
+    client.moves.endTurn();
+    const stateAfter = client.getState();
+    expect(stateAfter.ctx.turn).toBeGreaterThan(turnBefore); // endTurn was NOT blocked
+  }
+
+  test('save mid-OFFER, reload -> G.duel cleared by onBegin, turnPhase roll, game is fully playable again', () => {
+    const original = playToOffer();
+    const saved = original.getState().G;
+    // Sanity: this really is the frozen mid-duel state the fix targets.
+    expect(saved.duel).not.toBeNull();
+    expect(saved.duel.phase).toBe('offer');
+    expect(saved.turnPhase).toBe('duel');
+    expect(saved.hasRolled).toBe(true);
+
+    const client = reloadFrom(saved, 2);
+    const G = client.getState().G;
+
+    // The fix, directly: onBegin fired once at load (App.js's _resumeLoad
+    // convention) and cleared the stale envelope instead of leaving it frozen
+    // alongside a freshly-reset turnPhase/hasRolled.
+    expect(G.duel).toBeNull();
+    expect(G.turnPhase).toBe('roll');
+    expect(G.hasRolled).toBe(false);
+
+    driveOneFullTurn(client); // rollDice succeeds; endTurn eventually succeeds
+  });
+
+  test('save mid-RESPONSE, reload -> G.duel cleared by onBegin, turnPhase roll, game is fully playable again', () => {
+    const original = playToResponse();
+    const saved = original.getState().G;
+    expect(saved.duel).not.toBeNull();
+    expect(saved.duel.phase).toBe('response');
+    expect(saved.turnPhase).toBe('duel');
+    expect(saved.hasRolled).toBe(true);
+
+    const client = reloadFrom(saved, 2);
+    const G = client.getState().G;
+
+    expect(G.duel).toBeNull();
+    expect(G.turnPhase).toBe('roll');
+    expect(G.hasRolled).toBe(false);
+
+    driveOneFullTurn(client);
   });
 });
