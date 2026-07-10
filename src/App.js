@@ -945,6 +945,39 @@ class MonopolyBoard {
       </div>`;
   }
 
+  // Static two-roll duel-resolution result strip (Task 9 review fix). Spec §5
+  // requires duel-resolution VISIBILITY of both sides' 2d6 — "requirement is
+  // visibility, not instant text" — but the duel_resolved log line (events.js)
+  // only surfaces TOTALS ("Duel! X 18 vs Y 11 — X wins!"), and task-9-report.md
+  // §3 documented that both the dice-animation reuse AND this static-panel
+  // fallback were skipped at ship time. This closes that gap: individual die
+  // faces for both rolls, rendered in the turnbox (accepted fallback, no
+  // animation — see brief).
+  //
+  // Scoped to THIS turn only: finds the most recent duel_resolved event with
+  // `turn === G.totalTurns` so a stale result from a prior turn never lingers
+  // into the next turn's turnbox once G.duel is cleared and a new turn begins.
+  _duelResultStripHtml(G) {
+    const ev = G.events.slice().reverse().find(e => e.type === 'duel_resolved' && e.turn === G.totalTurns);
+    if (!ev) return '';
+    const { ownerId, challengerRoll: cr, defenderRoll: dr, winnerId, outcome } = ev.data;
+    const challengerId = ev.actor;
+    const challenger = G.players[challengerId];
+    const owner = G.players[ownerId];
+    const winner = G.players[winnerId];
+    const challengerName = challenger.character ? challenger.character.name : `Player ${parseInt(challengerId) + 1}`;
+    const ownerName = owner.character ? owner.character.name : `Player ${parseInt(ownerId) + 1}`;
+    const winnerName = winner.character ? winner.character.name : `Player ${parseInt(winnerId) + 1}`;
+    const cBonus = cr.stamina + cr.luckBonus;
+    const dBonus = dr.stamina + dr.luckBonus;
+    const outcomeText = outcome === 'waived' ? 'rent waived' : `${RULES.duel.loseMultiplier}&times; rent paid`;
+    return `
+      <div class="turnbox__slot">
+        <div class="cp__info">${esc(challengerName)} [${cr.dice[0]}][${cr.dice[1]}]+${cBonus} = ${cr.total} &nbsp;vs&nbsp; ${esc(ownerName)} [${dr.dice[0]}][${dr.dice[1]}]+${dBonus} = ${dr.total}</div>
+        <div class="cp__info">${esc(winnerName)} WINS (${outcomeText})</div>
+      </div>`;
+  }
+
   _tileHtml(spaceId, G, opts) {
     const space = this.boardSpaces[spaceId];
     const isCorner = (this.mapData.cornerIds || []).includes(spaceId);
@@ -1636,6 +1669,18 @@ class MonopolyBoard {
     if (G.hasRolled && player.rerollsLeft > 0 && !G.canBuy && !G.pendingCard && G.turnPhase === 'done') {
       html += `<button class="pix-btn pix-btn--default pix-btn--full" id="btn-reroll">REROLL (${player.rerollsLeft})</button>`;
     }
+
+    // Duel resolution result strip (review fix — see _duelResultStripHtml doc
+    // comment). Placed here, above the end-turn controls, so ONE insertion
+    // point covers both render paths that reach this shared "done"-phase code:
+    // classic maps (turnbox has never rendered dice — this is the first time a
+    // duel result appears there) and atlas maps (turnbox already shows the
+    // done-phase _centerSlotHtml hint further up via the `isAtlas` block; this
+    // adds the missing per-die breakdown alongside it). Both paths fall through
+    // to this exact code after the isDuelResponse/!isMyTurn early-returns above,
+    // so no atlas-specific branch is needed — traced during this fix, not
+    // assumed.
+    if (G.turnPhase === 'done') html += this._duelResultStripHtml(G);
 
     // Trade + end turn
     const canTrade = RULES.trading.enabled && G.hasRolled && !G.canBuy && !G.pendingCard && !G.trade && !G.auction && G.turnPhase === 'done'
