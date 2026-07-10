@@ -860,7 +860,9 @@ class MonopolyBoard {
     const total = d ? `<div class="centerslot__total">TOTAL ${d.total}${d.isDoubles ? ` · DOUBLES x${G.doublesCount}` : ''}</div>` : '';
 
     let body = '';
-    if (G.canBuy && isMyTurn) {
+    if (G.turnPhase === 'duel' && G.duel) {
+      body = this._duelPromptHtml(G, ctx, isMyTurn);
+    } else if (G.canBuy && isMyTurn) {
       const space = this.boardSpaces[player.position];
       const price = G.effectivePrice || space.price;
       body = `
@@ -886,6 +888,61 @@ class MonopolyBoard {
     }
 
     return `<div class="centerslot"><div class="centerslot__dice">${diceHtml}</div>${total}${body}</div>`;
+  }
+
+  // Rent-duel turnbox prompt (Task 9). Mirrors the buy/pass centerslot__prompt
+  // pattern above exactly (same markup shape, same pix-btn sizing).
+  //
+  // 'offer' phase — the actor is the CHALLENGER (ctx.currentPlayer), so it
+  // reuses the same `isMyTurn` the buy/pass prompt uses. DUEL! is disabled with
+  // a cooldown tooltip per RULES.duel.cooldownTurns vs the challenger's
+  // lastDuelTurn (engine formula in Game.js initiateDuel, mirrored read-only here).
+  //
+  // 'response' phase — the actor is the OWNER, who is NOT ctx.currentPlayer, so
+  // `isMyTurn` (keyed off ctx.currentPlayer) can't gate this. Online
+  // (G.enforceSeats), only the owner's client renders FIGHT/DECLINE; every other
+  // client (including the challenger's) sees a waiting line naming the owner.
+  // Hot-seat (enforceSeats false) always renders the buttons — same shared-screen
+  // convention the trade/auction modals already use.
+  _duelPromptHtml(G, ctx, isChallengerTurn) {
+    const duel = G.duel;
+    const space = this.boardSpaces[duel.propertyId];
+    const challenger = G.players[duel.challengerId];
+    const owner = G.players[duel.ownerId];
+    const challengerName = challenger.character ? challenger.character.name : `Player ${parseInt(duel.challengerId) + 1}`;
+    const ownerName = owner.character ? owner.character.name : `Player ${parseInt(duel.ownerId) + 1}`;
+
+    if (duel.phase === 'offer') {
+      if (!isChallengerTurn) return `<div class="centerslot__hint">WAITING…</div>`;
+      const cd = RULES.duel.cooldownTurns;
+      const last = challenger.lastDuelTurn;
+      const blocked = cd > 0 && last != null && (G.totalTurns - last) < cd;
+      const remaining = blocked ? cd - (G.totalTurns - last) : 0;
+      return `
+        <div class="centerslot__prompt">
+          <div class="cp__name">${esc(space.name)} — rent ${money(duel.rent)}</div>
+          <div class="cp__btns">
+            <button class="pix-btn pix-btn--success pix-btn--sm" id="btn-payrent">PAY RENT</button>
+            <button class="pix-btn pix-btn--danger pix-btn--sm" id="btn-duel" ${blocked ? `disabled title="Duel available in ${remaining} turn(s)"` : ''}>DUEL!</button>
+          </div>
+        </div>`;
+    }
+
+    // phase === 'response'
+    const isOwnerSeat = !G.enforceSeats || !this.onlinePlayerID || String(this.onlinePlayerID) === String(duel.ownerId);
+    if (!isOwnerSeat) {
+      return `<div class="centerslot__hint">WAITING FOR ${esc(ownerName)} TO RESPOND…</div>`;
+    }
+    const loseAmount = Math.round(RULES.duel.loseMultiplier * duel.rent);
+    return `
+      <div class="centerslot__prompt">
+        <div class="cp__name">${esc(ownerName)}, you are challenged for ${esc(space.name)}!</div>
+        <div class="cp__info">Win: rent waived for ${esc(challengerName)}. Lose: pay ${RULES.duel.loseMultiplier}&times; rent (${money(loseAmount)}).</div>
+        <div class="cp__btns">
+          <button class="pix-btn pix-btn--danger pix-btn--sm" id="btn-fight">FIGHT</button>
+          <button class="pix-btn pix-btn--ghost pix-btn--sm" id="btn-decline">DECLINE</button>
+        </div>
+      </div>`;
   }
 
   _tileHtml(spaceId, G, opts) {
@@ -1530,6 +1587,24 @@ class MonopolyBoard {
 
     let html = `<div class="turnbox"><div class="turnbox__who">${tokenHtml(color, char ? char.name[0] : parseInt(ctx.currentPlayer) + 1, true)} <span style="color:${color}">${esc(name)}</span></div>`;
 
+    // Duel response (Task 9) is a special case of the isMyTurn gate just below:
+    // its actor is the duel OWNER, not ctx.currentPlayer (the challenger, whose
+    // turn it still nominally is). On atlas maps the buy/pass-equivalent prompt
+    // (_centerSlotHtml) only ever reaches the DOM via this turnbox slot (see the
+    // isAtlas branch below), so the plain `!isMyTurn` early-return would hide the
+    // FIGHT/DECLINE hand-off from the owner's client entirely online. Detour
+    // through _centerSlotHtml here first — it does its own owner-vs-everyone-else
+    // check (waiting line for non-owners, hot-seat always shows buttons). Classic
+    // (non-atlas) maps don't need this: their board-center _centerHtml already
+    // renders unconditionally for every client (see _renderSquareBoard).
+    const isAtlas = this.mapData.movementMode === 'atlas';
+    const isDuelResponse = G.turnPhase === 'duel' && G.duel && G.duel.phase === 'response';
+    if (isAtlas && isDuelResponse) {
+      html += `<div class="turnbox__slot">${this._centerSlotHtml(G, ctx)}</div></div>`;
+      this.turnboxEl.innerHTML = html;
+      return;
+    }
+
     if (!isMyTurn) {
       html += `<div class="turnbox__waiting">WAITING FOR<br/>${esc(name)}…</div></div>`;
       this.turnboxEl.innerHTML = html;
@@ -1540,7 +1615,6 @@ class MonopolyBoard {
     // _centerSlotHtml content) here in the side panel. #btn-buy/#btn-pass are
     // wired by id in wireActions, so no rewiring is needed. Classic keeps the
     // prompt in the board center (isAtlas false → turnbox unchanged).
-    const isAtlas = this.mapData.movementMode === 'atlas';
     if (isAtlas) {
       html += `<div class="turnbox__slot">${this._centerSlotHtml(G, ctx)}</div>`;
     }
@@ -1692,6 +1766,10 @@ class MonopolyBoard {
     click('btn-roll', () => this._animateRollThenMove());
     click('btn-buy', () => this.client.moves.buyProperty());
     click('btn-pass', () => this.client.moves.passProperty());
+    click('btn-payrent', () => this.client.moves.payRent());
+    click('btn-duel', () => this.client.moves.initiateDuel());
+    click('btn-fight', () => this.client.moves.respondDuel());
+    click('btn-decline', () => this.client.moves.declineDuel());
     click('btn-end', () => this.client.moves.endTurn());
     click('btn-jail', () => this.client.moves.payJailFine());
     click('btn-reroll', () => this.client.moves.useReroll());
