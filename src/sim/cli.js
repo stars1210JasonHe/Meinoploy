@@ -145,6 +145,17 @@ function main() {
   const isAtlas = !!world;
   const traits = isAtlas ? loadWorld(world, ARCHETYPES).traits : null;
 
+  // Final-review Minor 5: fail loud on a typo'd --duel-policy instead of
+  // silently falling through to bot.js's 'strength' branch (decideMoves'
+  // duel-response logic treats anything that isn't 'never'/'always' as
+  // 'strength' — see src/sim/bot.js), which would produce a misleading run
+  // instead of an error.
+  const VALID_DUEL_POLICIES = ['never', 'always', 'strength'];
+  if (!VALID_DUEL_POLICIES.includes(args.duelPolicy)) {
+    console.error(`Unknown --duel-policy "${args.duelPolicy}". Known: ${VALID_DUEL_POLICIES.join(', ')}`);
+    process.exit(1);
+  }
+
   // --duel-policy selects the BOTS' behavior, but duels are also gated by
   // RULES.duel.enabled — and this CLI never calls setActiveMod (the --map flag
   // picks an atlas WORLD, e.g. terra-titans, which is unrelated to the

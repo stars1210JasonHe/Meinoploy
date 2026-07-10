@@ -16,6 +16,7 @@
 
 import { routeChoices } from '../atlas-movement';
 import { RULES } from '../../mods/active-rules';
+import { isDuelCooldownBlocked } from '../events';
 
 // Default greedy-developer policy. Every knob here is overridable per contestant
 // via the `policy` arg so tournaments can vary aggression without code edits.
@@ -343,8 +344,9 @@ function duelStrength(G, playerId) {
 
 // Mirrors the engine's initiateDuel cooldown guard (Game.js) exactly, so the
 // bot never dispatches an initiateDuel the engine would reject as INVALID_MOVE.
+// Delegates to the shared helper (final-review Fix 3 — de-triplication: this
+// local body used to duplicate the exact same boolean Game.js's initiateDuel
+// and App.js's _duelPromptHtml each inlined separately).
 function duelCooldownBlocked(G, duel) {
-  const challenger = G.players[duel.challengerId];
-  const cd = RULES.duel.cooldownTurns;
-  return cd > 0 && challenger.lastDuelTurn != null && (G.totalTurns - challenger.lastDuelTurn) < cd;
+  return isDuelCooldownBlocked(G.players[duel.challengerId], G.totalTurns);
 }

@@ -19,10 +19,29 @@ import { ARCHETYPES } from '../../mods/dominion/atlas/archetypes';
 import classicMapJson from '../../mods/dominion/maps/classic/map.json';
 import { decideMoves, decideRoute, resolvePolicy } from './bot';
 import { rankStandings } from './standings';
+import { RULES } from '../../mods/active-rules';
 
 // Hard safety cap on the dispatch loop per game so a logic bug can never hang the
 // process. Set well above any plausible real game length (turns * moves-per-turn).
 const MAX_DISPATCH_STEPS = 200000;
+
+// Final-review Fix 2b (cashflow truncation): RULES.core.eventLogCap (200) is
+// tuned for a REAL client's memory/UI display, not for a sim game that can run
+// hundreds of turns and thousands of engine events. tournament.js's
+// accumulateDuelStats scans runMatch's returned `events` (== the final G.events
+// snapshot) for the WHOLE game's duel_initiated/duel_resolved pairs — with the
+// default cap, any duel that happened more than ~200 events before the game
+// ended is silently missing from that snapshot, undercounting the cashflow
+// table. Raising the cap to effectively unlimited for sim matches only fixes
+// this at the source instead of teaching the accumulator to special-case a
+// truncated log. Same one-shot-process RULES mutation idiom as cli.js's
+// `RULES.duel.enabled = true` override (module-singleton, no restore needed —
+// every sim invocation is its own process/run); harmless to set on every game
+// (idempotent), so it lives at the top of ingestMap (real per-game setup)
+// rather than gated behind a "first call only" check.
+function raiseEventLogCapForSim() {
+  RULES.core.eventLogCap = 1e9;
+}
 
 // Ingest a map so Monopoly.setup reads the right board. world===null/undefined =>
 // the classic map. CRITICAL: we EXPLICITLY load + setActiveMap(classic) rather than
@@ -32,6 +51,7 @@ const MAX_DISPATCH_STEPS = 200000;
 // makes each game self-contained regardless of run order. Mirrors App.setMap().
 // Returns the expanded mapData for inspection.
 function ingestMap(world) {
+  raiseEventLogCapForSim();
   const mapData = world ? loadWorld(world, ARCHETYPES) : loadMap(classicMapJson);
   setActiveMap(mapData);
   return mapData;

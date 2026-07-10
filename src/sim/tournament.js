@@ -104,19 +104,27 @@ function duelRowFor(acc, charId) {
 // isn't a duel (no roll happened), and a decline falls back to ordinary
 // single rent — neither produces duel cashflow to report.
 //
-// rent is carried on duel_initiated's payload (frozen G.duel.rent) but NOT on
-// duel_resolved's (see src/events.js) — the two events are always adjacent for
-// the SAME duel (G.duel is a singleton; a new duel cannot start before the
-// previous one resolves), so `pendingRent` correlates them by sequence.
+// rent is carried on BOTH duel_initiated's payload (frozen G.duel.rent) AND,
+// as of final-review Fix 2a, directly on duel_resolved's own payload
+// (src/events.js / src/Game.js respondDuel) — read straight off the
+// duel_resolved event rather than correlating back to its (possibly absent)
+// preceding duel_initiated. Final-review Fix 2b: the old approach correlated
+// by adjacency via a `pendingRent` variable, banking on duel_initiated and
+// duel_resolved always surviving the event log's front-trim together — true
+// in the steady state (G.duel is a singleton; nothing else logs between the
+// two), but NOT guaranteed once a long sim game's cap-trimming is in play (a
+// duel resolved early in the game can have its duel_initiated trimmed away by
+// the time the match ends while a later-trimmed duel_resolved survives, or
+// vice versa) — that made pricing silently fall back to 0. Reading rent
+// directly off duel_resolved removes the fragile correlation entirely; only
+// duelsInitiated (a pure count, no dollar figure) still comes from scanning
+// duel_initiated events.
 export function accumulateDuelStats(acc, events, charIds) {
-  let pendingRent = null;
   (events || []).forEach(ev => {
     if (ev.type === 'duel_initiated') {
-      pendingRent = ev.data.rent;
       duelRowFor(acc, charIds[parseInt(ev.actor)]).duelsInitiated++;
     } else if (ev.type === 'duel_resolved') {
-      const rent = pendingRent != null ? pendingRent : 0;
-      pendingRent = null;
+      const rent = ev.data.rent != null ? ev.data.rent : 0;
       duelRowFor(acc, charIds[parseInt(ev.data.winnerId)]).duelsWon++;
       // challenger-centric cashflow: what THIS duel cost/saved the challenger
       // (actor on duel_resolved is always the challenger — see Game.js respondDuel).
@@ -124,7 +132,11 @@ export function accumulateDuelStats(acc, events, charIds) {
       if (ev.data.outcome === 'waived') {
         challengerRow.rentWaived += rent;
       } else {
-        challengerRow.rentDoubledPaid += RULES.duel.loseMultiplier * rent;
+        // Math.round to mirror the engine's own final-review Fix 4 (respondDuel
+        // now pays Math.round(loseMultiplier * rent), not the raw product) —
+        // keeps this reported figure equal to the dollar amount actually
+        // charged in-game, not a pre-rounding approximation of it.
+        challengerRow.rentDoubledPaid += Math.round(RULES.duel.loseMultiplier * rent);
       }
     }
   });

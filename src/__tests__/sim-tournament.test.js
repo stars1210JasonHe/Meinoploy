@@ -217,7 +217,8 @@ describe('accumulateDuelStats / duelStatsTable — duel cashflow per character',
     const events = [
       { type: 'duel_offered', actor: '0', data: { propertyId: 3, ownerId: '1', rent: 40 } },
       { type: 'duel_initiated', actor: '0', data: { propertyId: 3, ownerId: '1', rent: 40 } },
-      { type: 'duel_resolved', actor: '0', data: { propertyId: 3, ownerId: '1', winnerId: '0', outcome: 'waived' } },
+      // rent on duel_resolved (final-review Fix 2a) — the source of pricing now, not correlation.
+      { type: 'duel_resolved', actor: '0', data: { propertyId: 3, ownerId: '1', winnerId: '0', outcome: 'waived', rent: 40 } },
     ];
     const acc = accumulateDuelStats({}, events, charIds);
     expect(acc['albert-victor']).toEqual({ duelsInitiated: 1, duelsWon: 1, rentWaived: 40, rentDoubledPaid: 0 });
@@ -227,12 +228,25 @@ describe('accumulateDuelStats / duelStatsTable — duel cashflow per character',
   test("defender wins (outcome double): rentDoubledPaid = loseMultiplier x rent, credited to the CHALLENGER; duelsWon to the defender", () => {
     const events = [
       { type: 'duel_initiated', actor: '0', data: { propertyId: 5, ownerId: '1', rent: 30 } },
-      { type: 'duel_resolved', actor: '0', data: { propertyId: 5, ownerId: '1', winnerId: '1', outcome: 'double' } },
+      { type: 'duel_resolved', actor: '0', data: { propertyId: 5, ownerId: '1', winnerId: '1', outcome: 'double', rent: 30 } },
     ];
     const acc = accumulateDuelStats({}, events, charIds);
     // RULES.duel.loseMultiplier default is 2 → 2 * 30 = 60.
     expect(acc['albert-victor']).toEqual({ duelsInitiated: 1, duelsWon: 0, rentWaived: 0, rentDoubledPaid: 60 });
     expect(acc['lia-startrace']).toEqual({ duelsInitiated: 0, duelsWon: 1, rentWaived: 0, rentDoubledPaid: 0 });
+  });
+
+  // Final-review Fix 2b regression: duel_resolved now carries its own rent, so
+  // pricing survives even when the log's front-trim cut away the preceding
+  // duel_initiated (the OLD pendingRent-correlation approach would have priced
+  // this at 0 — see this file's git history / tournament.js's accumulateDuelStats
+  // header comment).
+  test('duel_resolved prices correctly even with NO preceding duel_initiated in the scanned window (simulates a front-trimmed log)', () => {
+    const events = [
+      { type: 'duel_resolved', actor: '0', data: { propertyId: 9, ownerId: '1', winnerId: '0', outcome: 'waived', rent: 77 } },
+    ];
+    const acc = accumulateDuelStats({}, events, charIds);
+    expect(acc['albert-victor']).toEqual({ duelsInitiated: 0, duelsWon: 1, rentWaived: 77, rentDoubledPaid: 0 });
   });
 
   test('a declined offer (no duel_initiated/duel_resolved) contributes nothing', () => {
@@ -247,7 +261,7 @@ describe('accumulateDuelStats / duelStatsTable — duel cashflow per character',
     // Game 1: albert-victor in seat 0 initiates and wins.
     const game1 = [
       { type: 'duel_initiated', actor: '0', data: { propertyId: 1, ownerId: '1', rent: 10 } },
-      { type: 'duel_resolved', actor: '0', data: { propertyId: 1, ownerId: '1', winnerId: '0', outcome: 'waived' } },
+      { type: 'duel_resolved', actor: '0', data: { propertyId: 1, ownerId: '1', winnerId: '0', outcome: 'waived', rent: 10 } },
     ];
     // Game 2: seats rotate — albert-victor now in seat 1, still initiates (as owner-seat
     // this time is irrelevant to accumulation; only the actor's mapped charId matters)
@@ -255,7 +269,7 @@ describe('accumulateDuelStats / duelStatsTable — duel cashflow per character',
     const rotatedCharIds = ['lia-startrace', 'albert-victor'];
     const game2 = [
       { type: 'duel_initiated', actor: '1', data: { propertyId: 2, ownerId: '0', rent: 20 } },
-      { type: 'duel_resolved', actor: '1', data: { propertyId: 2, ownerId: '0', winnerId: '0', outcome: 'double' } },
+      { type: 'duel_resolved', actor: '1', data: { propertyId: 2, ownerId: '0', winnerId: '0', outcome: 'double', rent: 20 } },
     ];
     let acc = {};
     acc = accumulateDuelStats(acc, game1, charIds);
