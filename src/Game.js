@@ -28,6 +28,7 @@ var _activeMod = MODS.dominion;
 // are shared by reference across matches by design — only the wrapper is per-match;
 // per-match MUTABLE state (ownership, buildings, mortgaged) already lives elsewhere in G.
 var _pendingMap = {
+  id: null,
   spaces: DEFAULT_BOARD_SPACES,
   colorGroups: DEFAULT_COLOR_GROUPS,
   chanceCards: DEFAULT_CHANCE_CARDS,
@@ -44,6 +45,7 @@ var _pendingMap = {
 
 export function setActiveMap(mapData) {
   _pendingMap = {
+    id: mapData.id || null,
     spaces: mapData.spaces,
     colorGroups: mapData.colorGroupsFlat,
     chanceCards: mapData.chanceCards,
@@ -91,6 +93,7 @@ export function setActiveMod(modId) {
   // Re-seed _pendingMap board defaults from the mod (a mod with no specific map still plays
   // on its own board). Keeps movement/affinity fields neutral as before.
   _pendingMap = {
+    id: null, // mod default board — not a loaded map/world (setup stamps activeMapId null)
     spaces: mod.board.spaces,
     colorGroups: mod.board.colorGroups,
     chanceCards: mod.cards.chance,
@@ -1210,6 +1213,11 @@ export const Monopoly = {
       // so setupData is always undefined there and this is always false —
       // guards are inert (see requireActor above).
       enforceSeats: !!(setupData && setupData.enforceSeats),
+      // Mod/map identity stamped into synced state (MT2-SP3, spec §0b): the
+      // server's truth, read by the browser's online first-sync alignment and
+      // by the MCP session's own-process mod alignment.
+      activeModId: _activeMod.id,
+      activeMapId: _pendingMap.id || null,
     };
   },
 
@@ -1654,6 +1662,11 @@ export const Monopoly = {
 
     // --- Trading ---
     proposeTrade: (G, ctx, proposal) => {
+      // Malformed-args guard (MT2-SP3): a null/non-object proposal would THROW
+      // on the destructure below — through bgio's fire-and-forget master call
+      // that is an unhandledRejection, i.e. a whole-server crash. External
+      // (MCP) clients can send arbitrary shapes; the browser UI never does.
+      if (!proposal || typeof proposal !== 'object') return INVALID_MOVE;
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (G.duel) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
