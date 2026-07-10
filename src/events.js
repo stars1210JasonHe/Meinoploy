@@ -13,6 +13,19 @@ export function playerName(player) {
   return `Player ${parseInt(player.id) + 1}`;
 }
 
+// Shared duel-cooldown predicate (final-review Fix 3 — de-triplication): the
+// exact same boolean was independently inlined in three places (Game.js
+// initiateDuel, App.js _duelPromptHtml's DUEL! disabled/tooltip check, and
+// sim/bot.js's bot decision logic) and had to stay manually in sync. Lives
+// here (not Game.js) because this module is a leaf — it only imports RULES —
+// so both Game.js (which already imports logEvent/resetMessages/playerName
+// from here) and App.js/sim/bot.js (which do NOT import Game.js-adjacent
+// engine internals) can import it with zero risk of a circular import.
+export function isDuelCooldownBlocked(player, totalTurns) {
+  const cd = RULES.duel.cooldownTurns;
+  return cd > 0 && player.lastDuelTurn != null && (totalTurns - player.lastDuelTurn) < cd;
+}
+
 export const EVENT_LOG_CAP_FALLBACK = 200;
 
 const TYPE_LIST = [

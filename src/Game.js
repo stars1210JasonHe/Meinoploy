@@ -6,7 +6,7 @@ import { RULES } from '../mods/active-rules';
 import { MODS, PRISTINE } from '../mods/index';
 import { deepMerge, DEFAULT_RULES } from './mod-loader';
 import { refreshConstants } from './constants';
-import { logEvent, resetMessages, playerName } from './events';
+import { logEvent, resetMessages, playerName, isDuelCooldownBlocked } from './events';
 
 // Active map data — defaults to classic mod, can be overridden via setActiveMap().
 // Per-match board config is snapshotted into G.board at setup(); all engine readers
@@ -1224,6 +1224,19 @@ export const Monopoly = {
       G.lastDice = null;
       G.pendingCard = null;
       G.doublesCount = 0;
+      // Final-review Fix 1a: a non-null G.duel can only survive to the start
+      // of a NEW turn via a stale loaded save — endTurn is unconditionally
+      // blocked while G.duel is set (see the 10-guard list below, after
+      // Fix 1b adds rollDice/rollOnly to it), so live play can never reach
+      // onBegin with a duel still pending. A save taken
+      // mid-offer/mid-response (G.turnPhase 'duel', G.duel non-null) that
+      // gets reloaded would otherwise leave that frozen envelope in place
+      // while turnPhase/hasRolled reset to 'roll' above — the duel UI has
+      // nothing to render (no fresh landing produced it) and every other
+      // move stays guard-blocked by G.duel, permanently soft-locking the
+      // loaded game. Clearing it here is provably safe by the same
+      // can't-happen-in-live-play argument.
+      G.duel = null;
 
       // Track total turns and advance season. Skipped once after a load (loadGame sets
       // G._resumeLoad) so resuming a saved game doesn't bump the turn counter or flip the season —
@@ -1305,6 +1318,12 @@ export const Monopoly = {
     // behavior to the pre-split version (the 381-test baseline is the proof).
     rollDice: (G, ctx, route) => {
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
+      // Defensive (final-review Fix 1b): redundant with `hasRolled` in live
+      // play (a duel can only exist once a roll already landed on it), but
+      // guards this move directly rather than depending solely on that
+      // ordering — consistent with the other 8 G.duel guards on every other
+      // move (now 10/10 with this move and rollOnly below).
+      if (G.duel) return INVALID_MOVE;
       if (G.phase !== 'play') return INVALID_MOVE;
       if (G.hasRolled) return INVALID_MOVE;
       if (G.players[ctx.currentPlayer].bankrupt) return INVALID_MOVE;
@@ -1316,6 +1335,7 @@ export const Monopoly = {
     // Atlas: roll, resolve jail/doubles, then PAUSE for route choice (D11).
     rollOnly: (G, ctx) => {
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
+      if (G.duel) return INVALID_MOVE; // defensive — see rollDice above
       if (G.phase !== 'play') return INVALID_MOVE;
       if (G.hasRolled) return INVALID_MOVE;
       if (G.players[ctx.currentPlayer].bankrupt) return INVALID_MOVE;
@@ -1696,9 +1716,12 @@ export const Monopoly = {
       }
     },
 
-    // acceptTrade/rejectTrade are the genuine cross-seat exception: the
-    // ACTOR is the trade's target, not ctx.currentPlayer (the proposer is
-    // still mid-turn while the target responds).
+    // acceptTrade/rejectTrade are one of THREE genuine cross-seat exception
+    // pairs in this move set (final-review Fix 6 — updated to acknowledge
+    // all three; the other two are placeBid/passAuction below and
+    // respondDuel/declineDuel further down): the ACTOR is the trade's
+    // target, not ctx.currentPlayer (the proposer is still mid-turn while
+    // the target responds).
     acceptTrade: (G, ctx) => {
       if (!G.trade) return INVALID_MOVE;
       if (!requireActor(G, ctx, G.trade.targetPlayerId)) return INVALID_MOVE;
@@ -1796,9 +1819,11 @@ export const Monopoly = {
     },
 
     // --- Auctions ---
-    // placeBid/passAuction are the other genuine cross-seat exception: the
-    // ACTOR is whichever bidder is currently on the clock (bidder rotation is
-    // independent of ctx.currentPlayer — the property's original owner stays
+    // placeBid/passAuction are the second of three genuine cross-seat
+    // exception pairs (see acceptTrade/rejectTrade above; respondDuel/
+    // declineDuel further down is the third): the ACTOR is whichever bidder
+    // is currently on the clock (bidder rotation is independent of
+    // ctx.currentPlayer — the property's original owner stays
     // ctx.currentPlayer for the whole auction).
     placeBid: (G, ctx, amount) => {
       if (!G.auction) return INVALID_MOVE;
@@ -1873,8 +1898,7 @@ export const Monopoly = {
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
       if (!G.duel || G.duel.phase !== 'offer') return INVALID_MOVE;
       const player = G.players[G.duel.challengerId];
-      const cd = RULES.duel.cooldownTurns;
-      if (cd > 0 && player.lastDuelTurn != null && (G.totalTurns - player.lastDuelTurn) < cd) return INVALID_MOVE;
+      if (isDuelCooldownBlocked(player, G.totalTurns)) return INVALID_MOVE;
       player.lastDuelTurn = G.totalTurns;
       G.duel.phase = 'response';
       logEvent(G, 'duel_initiated', G.duel.challengerId, { propertyId: G.duel.propertyId, ownerId: G.duel.ownerId, rent: G.duel.rent });
@@ -1885,9 +1909,12 @@ export const Monopoly = {
     // statPrimary + floor(statSecondary / secondaryDivisor) per side, pinned
     // roll order (challenger first, then defender) for determinism. Ties go
     // to the defender when RULES.duel.tieGoesToDefender (default true).
-    // G.duel existence is checked BEFORE requireActor because the expected-
-    // actor expression dereferences G.duel.ownerId (acceptTrade precedent,
-    // above, does the same for G.trade.targetPlayerId).
+    // respondDuel/declineDuel are the third of the three genuine cross-seat
+    // exception pairs (final-review Fix 6 — see acceptTrade/rejectTrade and
+    // placeBid/passAuction above). G.duel existence is checked BEFORE
+    // requireActor because the expected-actor expression dereferences
+    // G.duel.ownerId (acceptTrade precedent, above, does the same for
+    // G.trade.targetPlayerId).
     respondDuel: (G, ctx) => {
       if (!G.duel || G.duel.phase !== 'response') return INVALID_MOVE;
       if (!requireActor(G, ctx, G.duel.ownerId)) return INVALID_MOVE;
@@ -1909,11 +1936,26 @@ export const Monopoly = {
       const outcome = challengerWins ? 'waived' : 'double';
       logEvent(G, 'duel_resolved', G.duel.challengerId, {
         propertyId: G.duel.propertyId, ownerId: G.duel.ownerId,
+        // rent (final-review Fix 2a): additive field, frozen rent carried
+        // directly on the resolution event itself. Previously only
+        // duel_initiated carried rent, so a consumer scanning a (possibly
+        // front-trimmed) event log had to correlate duel_resolved back to
+        // its adjacent duel_initiated to price it — fragile against any log
+        // truncation between the two. formatEventMessage's 'duel_resolved'
+        // branch (events.js) never reads `data.rent`, so this is invisible
+        // to rendered text (golden gate stays byte-identical).
+        rent: G.duel.rent,
         challengerRoll, defenderRoll, winnerId, outcome,
       });
       const duel = G.duel;
       G.duel = null; // clear BEFORE the payment so the helper's bankruptcy path sees no pending duel
-      if (!challengerWins) payRentAmount(G, ctx, duel.challengerId, duel.ownerId, duel.propertyId, RULES.duel.loseMultiplier * duel.rent);
+      // Math.round (final-review Fix 4): duel.rent/loseMultiplier can combine
+      // into a fractional amount (season/passive rent modifiers), and money
+      // fields are meant to be whole dollars everywhere else in the engine.
+      // App.js's own display of this same figure (_duelPromptHtml's
+      // loseAmount) already rounds — this makes the actual charged payment
+      // match what the UI showed the player before they fought.
+      if (!challengerWins) payRentAmount(G, ctx, duel.challengerId, duel.ownerId, duel.propertyId, Math.round(RULES.duel.loseMultiplier * duel.rent));
       G.turnPhase = 'done';
       if (G.enforceSeats) ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
     },

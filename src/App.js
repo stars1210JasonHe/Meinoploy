@@ -12,6 +12,7 @@ import { CharacterAI, VERBOSITY, mapEngineEventToAi, consumeNewEvents } from './
 import { loadWorld } from './world-loader';
 import { routeChoices } from './atlas-movement';
 import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
+import { isDuelCooldownBlocked } from './events';
 
 // Client-side mod registry — static bundle imports (Parcel v1 forces all imports static, so
 // every registered mod is bundled at build; only WHICH is active is chosen at runtime). This
@@ -914,9 +915,12 @@ class MonopolyBoard {
 
     if (duel.phase === 'offer') {
       if (!isChallengerTurn) return `<div class="centerslot__hint">WAITING…</div>`;
+      // blocked via the shared helper (final-review Fix 3 — de-triplication);
+      // `cd`/`last` stay local, only needed here for the "N turn(s)" tooltip
+      // countdown, which isDuelCooldownBlocked doesn't compute.
       const cd = RULES.duel.cooldownTurns;
       const last = challenger.lastDuelTurn;
-      const blocked = cd > 0 && last != null && (G.totalTurns - last) < cd;
+      const blocked = isDuelCooldownBlocked(challenger, G.totalTurns);
       const remaining = blocked ? cd - (G.totalTurns - last) : 0;
       return `
         <div class="centerslot__prompt">
