@@ -1,6 +1,6 @@
 # Meinopoly Roadmap
 
-_Last updated: 2026-07-07. This records direction agreed with the project owner; the two
+_Last updated: 2026-07-10. This records direction agreed with the project owner; the two
 major tasks below are to **discuss + design before building** — each is a large initiative._
 
 ## Where we are
@@ -102,8 +102,19 @@ Decomposed 2026-07-06 into: SP1 foundation (events+seats) → SP2 duel/对战 �
   WITH per-character turn memory + personality memory (owner requirement 2026-07-06).
 - **MCP** — expose game state + mechanisms over MCP so external agents/tools (and the dialogue layer)
   can observe/drive the game. (`sim/match.js` is the headless-driving precedent; events = subscribe feed.)
-- **Duel/对战 (SP2, next)** — same-tile co-location trigger, 6-stat opposed rolls, `RULES.duel` config
-  bucket, defender-response via the SP1 envelope machinery.
+> **MT2-SP2 — Rent-duel mechanism (对战/单挑): DONE 2026-07-10 (main `d20c8cb`).** Landing on a rent-due
+> opponent property (duel-enabled mods) offers PAY RENT or DUEL!: the owner FIGHTS (each side 2d6 +
+> stamina + luck÷2, tie→defender; challenger win = rent waived, loss = double rent, bankruptcy-capable)
+> or DECLINES (normal rent). Cooldown default 3 turns; `RULES.duel` fully configurable (stats, dice,
+> multiplier, tie rule). Frozen-rent contract; 10-move mid-duel guard list; save/load-safe (stale-duel
+> clear + round-trip tests); seat envelopes (third cross-seat guard pair) proven over the Local master;
+> AI DUEL reactions; sim duelPolicy bots + duel-cashflow tournament tables (fairness gates PASS under
+> both strength and always policies — weak challenger wins 17.5% and bleeds 2× rent, as designed);
+> turnbox UI with owner hand-off cue + dice-face result strip; enabled on terra-titans (Genghis vs
+> Cleopatra is now a real fight at ~1-3%, not a foregone conclusion). Drive-by production fixes: globe
+> route auto-commit stuck-UI (pre-existing since 06-24, also heals ancient-empires/silk-road) and sim
+> strength-policy game-truncation. 1018 unit tests + 28 E2E. Events duel_offered/initiated/declined/
+> resolved (registry 42) are the SP3-MCP/SP4-dialogue contract surface.
 - **Other mechanisms (TBD — to discuss):** e.g. AI bot players, alliances/voting, world events.
 
 ## Sequencing (proposed; to confirm)
