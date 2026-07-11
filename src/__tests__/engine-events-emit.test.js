@@ -158,7 +158,7 @@ describe('moved', () => {
     const salary = eventsOfType(G, 'salary_collected').find(e => e.data.source === 'hub');
     expect(salary.data).toEqual({ source: 'hub', amount: RULES.core.goSalary });
     const exhausted = eventsOfType(G, 'moved').find(e => e.data.routeExhausted);
-    expect(exhausted.data).toEqual({ from: 0, to: 1, passedGo: false, routeExhausted: true });
+    expect(exhausted.data).toEqual({ from: 0, to: 1, passedGo: false, routeExhausted: true, path: [1] });
     expect(G.messages).toEqual(expect.arrayContaining([
       'No path forward — the route ends here.',
       `Player 1 passes a capital hub! Collect $${RULES.core.goSalary}.`,
@@ -1288,5 +1288,42 @@ describe('guardrail: no raw G.messages mutation remains in Game.js or App.js', (
     const source = fs.readFileSync(path.join(__dirname, '..', 'App.js'), 'utf8');
     expect(source).not.toMatch(/G\.messages\.push/);
     expect(source).not.toMatch(/G\.messages\s*=/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 2 (experience wave): 'moved' gains data.path on atlas worlds — the
+// ordered route actually walked, for Task 4's animator. Classic boards never
+// set it (client derives loop paths). Reuses atlasG()/freshG()/makeCtx above.
+// ---------------------------------------------------------------------------
+
+describe("moved event carries the walked path on atlas worlds", () => {
+  test('atlas rollOnly+commitRoute logs moved with data.path === committed route', () => {
+    const G = atlasG();
+    const ctx = makeCtx('0', 1, 2); // total 3, but node 1 is a dead end (edges: {0:[1], 1:[]})
+    Monopoly.moves.rollOnly(G, ctx);
+    expect(G.awaitingRoute).toBe(true);
+    const committedRoute = [1];
+    Monopoly.moves.commitRoute(G, ctx, committedRoute);
+
+    // Control flow: a route-exhausted walk emits moved TWICE — atlasWalk's
+    // routeExhausted notice first, then performMove's shared emit. Both must
+    // carry the path (Task 4's animator may consume either).
+    const allMoved = eventsOfType(G, 'moved');
+    expect(allMoved).toHaveLength(2);
+    expect(allMoved[0].data.routeExhausted).toBe(true);
+    allMoved.forEach(e => expect(e.data.path).toEqual(committedRoute));
+
+    const moved = allMoved.pop();
+    expect(Array.isArray(moved.data.path)).toBe(true);
+    expect(moved.data.path[moved.data.path.length - 1]).toBe(moved.data.to);
+    expect(moved.data.path).toEqual(committedRoute); // the exact steps array dispatched
+  });
+
+  test('classic board moved has NO path field', () => {
+    const G = freshG();
+    Monopoly.moves.rollDice(G, makeCtx('0', 1, 2)); // 0 -> 3 (Baltic Ave)
+    const moved = eventsOfType(G, 'moved').pop();
+    expect(moved.data.path).toBeUndefined();
   });
 });

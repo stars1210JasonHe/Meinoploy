@@ -468,6 +468,7 @@ function atlasWalk(G, player, dice, route) {
   const edges = G.board.edges;
   const steps = route === undefined ? autoRoute(edges, player.position, dice.total) : route;
   if (!validateRoute(edges, player.position, steps, dice.total)) return false;
+  G.lastDice.path = steps.slice(); // walked route for presentation (moved event data.path)
 
   let salaryCollected = 0;
   steps.forEach(id => {
@@ -479,7 +480,7 @@ function atlasWalk(G, player, dice, route) {
     }
   });
   if (steps.length < dice.total) {
-    logEvent(G, 'moved', player.id, { from: dice.preRollPosition, to: player.position, passedGo: false, routeExhausted: true });
+    logEvent(G, 'moved', player.id, { from: dice.preRollPosition, to: player.position, passedGo: false, routeExhausted: true, path: steps.slice() });
   }
   G.lastDice.salaryCollected = salaryCollected;
   return true;
@@ -1087,7 +1088,9 @@ function performMove(G, ctx, route) {
     }
   }
 
-  logEvent(G, 'moved', ctx.currentPlayer, { from: dice.preRollPosition, to: player.position, passedGo });
+  const movedData = { from: dice.preRollPosition, to: player.position, passedGo };
+  if (G.board.movementMode === 'atlas' && dice.path) movedData.path = dice.path;
+  logEvent(G, 'moved', ctx.currentPlayer, movedData);
   handleLanding(G, ctx);
 
   // Set turnPhase based on what happened
