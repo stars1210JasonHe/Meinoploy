@@ -42,9 +42,101 @@ async function main() {
     log('BOOTSTRAP OK: sdk + zod (native) + Game.js + boardgame.io (scoped esm)');
     return;
   }
-  // Task 10 replaces this stub with the full 9-tool registration.
-  log('tool registration not implemented yet (Task 10)');
-  process.exit(1);
+  // --- full tool registration ---
+  const path = require('path');
+  const fs = require('fs');
+  const mcpCore = esmRequire('../src/mcp/index.js');
+  const { createSession, McpToolError } = mcpCore;
+  const { Client } = esmRequire('boardgame.io/client');
+  const { SocketIO } = esmRequire('boardgame.io/multiplayer');
+  const { Monopoly, setActiveMod } = esmRequire('../src/Game.js');
+
+  const SERVER_URL = process.env.MEINOPOLY_SERVER_URL || 'http://localhost:8088';
+  const MOVE_TIMEOUT = Number(process.env.MEINOPOLY_MCP_MOVE_TIMEOUT_MS) || 1500;
+  const SESSION_FILE = process.env.MEINOPOLY_MCP_SESSION_FILE
+    || path.join(__dirname, '..', '.superpowers', 'mcp-session.json');
+
+  const credStore = {
+    load() {
+      try { return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')); } catch { return {}; }
+    },
+    save(data) {
+      fs.mkdirSync(path.dirname(SESSION_FILE), { recursive: true });
+      fs.writeFileSync(SESSION_FILE, JSON.stringify(data)); // credentials on disk: gitignored dir, same trust domain as the machine (spec §7)
+    },
+  };
+
+  const session = createSession({
+    serverUrl: SERVER_URL,
+    fetchImpl: (...a) => fetch(...a), // Node 20 global fetch
+    clientFactory: ({ matchID, playerID, credentials, numPlayers }) => Client({
+      game: Monopoly, numPlayers, multiplayer: SocketIO({ server: SERVER_URL }),
+      matchID, playerID, credentials, debug: false,
+    }),
+    credStore,
+    setActiveModImpl: (id) => setActiveMod(id),
+    moveTimeoutMs: MOVE_TIMEOUT,
+    log,
+  });
+
+  const server = new McpServer({ name: 'meinopoly', version: '1.0.0' });
+
+  const ok = (obj) => ({ content: [{ type: 'text', text: typeof obj === 'string' ? obj : JSON.stringify(obj) }] });
+  const wrap = (fn) => async (input) => {
+    try {
+      return ok(await fn(input || {}));
+    } catch (e) {
+      if (e instanceof McpToolError) return { content: [{ type: 'text', text: e.message }], isError: true };
+      log('tool crash:', e && e.stack || e);
+      return { content: [{ type: 'text', text: `internal error: ${e.message}` }], isError: true };
+    }
+  };
+
+  server.registerTool('list_matches',
+    { description: 'List open matches on the Meinopoly game server.', inputSchema: {} },
+    wrap(() => session.listMatches()));
+
+  server.registerTool('create_match',
+    { description: 'Create a match (2..10 players; seat enforcement on; victory mode follows the server default). Does NOT auto-join.',
+      inputSchema: { numPlayers: z.number().int().min(2).max(10) } },
+    wrap(({ numPlayers }) => session.createMatch({ numPlayers })));
+
+  server.registerTool('join_match',
+    { description: 'Join a match as a seat (takes over the session; one active session per server). Numbers are coerced to string seats.',
+      inputSchema: { matchID: z.string(), seat: z.union([z.string(), z.number()]), name: z.string().optional() } },
+    wrap(({ matchID, seat, name }) => session.joinMatch({ matchID, seat, name })));
+
+  server.registerTool('get_state',
+    { description: 'Structured view of the joined match: seats, flags, canAct/isYourTurn/isAddressed, gameover.', inputSchema: {} },
+    wrap(() => session.getState()));
+
+  server.registerTool('get_state_digest',
+    { description: 'Compact English digest of the current state — the primary per-turn read.', inputSchema: {} },
+    wrap(() => session.getStateDigest()));
+
+  server.registerTool('list_legal_moves',
+    { description: 'Moves YOUR seat can make right now, with argsHints and required expect values.', inputSchema: {} },
+    wrap(() => session.listLegalMoves()));
+
+  server.registerTool('make_move',
+    { description: 'Dispatch a move. args = positional array. For placeBid/passAuction/acceptTrade/rejectTrade/respondDuel/declineDuel, echo expect from list_legal_moves. Returns {accepted, reason?, digest}.',
+      inputSchema: { move: z.string(), args: z.array(z.any()).optional(),
+        expect: z.object({ decisionSeq: z.number() }).optional() } },
+    wrap(({ move, args, expect }) => session.makeMove({ move, args, expect })));
+
+  server.registerTool('get_events',
+    { description: 'Typed engine events since your cursor (parameterless advances it) or since an explicit sinceSeq (pure read; -1 = full history). gap:true means the 200-event log trimmed past your cursor — reconcile via get_state.',
+      inputSchema: { sinceSeq: z.number().optional() } },
+    wrap(({ sinceSeq }) => session.getEvents({ sinceSeq })));
+
+  server.registerTool('wait_for_my_turn',
+    { description: 'Long-poll (1-45s, default 25s) until you can act or the game ends. Resolves immediately if you already can.',
+      inputSchema: { timeoutMs: z.number().optional() } },
+    wrap(({ timeoutMs }) => session.waitForMyTurn({ timeoutMs })));
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  log(`ready — game server: ${SERVER_URL}`);
 }
 
 main().catch(err => {
