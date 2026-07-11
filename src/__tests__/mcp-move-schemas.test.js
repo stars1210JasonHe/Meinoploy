@@ -77,4 +77,7 @@ describe('moveSignature (spec §1 tool 7.4 signature SETS)', () => {
       { type: 'auction_started', actor: null, result: 'accepted' },
     ]);
   });
+  test('commitRoute: signature is moved (route_committed is reserved but never emitted)', () => {
+    expect(moveSignature('commitRoute', {}, '0')).toEqual([{ type: 'moved', actor: '0', result: 'accepted' }]);
+  });
 });

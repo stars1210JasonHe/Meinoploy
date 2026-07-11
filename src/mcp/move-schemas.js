@@ -77,7 +77,7 @@ const DEFAULT_SIGNATURE_EVENT = {
   selectCharacter: 'character_selected',
   rollDice: 'dice_rolled',
   rollOnly: 'dice_rolled',
-  commitRoute: 'route_committed',
+  commitRoute: 'moved', // engine emits 'moved' via performMove — 'route_committed' is a reserved type that is NEVER logged
   useReroll: 'reroll_used',
   acceptCard: 'card_applied',
   redrawCard: 'card_redrawn',
