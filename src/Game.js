@@ -233,7 +233,7 @@ function getEffectiveBuyPrice(G, player, space) {
 
 // --- Upgrade cost ---
 
-function getUpgradeCost(G, player, space, targetLevel) {
+export function getUpgradeCost(G, player, space, targetLevel) {
   let cost = space.price * RULES.buildings.upgradeCostMultipliers[targetLevel - 1];
 
   // Season price modifier affects upgrade cost
