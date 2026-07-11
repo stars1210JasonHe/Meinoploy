@@ -1,8 +1,9 @@
 // src/mcp/session.js — session state machine (spec §1 tools 1-4, 8; Task 9
 // adds make_move/wait). ONE active session per process; all failures that are
 // NOT game answers throw McpToolError (tool layer -> isError:true).
-import { stateView, stateDigest } from './view';
+import { stateView, stateDigest, canAct } from './view';
 import { getLegalMoves } from './legal-moves';
+import { MOVE_SCHEMAS, EXPECT_REQUIRED, decisionSeq, moveSignature } from './move-schemas';
 
 export class McpToolError extends Error {}
 
@@ -10,6 +11,7 @@ const credKey = (serverUrl, matchID, seat) => `${serverUrl}|${matchID}|${seat}`;
 
 export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, setActiveModImpl, moveTimeoutMs = 1500, syncTimeoutMs = 5000, log = () => {} }) {
   let active = null; // { client, matchID, seat, cursor, aligned }
+  let moveInFlight = false; // makeMove single-flight guard (Task 9)
 
   function closeActive() {
     // Named (not a method referenced via `this`) — joinMatch calls it and the
@@ -201,6 +203,121 @@ export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, 
     },
 
     close() { closeActive(); },
+
+    // make_move (spec §1 tool 7): 4-layer pipeline. Layer 1 (schema/unknown-
+    // move/expect-shape) and layer 2's "expect.decisionSeq required" leg are
+    // TOOL ERRORS (McpToolError, pre-dispatch). Layers 2-4 (stale-decision,
+    // gameover, and the dispatch outcome itself) are GAME ANSWERS — return
+    // values, never thrown. SINGLE-FLIGHT: attribution baselines (event-log
+    // tail / ctx-delta) must not interleave across concurrent make_move calls.
+    async makeMove({ move, args = [], expect } = {}) {
+      const state = requireSession();
+      if (moveInFlight) throw new McpToolError('move already in flight — await the previous make_move');
+
+      // Layer 1: schema + unknown-move + expect presence/shape (tool errors).
+      const schema = MOVE_SCHEMAS[move];
+      if (!schema || typeof active.client.moves[move] !== 'function') {
+        throw new McpToolError(`unknown move '${move}' — see list_legal_moves`);
+      }
+      const parsed = schema.safeParse(args);
+      if (!parsed.success) {
+        throw new McpToolError(`invalid args for ${move}: ${parsed.error.issues.map(i => i.message).join('; ')}`);
+      }
+      if (EXPECT_REQUIRED.has(move)) {
+        if (!expect || typeof expect.decisionSeq !== 'number') {
+          throw new McpToolError(`expect.decisionSeq is REQUIRED for ${move} — echo the value from list_legal_moves`);
+        }
+      }
+
+      const { G: preG, ctx: preCtx } = state;
+      // Layer 3 (before 2 deliberately: a finished game beats a stale decision).
+      if (preCtx.gameover !== undefined && preCtx.gameover !== null) {
+        return { accepted: false, reason: 'gameover', digest: stateDigest(preG, preCtx, active.seat) };
+      }
+      // Layer 2: decision correlation (fail closed on null).
+      if (EXPECT_REQUIRED.has(move)) {
+        const current = decisionSeq(preG);
+        if (current === null || current !== expect.decisionSeq) {
+          return { accepted: false, reason: 'stale-decision', digest: stateDigest(preG, preCtx, active.seat) };
+        }
+      }
+
+      // Layer 4: bounded, attributed resolution.
+      const signatures = moveSignature(move, preG, active.seat);
+      const baseline = preG.events.length ? preG.events[preG.events.length - 1].seq : -1; // sentinel -1
+      const preTurn = preCtx.turn;
+      const preCurrent = preCtx.currentPlayer;
+
+      moveInFlight = true;
+      try {
+        const result = await new Promise((resolve) => {
+          let done = false;
+          const finish = (v) => { if (!done) { done = true; active.onState = null; resolve(v); } };
+          const timer = setTimeout(() => finish({ accepted: false, reason: 'rejected-or-raced' }), moveTimeoutMs);
+          active.onState = (st) => {
+            if (!st) return;
+            const { G, ctx } = st;
+            if (signatures === null) {
+              // endTurn: ctx-delta attribution (deterministic — no other seat
+              // can act in any state where endTurn is legal).
+              if (ctx.turn !== preTurn || ctx.currentPlayer !== preCurrent) {
+                clearTimeout(timer);
+                finish({ accepted: preCurrent === active.seat, reason: preCurrent === active.seat ? undefined : 'rejected-or-raced' });
+              }
+              return;
+            }
+            const tail = G.events.filter(e => e.seq > baseline);
+            for (const sig of signatures) {
+              if (tail.some(e => e.type === sig.type && e.actor === sig.actor)) {
+                clearTimeout(timer);
+                finish(sig.result === 'accepted'
+                  ? { accepted: true }
+                  : { accepted: false, reason: sig.result });
+                return;
+              }
+            }
+            // State changed WITHOUT our signature: someone else's action — keep
+            // waiting until the timer decides (our frame may still arrive).
+          };
+          active.client.moves[move](...parsed.data);
+          // A synchronous Local() master may already have applied it: re-run
+          // the listener once against the current state.
+          const now = active.client.getState();
+          if (now) active.onState(now);
+        });
+        const st = active.client.getState() || state;
+        return { ...result, digest: stateDigest(st.G, st.ctx, active.seat) };
+      } finally {
+        moveInFlight = false;
+      }
+    },
+
+    // wait_for_my_turn (spec §1 tool 6): blocks until this seat can act, the
+    // game ends, or timeoutMs elapses. Built on the existing waitForState
+    // helper (own private subscription per call — see waitForState's header)
+    // rather than the single active.onState slot, so concurrent waits each
+    // resolve independently instead of clobbering one another.
+    async waitForMyTurn({ timeoutMs = 25000 } = {}) {
+      const state = requireSession();
+      const clamped = Math.max(1000, Math.min(45000, Number(timeoutMs) || 25000));
+      const check = (G, ctx) => {
+        if (ctx.gameover !== undefined && ctx.gameover !== null) {
+          return { yourTurn: false, reason: 'gameover', gameover: ctx.gameover };
+        }
+        if (canAct(ctx, active.seat)) {
+          return { yourTurn: true, digest: stateDigest(G, ctx, active.seat) };
+        }
+        return null;
+      };
+      const immediate = check(state.G, state.ctx);
+      if (immediate) return immediate; // already-true / already-gameover -> resolve NOW
+      try {
+        const st = await waitForState(active.client, (s) => check(s.G, s.ctx) !== null, clamped);
+        return check(st.G, st.ctx);
+      } catch (e) {
+        return { yourTurn: false, reason: 'timeout' }; // waitForState only rejects on timeout
+      }
+    },
 
     // internals for tests / Task 9
     _client() { return active && active.client; },
