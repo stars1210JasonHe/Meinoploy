@@ -1,5 +1,5 @@
 import { ARCHETYPES } from '../../mods/dominion/atlas/archetypes';
-import { ATLAS_DEFAULTS, computePlaceValues, expandWorld, aggregateTraits, validateWorld, loadWorld } from '../world-loader';
+import { ATLAS_DEFAULTS, computePlaceValues, expandWorld, aggregateTraits, validateWorld, loadWorld, declutterPositions } from '../world-loader';
 import { MINI_WORLD } from '../../mods/dominion/atlas/fixtures/mini-world';
 
 describe('archetype library', () => {
@@ -228,5 +228,90 @@ describe('loadWorld', () => {
   test('per-space positions derive from place pos', () => {
     const m = loadWorld(MINI_WORLD, ARCHETYPES);
     expect(m.positions[0].x).toBeCloseTo(50, 0); // rome entry near rome's pos
+  });
+});
+
+describe('declutterPositions (flat-atlas overlap fix)', () => {
+  // Real overlapping-world fixture: the 19-place 三国 world that motivated this
+  // (mods/sanguo-excerpt is uncommitted owner WIP — do NOT import from it; this
+  // is a frozen copy of its place id/pos data only, read verbatim from
+  // mods/sanguo-excerpt/sanguo-excerpt.data.json on 2026-07-12).
+  const SANGUO_PLACES = [
+    { id: 'luoyang',     pos: { x: 43.95139542306998,  y: 41.745307452649264 } },
+    { id: 'jizhou',      pos: { x: 64.7422906871714,   y: 29.00684668071955 } },
+    { id: 'youzhou',     pos: { x: 62.9810218296363,   y: 12 } },
+    { id: 'zhuoxian',    pos: { x: 70.40201602480111,  y: 14.988117326229622 } },
+    { id: 'hulaoguan',   pos: { x: 65.37020784768185,  y: 47.30700065397624 } },
+    { id: 'chenliu',     pos: { x: 67.12295424481329,  y: 39.275439436338374 } },
+    { id: 'yingchuan',   pos: { x: 57.27528698214765,  y: 49.50029459761153 } },
+    { id: 'qingzhou',    pos: { x: 72.51851851851859,  y: 31.703703703703688 } },
+    { id: 'sishuiguan',  pos: { x: 58.41863599098211,  y: 33.906988646336075 } },
+    { id: 'zhongshan',   pos: { x: 56.69122493261428,  y: 25.83639450600389 } },
+    { id: 'jiuchong',    pos: { x: 50.655599894566045, y: 35.8396734539795 } },
+    { id: 'beimangshan', pos: { x: 59.54105739515649,  y: 41.82785792889575 } },
+    { id: 'nanyang',     pos: { x: 50.73649629819217,  y: 54.902898160113914 } },
+    { id: 'jiademen',    pos: { x: 51.690295554660516, y: 43.77247906681132 } },
+    { id: 'anxixian',    pos: { x: 70.00097066188069,  y: 22.978058666242347 } },
+    { id: 'dingzhou',    pos: { x: 54.34000963938084,  y: 17.419804338573876 } },
+    { id: 'wancheng',    pos: { x: 59.08767940917528,  y: 57.29229265269514 } },
+    { id: 'jianning',    pos: { x: 27.481481481481417, y: 88 } },
+    { id: 'quyang',      pos: { x: 62.1116719988849,   y: 19.952624150037117 } },
+  ];
+
+  const MINX = 14, MINY = 9;
+  function overlaps(a, b) {
+    const dx = (a.x - b.x) / MINX, dy = (a.y - b.y) / MINY;
+    return dx * dx + dy * dy < 1 - 1e-9;
+  }
+
+  test('sanguo fixture: zero elliptical overlaps after declutter', () => {
+    const out = declutterPositions(SANGUO_PLACES);
+    const ids = Object.keys(out);
+    expect(ids).toHaveLength(SANGUO_PLACES.length);
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        expect(overlaps(out[ids[i]], out[ids[j]])).toBe(false);
+      }
+    }
+  });
+
+  test('deterministic: same input -> identical output', () => {
+    const a = declutterPositions(SANGUO_PLACES);
+    const b = declutterPositions(SANGUO_PLACES.slice().reverse()); // input order must not matter
+    expect(b).toEqual(a);
+  });
+
+  test('bounds clamped to [pad, 100-pad]', () => {
+    const out = declutterPositions(SANGUO_PLACES);
+    Object.values(out).forEach(p => {
+      expect(p.x).toBeGreaterThanOrEqual(3);
+      expect(p.x).toBeLessThanOrEqual(97);
+      expect(p.y).toBeGreaterThanOrEqual(3);
+      expect(p.y).toBeLessThanOrEqual(97);
+    });
+  });
+
+  test('approximate geography preserved: west-of stays west-of for far pairs', () => {
+    const out = declutterPositions(SANGUO_PLACES);
+    // jianning (far SW outlier) stays west+south of the main cluster anchors
+    expect(out.jianning.x).toBeLessThan(out.qingzhou.x);
+    expect(out.jianning.y).toBeGreaterThan(out.youzhou.y);
+  });
+
+  test('degenerate: two coincident points get separated; single point unchanged', () => {
+    const two = declutterPositions([
+      { id: 'a', pos: { x: 50, y: 50 } }, { id: 'b', pos: { x: 50, y: 50 } },
+    ]);
+    expect(overlaps(two.a, two.b)).toBe(false);
+    const one = declutterPositions([{ id: 'solo', pos: { x: 20, y: 30 } }]);
+    expect(one.solo).toEqual({ x: 20, y: 30 });
+  });
+
+  test('non-overlapping input passes through unchanged', () => {
+    const spread = [
+      { id: 'a', pos: { x: 10, y: 10 } }, { id: 'b', pos: { x: 50, y: 50 } },
+      { id: 'c', pos: { x: 90, y: 90 } },
+    ];
+    expect(declutterPositions(spread)).toEqual({ a: { x: 10, y: 10 }, b: { x: 50, y: 50 }, c: { x: 90, y: 90 } });
   });
 });

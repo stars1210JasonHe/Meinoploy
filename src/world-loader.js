@@ -434,6 +434,48 @@ export function validateWorld(world, archetypes) {
   return errors;
 }
 
+// Deterministic min-distance relaxation for FLAT atlas worlds (spec 2026-07-11
+// §3.3): geo-faithful positions cluster real-world neighbors so fixed-size
+// tiles stack unreadably (sanguo: 18 central-plains cities in ~1/4 board).
+// Pushes overlapping pairs apart along their separation vector using an
+// elliptical distance matched to the tile footprint; only pushes (no global
+// re-layout), so approximate geography survives. Deterministic: places are
+// processed in sorted-id order regardless of input order.
+export function declutterPositions(places, opts) {
+  var o = opts || {};
+  var minX = o.minX !== undefined ? o.minX : 14;
+  var minY = o.minY !== undefined ? o.minY : 9;
+  var iterations = o.iterations !== undefined ? o.iterations : 120;
+  var pad = o.pad !== undefined ? o.pad : 3;
+  function clamp(v) { return Math.max(pad, Math.min(100 - pad, v)); }
+  var pts = places
+    .map(function (p) { return { id: p.id, x: p.pos.x, y: p.pos.y }; })
+    .sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+  for (var it = 0; it < iterations; it++) {
+    var movedAny = false;
+    for (var i = 0; i < pts.length; i++) {
+      for (var j = i + 1; j < pts.length; j++) {
+        var a = pts[i], b = pts[j];
+        var dx = (b.x - a.x) / minX;
+        var dy = (b.y - a.y) / minY;
+        var d2 = dx * dx + dy * dy;
+        if (d2 >= 1) continue;
+        movedAny = true;
+        var d = Math.sqrt(d2);
+        var ux, uy, push;
+        if (d < 1e-6) { ux = 1; uy = 0; push = 0.5; } // coincident: split along x
+        else { ux = dx / d; uy = dy / d; push = (1 - d) / 2; }
+        a.x = clamp(a.x - ux * push * minX); a.y = clamp(a.y - uy * push * minY);
+        b.x = clamp(b.x + ux * push * minX); b.y = clamp(b.y + uy * push * minY);
+      }
+    }
+    if (!movedAny) break;
+  }
+  var out = {};
+  pts.forEach(function (p) { out[p.id] = { x: p.x, y: p.y }; });
+  return out;
+}
+
 // ── Load World ──────────────────────────────────────────
 // Validate -> expand -> aggregate traits -> assemble a mapData-compatible
 // object (superset of loadMap()'s contract) with atlas extensions.
@@ -449,6 +491,12 @@ export function loadWorld(world, archetypes) {
 
   // Per-space positions: the place's pos with a small deterministic slot offset
   // (x + (slotIndex - (n-1)/2) * step, clamped 0-100) so tokens don't fully overlap.
+  // FLAT worlds get decluttered place positions (spec 2026-07-11 §3.3);
+  // globe worlds render on real geo and are untouched.
+  var placePos = null;
+  if (world.renderMode === 'flat') {
+    placePos = declutterPositions(world.places);
+  }
   var slotCounts = {};
   ex.spaces.forEach(function (s) {
     slotCounts[s.placeId] = (slotCounts[s.placeId] || 0) + 1;
@@ -456,11 +504,12 @@ export function loadWorld(world, archetypes) {
   var step = cfg.positions.slotOffsetStep;
   var positions = {};
   ex.spaces.forEach(function (s) {
+    var base = (placePos && placePos[s.placeId]) || s.pos;
     var n = slotCounts[s.placeId];
-    var x = s.pos.x + (s.slotIndex - (n - 1) / 2) * step;
+    var x = base.x + (s.slotIndex - (n - 1) / 2) * step;
     positions[s.id] = {
       x: Math.max(0, Math.min(100, x)),
-      y: Math.max(0, Math.min(100, s.pos.y)),
+      y: Math.max(0, Math.min(100, base.y)),
     };
   });
 
