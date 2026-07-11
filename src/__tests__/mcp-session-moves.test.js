@@ -119,6 +119,28 @@ describe('layers 2-4 over a real trade window', () => {
     // the envelope to {0:null,1:null} via Game.js's own setActivePlayers call
     // — NOW driver (proposer, still ctx.currentPlayer) can legitimately race
     // its own cancelTrade against session's (target's) acceptTrade.
+    //
+    // HONEST SCOPE NOTE (fix wave, round 9 — confirmed by instrumentation, not
+    // guessed): this test validates the `accepted:false` invariant, but it
+    // does so via LAYER 2 (stale-decision), never Layer 4. `Local()`'s
+    // InMemory storage is fully SYNCHRONOUS, so `driver.moves.cancelTrade()`
+    // below completes the ENTIRE master round trip — including the broadcast
+    // to session's own client — before that statement returns. By the time
+    // `session.makeMove('acceptTrade', ...)` takes its `requireSession()`
+    // snapshot, `G.trade` is already null and `trade_cancelled` is already the
+    // last event in the log, so `decisionSeq(preG)` is already `null` and
+    // Layer 2 (`current === null`) fires and returns synchronously — verified
+    // empirically (elapsed 0ms, `reason: 'stale-decision'`, every run). The
+    // move never reaches Layer 4's async promise/tail-scan at all, so this
+    // test does NOT exercise the tail-scan actor-matching that is Task 9's new
+    // surface (a rejected frame must not pick up ANOTHER seat's event in its
+    // tail-scan window). That specific guard is what the (e) staleTrade and
+    // (f) challenger-actor tests below DO reach and assert on — both dispatch
+    // through Layer 4 and match a specific `{type, actor}` signature. A
+    // genuinely async Layer-4 misattribution race (my frame master-rejected
+    // WHILE another seat's event lands in my tail-scan window) is structurally
+    // unreproducible under `Local()`'s synchronous transport — it is a
+    // real-network phenomenon, out of reach for this in-process suite.
     const { session, driver, cleanup } = await harness({ seed: 3 });
     await selectBoth(session, driver);
     expect(session._current().ctx.currentPlayer).toBe('0'); // seed pinned: seat 0 goes first
@@ -145,7 +167,13 @@ describe('layers 2-4 over a real trade window', () => {
     driver.moves.cancelTrade();          // now legitimate: proposer, still ctx.currentPlayer, envelope-active
     const r = await session.makeMove({ move: 'acceptTrade', expect: { decisionSeq: seq } });
     expect(r.accepted).toBe(false);
-    expect(['stale-decision', 'rejected-or-raced']).toContain(r.reason); // either honest label is correct depending on sync timing
+    // Empirically always 'stale-decision' under Local()'s synchronous
+    // transport (see the HONEST SCOPE NOTE above) — 'rejected-or-raced' is
+    // kept in this allow-list because it is the honest Layer-4 label a real
+    // (async) network transport could legitimately produce for this same
+    // scenario; this assertion is intentionally left as-is (not narrowed) so
+    // it stays valid if the sync assumption above ever changes.
+    expect(['stale-decision', 'rejected-or-raced']).toContain(r.reason);
     cleanup();
   });
 
@@ -251,6 +279,41 @@ describe('(h) single-flight + wait supersede', () => {
     await w2p;
     cleanup();
   });
+
+  test('close() mid-flight releases the single-flight lock, does not wedge', async () => {
+    // Real bug (fix wave, round 9): makeMove's `finish` closure unconditionally
+    // wrote `active.onState = null`, and the post-await line unconditionally
+    // read `active.client.getState()` — but close()/closeActive() sets
+    // `active = null` and is NOT gated by moveInFlight. If close() runs after
+    // dispatch but before the moveTimeoutMs timer fires, the timer's `finish`
+    // call threw `TypeError: Cannot set property 'onState' of null` inside a
+    // detached callback: the `await new Promise(...)` never settled, so
+    // `finally { moveInFlight = false }` never ran, and every LATER makeMove
+    // threw "in flight" forever. session.js now guards both derefs.
+    const { session, driver, cleanup } = await harness();
+    await selectBoth(session, driver); // pre-roll play state
+    // buyProperty pre-roll: G.canBuy is false (nothing rolled yet), so the
+    // master hard-rejects (INVALID_MOVE) with NO G change — the onState
+    // listener never sees a matching 'property_bought' signature, so this
+    // pends all the way to the moveTimeoutMs=300 timer (verified: this is
+    // exactly the "master REJECTS -> pends to the timer" case the fix calls
+    // for). bgio's own reducer logs a console.error for every INVALID_MOVE —
+    // that's expected/deterministic here (not flakiness), so it's muted.
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const movePromise = session.makeMove({ move: 'buyProperty' });
+    session.close(); // races the in-flight makeMove — nulls `active` before the timer fires
+    const result = await movePromise; // must RESOLVE (no hang, no crash)
+    errSpy.mockRestore();
+    expect(result).toMatchObject({ accepted: false, reason: 'rejected-or-raced' });
+    // Lock released: the NEXT call must fail on "no active session" (the
+    // session really is closed) — NOT "in flight" (the old wedge symptom).
+    let err;
+    try { await session.makeMove({ move: 'endTurn' }); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(McpToolError);
+    expect(err.message).toMatch(/no active session/i);
+    expect(err.message).not.toMatch(/in flight/i);
+    cleanup();
+  });
 });
 
 describe('wait_for_my_turn', () => {
@@ -263,24 +326,45 @@ describe('wait_for_my_turn', () => {
     cleanup();
   });
   test('resolves when the turn ARRIVES; timeoutMs clamped to >=1000', async () => {
-    const { session, driver, cleanup } = await harness();
-    await selectBoth(session, driver); // after selects, someone's turn begins
-    const st = session._current();
-    if (st.ctx.currentPlayer === '0') {
-      // make it seat 1's turn: roll + resolve + end
-      // (simplest deterministic path: session rolls, finishes, ends turn)
-      await session.makeMove({ move: 'rollDice' });
-      const lm = session.listLegalMoves();
-      for (const e of lm) { if (e.move === 'passProperty' || e.move === 'acceptCard') await session.makeMove({ move: e.move, expect: e.expect }); }
-      const end = session.listLegalMoves().find(e => e.move === 'endTurn');
-      if (end) await session.makeMove({ move: 'endTurn' });
-    }
+    // Fix wave (round 9): this test was unseeded, which made it flaky and
+    // console-noisy for a reason NOT related to doubles (verified empirically
+    // by instrumenting seeds 1..30 — see task-9-report.md's fix-wave section):
+    // whenever seat 0's first roll landed on a buyable property, the old body
+    // always called 'passProperty' (never 'buyProperty'), which OPENS AN
+    // AUCTION with seat 0 as the first bidder — 'endTurn' then never becomes
+    // legal, so `if (end) ...` silently skipped it, seat 0 never actually
+    // relinquished the turn, and `waitForMyTurn` resolved via the
+    // IMMEDIATE-resolve branch (seat 0 still current) instead of the PENDING
+    // waitForState path this test claims to exercise. The subsequent
+    // `driver.moves.rollDice()` was then master-rejected (bgio console.error
+    // — the console noise), since it genuinely wasn't seat 1's turn yet.
+    // SEED 6 (hunted 1..30, verified empirically): after selectBoth, seat 0's
+    // first roll lands on a non-buyable, cardless, non-doubles space, so
+    // 'endTurn' is legal immediately and genuinely hands the turn to seat 1 —
+    // no auction/doubles detour keeps seat 0 on the clock. Seat 1's own first
+    // roll (same seed, next draw off the shared PRNG stream) also lands
+    // canBuy:false/pendingCard:null, so no dispatch on either side is ever
+    // master-rejected.
+    const { session, driver, cleanup } = await harness({ seed: 6 });
+    await selectBoth(session, driver);
+    expect(session._current().ctx.currentPlayer).toBe('0'); // seed pinned: seat 0 goes first
+    await session.makeMove({ move: 'rollDice' });
+    expect(session._current().G.canBuy).toBe(false); // seed pinned: no buy/auction detour
+    expect(session._current().G.pendingCard).toBeNull(); // seed pinned: nothing to resolve
+    await session.makeMove({ move: 'endTurn' });
+    expect(session._current().ctx.currentPlayer).toBe('1'); // genuinely seat 1's turn now
+
+    // seat 1 is current (asserted above) at the moment the wait is created ->
+    // canAct('0') is false -> this genuinely enters waitForState's PENDING
+    // path, not the immediate-resolve branch.
     const waitP = session.waitForMyTurn({ timeoutMs: 8000 });
     // driver finishes its turn -> seat 0's turn begins -> wait resolves
     driver.moves.rollDice();
     await flush();
     const s2 = session._current();
-    if (s2.G.canBuy) driver.moves.passProperty();
+    // buy (never pass) so a landing on a buyable property can't open an
+    // auction and strand seat 1 on the clock the same way the old body did.
+    if (s2.G.canBuy) driver.moves.buyProperty();
     if (s2.G.pendingCard) driver.moves.acceptCard();
     await flush();
     driver.moves.endTurn();

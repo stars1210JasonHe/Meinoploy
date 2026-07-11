@@ -243,7 +243,10 @@ export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, 
       }
 
       // Layer 4: bounded, attributed resolution.
-      const signatures = moveSignature(move, preG, active.seat);
+      const seat = active.seat; // captured now (active is guaranteed non-null here) — close()
+      // may null out `active` while this move is in flight (below), so every
+      // later reference in this method uses this local, never `active.seat`.
+      const signatures = moveSignature(move, preG, seat);
       const baseline = preG.events.length ? preG.events[preG.events.length - 1].seq : -1; // sentinel -1
       const preTurn = preCtx.turn;
       const preCurrent = preCtx.currentPlayer;
@@ -252,7 +255,17 @@ export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, 
       try {
         const result = await new Promise((resolve) => {
           let done = false;
-          const finish = (v) => { if (!done) { done = true; active.onState = null; resolve(v); } };
+          // Guarded deref (round-9 fix): close()/closeActive() sets `active =
+          // null` and is NOT gated by moveInFlight — if close() runs after
+          // dispatch but before this fires (e.g. the moveTimeoutMs timer, or a
+          // late onSync from a lagging transport), `active` may already be
+          // null here. Unconditionally writing `active.onState` would throw
+          // INSIDE this callback, which — because it's invoked from a timer/
+          // subscription, not from the `await` call stack — would leave the
+          // `await new Promise(...)` permanently unsettled: `finally` below
+          // never runs, `moveInFlight` never resets, and every subsequent
+          // make_move wedges on "in flight" forever.
+          const finish = (v) => { if (!done) { done = true; if (active) active.onState = null; resolve(v); } };
           const timer = setTimeout(() => finish({ accepted: false, reason: 'rejected-or-raced' }), moveTimeoutMs);
           active.onState = (st) => {
             if (!st) return;
@@ -285,8 +298,12 @@ export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, 
           const now = active.client.getState();
           if (now) active.onState(now);
         });
-        const st = active.client.getState() || state;
-        return { ...result, digest: stateDigest(st.G, st.ctx, active.seat) };
+        // `active` may be null here too (same close()-mid-flight race as
+        // `finish` above) — fall back to the pre-dispatch `state` snapshot so
+        // the digest still reflects a valid (if stale) G/ctx instead of
+        // crashing on `active.client`.
+        const st = (active && active.client.getState()) || state;
+        return { ...result, digest: stateDigest(st.G, st.ctx, seat) };
       } finally {
         moveInFlight = false;
       }
