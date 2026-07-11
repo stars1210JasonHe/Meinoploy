@@ -52,47 +52,24 @@ describe('stateView', () => {
     expect(v.seats[0].money).toEqual(expect.any(Number));
   });
 
+  // SEED 1: author-time seed hunt (2-player classic map) — P0's first rollDice
+  // lands total 5 -> space 5 (Reading Railroad, $200, unowned), so canBuy is
+  // the only blocker; buyProperty() clears it (auction/pendingCard/duel never
+  // trigger) leaving hasRolled true and every proposeTrade guard (Game.js
+  // proposeTrade, ~line 1670: duel/phase/hasRolled/canBuy/pendingCard/auction/
+  // trade/awaitingRoute) open, so proposeTrade({targetPlayerId:'1',
+  // offeredMoney:10}) is accepted and G.trade gets set deterministically.
+  // Pinned script: rollDice() -> buyProperty() -> proposeTrade(...). Verified
+  // by a throwaway hunt script (seeds 1-60, deleted before commit); seed 1 is
+  // the first hit.
   test('trade pending: isAddressed for target, flags.trade projected', () => {
-    let seedToUse = 42;
-    let client = startedClient(2, seedToUse);
-    let tradeFound = false;
-
-    // Hunt for a seed where proposeTrade succeeds (G.trade gets set)
-    for (let seed = 42; seed <= 20 + 42; seed++) {
-      client = startedClient(2, seed);
-      client.moves.rollDice();
-      const { G } = client.getState();
-      if (!G.trade) {
-        // Try proposeTrade
-        if (G.players[Number('0')].properties.length > 0) {
-          try {
-            client.moves.proposeTrade({ targetPlayerId: '1', offeredMoney: 10 });
-            const s2 = client.getState();
-            if (s2.G.trade) {
-              seedToUse = seed;
-              tradeFound = true;
-              break;
-            }
-          } catch (e) {
-            // Move rejected, continue searching
-          }
-        }
-      } else {
-        seedToUse = seed;
-        tradeFound = true;
-        break;
-      }
-    }
-
-    if (!tradeFound) {
-      // fallback: just do the trade attempt at seed 42
-      client = startedClient(2, 42);
-      client.moves.rollDice();
-      client.moves.proposeTrade({ targetPlayerId: '1', offeredMoney: 10 });
-    }
+    const client = startedClient(2, 1);
+    client.moves.rollDice();
+    client.moves.buyProperty();
+    client.moves.proposeTrade({ targetPlayerId: '1', offeredMoney: 10 });
 
     const s2 = client.getState();
-    if (!s2.G.trade) return; // Can't establish trade state — acceptable skip
+    expect(s2.G.trade).not.toBeNull();
 
     const target = s2.G.trade.targetPlayerId;
     const v = stateView(s2.G, s2.ctx, target);

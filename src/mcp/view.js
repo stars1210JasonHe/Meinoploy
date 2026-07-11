@@ -45,7 +45,7 @@ export function stateView(G, ctx, seat) {
       awaitingRoute: !!G.awaitingRoute,
       trade: G.trade ? {
         proposerId: G.trade.proposerId, targetPlayerId: G.trade.targetPlayerId,
-        offeredProperties: G.trade.offeredProperties, requestedProperties: G.trade.requestedProperties,
+        offeredProperties: G.trade.offeredProperties.slice(), requestedProperties: G.trade.requestedProperties.slice(),
         offeredMoney: G.trade.offeredMoney, requestedMoney: G.trade.requestedMoney,
       } : null,
       auction: G.auction ? {
