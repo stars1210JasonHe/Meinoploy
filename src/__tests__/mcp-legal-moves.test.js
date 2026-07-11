@@ -42,3 +42,31 @@ test('response moves carry expect.decisionSeq', () => {
   // The auction INITIATOR (currentPlayer, NOT in envelope) gets nothing (canAct false).
   expect(getLegalMoves(G2, ctx2, '0')).toEqual([]);
 });
+
+test('enforceSeats:true — duel response listed only for the owner seat, not the challenger', () => {
+  const client = makeClient(3, 8);
+  selectAllCharacters(client, CHAR_IDS.slice(0, 3));
+  const { G, ctx } = client.getState();
+  // Craft a duel-response state pure-functionally (same hand-shaped style as
+  // above), mirroring the REAL fields Game.js's landing-interception (Game.js:
+  // 547-549) and initiateDuel (Game.js:1910-1918) put on G.duel: phase,
+  // propertyId, ownerId, challengerId, rent. Both duelists are active per
+  // Game.js:1918's setActivePlayers — canAct alone would admit both seats;
+  // only actorMatches's enforceSeats-gated exact-seat check (legal-moves.js:
+  // 60-62, mirroring requireActor at Game.js:159-161) must exclude the
+  // challenger from respondDuel/declineDuel.
+  const G2 = JSON.parse(JSON.stringify(G));
+  G2.enforceSeats = true;
+  G2.duel = { phase: 'response', propertyId: 3, ownerId: '0', challengerId: '1', rent: 40 };
+  G2.events = [...G2.events, { seq: 700, turn: 1, type: 'duel_offered', actor: '1', data: {} }];
+  const ctx2 = { ...ctx, currentPlayer: '1', activePlayers: { '0': null, '1': null } };
+  // The challenger (WRONG seat under enforceSeats) is in the activePlayers
+  // envelope (canAct true) but must be excluded by actorMatches.
+  expect(getLegalMoves(G2, ctx2, '1')).toEqual([]);
+  // The owner (RIGHT seat) gets exactly respondDuel + declineDuel, each
+  // carrying expect.decisionSeq (both are in EXPECT_REQUIRED).
+  const forOwner = getLegalMoves(G2, ctx2, '0');
+  expect(names(forOwner)).toEqual(['declineDuel', 'respondDuel']);
+  expect(forOwner.find(e => e.move === 'respondDuel').expect).toEqual({ decisionSeq: 700 });
+  expect(forOwner.find(e => e.move === 'declineDuel').expect).toEqual({ decisionSeq: 700 });
+});
