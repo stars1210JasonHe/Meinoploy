@@ -1,0 +1,157 @@
+// src/__tests__/anim.test.js — DOM-free: fake stage + manual clock.
+import { createAnimator, deriveLoopPath } from '../anim';
+
+function makeClock() {
+  let t = 0; const q = [];
+  return {
+    now: () => t,
+    schedule: (fn, ms) => { q.push({ at: t + ms, fn }); q.sort((a, b) => a.at - b.at); },
+    tick(ms) { // advance, firing due callbacks in order
+      const end = t + ms;
+      while (q.length && q[0].at <= end) { const j = q.shift(); t = j.at; j.fn(); }
+      t = end;
+    },
+  };
+}
+function makeStage(log) {
+  return {
+    diceStart: (d1, d2) => log.push(`dice:${d1},${d2}`),
+    diceEnd: () => log.push('diceEnd'),
+    hopTo: (pid, pos, i, n) => log.push(`hop:${pid}@${pos}(${i}/${n})`),
+    hopDone: (pid) => log.push(`done:${pid}`),
+    reapply: () => log.push('reapply'),
+  };
+}
+function makeSink(log) {
+  return { dice: () => log.push('snd:dice'), hop: i => log.push(`snd:hop${i}`), event: e => log.push(`snd:${e.type}`) };
+}
+const ev = (seq, type, actor, data) => ({ seq, turn: 1, type, actor, data: data || {} });
+const gWith = (events) => ({ events, players: [] });
+
+describe('deriveLoopPath', () => {
+  test('simple forward', () => expect(deriveLoopPath(3, 6, 40)).toEqual([4, 5, 6]));
+  test('wraps around GO', () => expect(deriveLoopPath(38, 2, 40)).toEqual([39, 0, 1, 2]));
+  test('from==to -> empty (no walk)', () => expect(deriveLoopPath(5, 5, 40)).toEqual([]));
+});
+
+describe('animator queue', () => {
+  test('dice then hop play in seq order with sounds at milestones', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([
+      ev(0, 'dice_rolled', '0', { d1: 2, d2: 3, total: 5, doubles: false }),
+      ev(1, 'moved', '0', { from: 0, to: 2, path: [1, 2] }),
+    ]));
+    clock.tick(0);
+    expect(log[0]).toBe('snd:dice');       // dice sound at tumble start
+    expect(log[1]).toBe('dice:2,3');
+    expect(a.isAnimating('0')).toBe(false); // hop not started until dice finishes
+    clock.tick(1100);                       // 700 tumble + 400 hold
+    expect(log).toContain('diceEnd');
+    expect(a.isAnimating('0')).toBe(true);
+    clock.tick(160);
+    expect(log).toContain('hop:0@1(0/2)');
+    expect(log).toContain('snd:hop0');
+    clock.tick(160);
+    expect(log).toContain('hop:0@2(1/2)');
+    expect(log).toContain('done:0');
+    expect(a.isAnimating('0')).toBe(false);
+  });
+
+  test('non-animated audible events forward to sink immediately in seq order', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([ev(0, 'property_bought', '0', {})]));
+    expect(log).toEqual(['snd:property_bought']);
+  });
+
+  test('cursor: events are consumed once across onState calls', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    const events = [ev(0, 'property_bought', '0', {})];
+    a.onState(gWith(events));
+    a.onState(gWith(events)); // same state re-delivered (re-render) -> no double sound
+    expect(log).toEqual(['snd:property_bought']);
+  });
+
+  test('fastForward completes everything instantly', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([
+      ev(0, 'dice_rolled', '0', { d1: 1, d2: 1, total: 2, doubles: true }),
+      ev(1, 'moved', '0', { from: 0, to: 2, path: [1, 2] }),
+    ]));
+    a.fastForward();
+    expect(log).toContain('diceEnd');
+    expect(log).toContain('done:0');
+    expect(a.isAnimating('0')).toBe(false);
+  });
+
+  test('queue depth cap: >6 pending events drain instantly except the last two', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    const events = [];
+    for (let s = 0; s < 8; s++) events.push(ev(s, 'moved', String(s % 2), { from: 0, to: 1, path: [1] }));
+    a.onState(gWith(events));
+    clock.tick(0);
+    // first 6 completed instantly (done logged), last 2 animate normally
+    const doneCount = log.filter(l => l.startsWith('done:')).length;
+    expect(doneCount).toBeGreaterThanOrEqual(6);
+  });
+
+  test('gap (front-trim) -> jump cursor, no animation for missing range', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([ev(0, 'property_bought', '0', {})]));
+    log.length = 0;
+    // trimmed log: oldest seq jumped from 1 to 250
+    a.onState(gWith([ev(250, 'property_bought', '0', {}), ev(251, 'rent_paid', '1', {})]));
+    // gap policy: skip to latest, do NOT replay the missing range; the two
+    // present events after the jump still play (they are the newest state)
+    expect(log).toEqual(['snd:property_bought', 'snd:rent_paid']);
+  });
+
+  test('reset clears queue and reveals: pending hop never fires after reset', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([ev(0, 'moved', '0', { from: 0, to: 3, path: [1, 2, 3] })]));
+    clock.tick(160); // one hop in
+    a.reset();
+    expect(a.isAnimating('0')).toBe(false);
+    const before = log.length;
+    clock.tick(2000);
+    expect(log.length).toBe(before); // nothing scheduled survived
+  });
+
+  test('disabled -> everything completes synchronously, sounds still fire', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => true });
+    a.onState(gWith([
+      ev(0, 'dice_rolled', '0', { d1: 4, d2: 2, total: 6, doubles: false }),
+      ev(1, 'moved', '0', { from: 0, to: 2, path: [1, 2] }),
+    ]));
+    expect(log).toContain('snd:dice');
+    expect(log).toContain('done:0');
+    expect(a.isAnimating('0')).toBe(false);
+  });
+
+  test('moved without path on a loop board derives the walk', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => true, boardSize: () => 40 });
+    a.onState(gWith([ev(0, 'moved', '0', { from: 38, to: 1, passedGo: true })]));
+    expect(log).toContain('hop:0@39(0/3)');
+    expect(log).toContain('hop:0@1(2/3)');
+  });
+
+  test('route-exhausted moved (routeExhausted:true) is skipped — its twin shared emit animates once', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => true });
+    a.onState(gWith([
+      ev(0, 'moved', '0', { from: 0, to: 1, passedGo: false, routeExhausted: true, path: [1] }),
+      ev(1, 'moved', '0', { from: 0, to: 1, passedGo: false, path: [1] }),
+    ]));
+    const hops = log.filter(l => l.startsWith('hop:'));
+    expect(hops).toEqual(['hop:0@1(0/1)']); // exactly ONE hop run, from the shared emit
+    expect(log.filter(l => l.startsWith('done:'))).toHaveLength(1);
+  });
+});
