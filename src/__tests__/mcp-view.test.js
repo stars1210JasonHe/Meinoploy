@@ -44,7 +44,7 @@ describe('stateView', () => {
     expect(v.phase).toBe('play');
     expect(v.isYourTurn).toBe(true);
     expect(v.canAct).toBe(true);
-    expect(v.flags).toMatchObject({ canBuy: false, pendingCard: false, awaitingRoute: false });
+    expect(v.flags).toMatchObject({ canBuy: false, pendingCard: null, awaitingRoute: false });
     expect(v.flags.trade).toBeNull();
     expect(v.flags.auction).toBeNull();
     expect(v.flags.duel).toBeNull();

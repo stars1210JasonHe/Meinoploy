@@ -41,7 +41,7 @@ export function stateView(G, ctx, seat) {
     flags: {
       canBuy: !!G.canBuy,
       effectivePrice: G.effectivePrice || 0,
-      pendingCard: G.pendingCard ? { deck: G.pendingCard.deck, text: G.pendingCard.card && G.pendingCard.card.text } : false,
+      pendingCard: G.pendingCard ? { deck: G.pendingCard.deck, text: G.pendingCard.card && G.pendingCard.card.text } : null,
       awaitingRoute: !!G.awaitingRoute,
       trade: G.trade ? {
         proposerId: G.trade.proposerId, targetPlayerId: G.trade.targetPlayerId,

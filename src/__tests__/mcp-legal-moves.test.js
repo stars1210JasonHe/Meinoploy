@@ -43,6 +43,27 @@ test('response moves carry expect.decisionSeq', () => {
   expect(getLegalMoves(G2, ctx2, '0')).toEqual([]);
 });
 
+test('null decisionSeq (opening event front-trimmed): active bidder gets NO placeBid/passAuction', () => {
+  // Fix wave: an open auction whose 'auction_started' opening event is NOT in
+  // G.events (simulating front-trim past the 200-cap log) makes decisionSeq(G)
+  // return null. Listing placeBid/passAuction WITHOUT expect would be a dead
+  // end for the caller — make_move's layer 1 hard-errors "expect.decisionSeq
+  // is REQUIRED" (nothing to echo) and layer 2 fails closed to stale-decision
+  // for any value anyway. getLegalMoves must fail closed identically: neither
+  // response move is listed at all.
+  const client = makeClient(3, 8);
+  selectAllCharacters(client, CHAR_IDS.slice(0, 3));
+  const { G, ctx } = client.getState();
+  const G2 = JSON.parse(JSON.stringify(G));
+  G2.auction = { propertyId: 3, currentBid: 0, currentBidder: null,
+    bidders: [{ playerId: '0', passed: false }, { playerId: '1', passed: false }], currentBidderIndex: 1 };
+  // No 'auction_started' event anywhere in the log -> decisionSeq(G2) is null.
+  G2.events = [...G2.events, { seq: 500, turn: 1, type: 'bid_placed', actor: '0', data: {} }];
+  const ctx2 = { ...ctx, currentPlayer: '0', activePlayers: { '1': null } };
+  const forBidder = getLegalMoves(G2, ctx2, '1');
+  expect(names(forBidder)).toEqual([]);
+});
+
 test('enforceSeats:true — duel response listed only for the owner seat, not the challenger', () => {
   const client = makeClient(3, 8);
   selectAllCharacters(client, CHAR_IDS.slice(0, 3));

@@ -30,20 +30,25 @@ const server = Server({
 const buildPath = path.resolve(__dirname, 'dist');
 server.app.use(serve(buildPath));
 
-// Prevent server crash from stale client reconnections
-process.on('uncaughtException', (err) => {
-  console.error('WARN: uncaught exception (server continues):', err && err.message);
-});
-// A move that throws inside bgio's fire-and-forget Master.onUpdate call becomes
-// an UNHANDLED REJECTION, not an uncaughtException — without this handler Node
-// terminates the whole process (MT2-SP3, spec §2 engine hardening).
-process.on('unhandledRejection', (err) => {
-  console.error('WARN: unhandled rejection (server continues):', (err && err.message) || err);
-});
-
 // require.main gate (MT2-SP3): requiring this file (unit tests) must not bind
-// a port — only direct execution runs the server.
+// a port — only direct execution runs the server. The process-wide
+// uncaughtException/unhandledRejection handlers below are ALSO inside this
+// gate (fix wave): registered at module load, they used to install into
+// EVERY process that merely `require()`s this file — including jest workers
+// running mod-map-select.test.js, silently swallowing that worker's own
+// rejections.
 if (require.main === module) {
+  // Prevent server crash from stale client reconnections
+  process.on('uncaughtException', (err) => {
+    console.error('WARN: uncaught exception (server continues):', err && err.message);
+  });
+  // A move that throws inside bgio's fire-and-forget Master.onUpdate call becomes
+  // an UNHANDLED REJECTION, not an uncaughtException — without this handler Node
+  // terminates the whole process (MT2-SP3, spec §2 engine hardening).
+  process.on('unhandledRejection', (err) => {
+    console.error('WARN: unhandled rejection (server continues):', (err && err.message) || err);
+  });
+
   const PORT = process.env.PORT || 8088;
   server.run(PORT, () => {
     console.log(`Meinopoly server running on http://localhost:${PORT}`);

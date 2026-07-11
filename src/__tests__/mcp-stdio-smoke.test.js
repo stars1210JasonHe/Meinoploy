@@ -78,7 +78,7 @@ function killTree(pid) {
 }
 
 describe('stdio smoke', () => {
-  let gamePort, gameProc, mcpProc, mcp;
+  let gamePort, gameProc, mcpProc, mcp, sessionFile;
 
   beforeAll(async () => {
     try {
@@ -90,9 +90,10 @@ describe('stdio smoke', () => {
     gameProc = spawn(process.execPath, ['-r', 'esm', 'server.js'],
       { cwd: ROOT, env: { ...process.env, PORT: String(gamePort) }, stdio: 'ignore' });
     await waitHttp(`http://127.0.0.1:${gamePort}/games/monopoly`, 20000);
+    sessionFile = path.join(ROOT, '.superpowers', `mcp-smoke-${Date.now()}.json`);
     mcpProc = spawn(process.execPath, ['scripts/mcp-server.js'],
       { cwd: ROOT, env: { ...process.env, MEINOPOLY_SERVER_URL: `http://127.0.0.1:${gamePort}`,
-        MEINOPOLY_MCP_SESSION_FILE: path.join(ROOT, '.superpowers', `mcp-smoke-${Date.now()}.json`) },
+        MEINOPOLY_MCP_SESSION_FILE: sessionFile },
         stdio: ['pipe', 'pipe', 'inherit'] });
     mcp = new McpStdio(mcpProc);
   });
@@ -100,6 +101,12 @@ describe('stdio smoke', () => {
   afterAll(() => {
     killTree(mcpProc && mcpProc.pid);
     killTree(gameProc && gameProc.pid);
+    // Fix wave: each run wrote a unique session file and never cleaned it up.
+    // Wrapped in try/catch — it may not exist (e.g. the loud port-block skip
+    // never spawned the MCP server at all).
+    try {
+      if (sessionFile) require('fs').unlinkSync(sessionFile);
+    } catch (e) { /* not created — fine */ }
   });
 
   test('initialize -> 9 tools -> create/join/state/legal/move round-trip', async () => {

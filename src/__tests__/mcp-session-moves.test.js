@@ -259,7 +259,7 @@ describe('layers 2-4 over a real trade window', () => {
   });
 });
 
-describe('(h) single-flight + wait supersede', () => {
+describe('(h) single-flight + concurrent waits', () => {
   test('second make_move mid-flight throws', async () => {
     const { session, cleanup } = await harness();
     const p1 = session.makeMove({ move: 'selectCharacter', args: [CHAR_IDS[0]] });
@@ -267,16 +267,23 @@ describe('(h) single-flight + wait supersede', () => {
     await p1;
     cleanup();
   });
-  test('second wait supersedes the first', async () => {
+  test('concurrent waits: both resolve independently, neither hangs', async () => {
+    // Fix wave (contract write-back): wait_for_my_turn is built on waitForState's
+    // own PRIVATE per-call subscription (see session.js's waitForState header),
+    // not a shared active.onState-style listener slot — so two overlapping
+    // waits never clobber one another. 'superseded' is not a reason this
+    // implementation can ever produce; assert its absence explicitly so this
+    // test actually locks the shipped contract instead of merely tolerating it.
     const { session, cleanup } = await harness();
     const w1 = session.waitForMyTurn({ timeoutMs: 5000 });
     await flush(10);
     const w2p = session.waitForMyTurn({ timeoutMs: 1000 });
     const r1 = await w1;
+    const r2 = await w2p;
     expect(r1).toMatchObject({ yourTurn: expect.any(Boolean) });
-    // superseded OR immediate-resolve (seat 0 starts as current) — both legal;
-    // the invariant is w1 RESOLVED (never left hanging).
-    await w2p;
+    expect(r2).toMatchObject({ yourTurn: expect.any(Boolean) });
+    expect(r1.reason).not.toBe('superseded');
+    expect(r2.reason).not.toBe('superseded');
     cleanup();
   });
 

@@ -197,7 +197,13 @@ export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, 
       const oldest = ev[0].seq;
       const latest = ev[ev.length - 1].seq;
       const gap = effectiveStart < oldest - 1; // exclusive: next-wanted = start+1
-      const events = ev.filter(e => e.seq > effectiveStart);
+      // Shallow-copy each event (fix wave): the filtered slice previously held
+      // references into the live G.events objects — a mutation hazard for
+      // in-process consumers (same class as the T5 raw-G leak). Data is flat
+      // (seq/turn/type/actor/data); also spread `data` since it's cheap and
+      // keeps the copy from sharing that nested ref too.
+      const events = ev.filter(e => e.seq > effectiveStart)
+        .map(e => ({ ...e, data: e.data ? { ...e.data } : e.data }));
       if (!explicit) active.cursor = latest; // parameterless advances; explicit is a pure read
       return { events, latestSeq: latest, gap, oldestAvailableSeq: oldest };
     },
@@ -275,7 +281,7 @@ export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, 
               // can act in any state where endTurn is legal).
               if (ctx.turn !== preTurn || ctx.currentPlayer !== preCurrent) {
                 clearTimeout(timer);
-                finish({ accepted: preCurrent === active.seat, reason: preCurrent === active.seat ? undefined : 'rejected-or-raced' });
+                finish({ accepted: preCurrent === seat, reason: preCurrent === seat ? undefined : 'rejected-or-raced' });
               }
               return;
             }

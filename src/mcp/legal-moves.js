@@ -178,6 +178,15 @@ export function getLegalMoves(G, ctx, seat) {
   const isCurrent = ctx.currentPlayer === seat;
   const dSeq = decisionSeq(G);
   const expectFor = (move) => (EXPECT_REQUIRED.has(move) && dSeq !== null) ? { decisionSeq: dSeq } : undefined;
+  // Fail-closed listability (fix wave): a response move in EXPECT_REQUIRED
+  // with dSeq === null means the decision's opening event was front-trimmed
+  // out of the capped log — expectFor(move) would return undefined, but
+  // make_move's layer 1 hard-errors "expect.decisionSeq is REQUIRED" (there is
+  // nothing to echo) and layer 2 fails closed to stale-decision for ANY
+  // supplied value. Listing the move here would be a dead end for the caller,
+  // so it must not be listed at all — mirrors make_move's own fail-closed
+  // behavior instead of contradicting it.
+  const listable = (move) => !(EXPECT_REQUIRED.has(move) && dSeq === null);
 
   // --- characterSelect phase ---
   if (G.phase === 'characterSelect') {
@@ -208,8 +217,8 @@ export function getLegalMoves(G, ctx, seat) {
         out.push({ move: 'initiateDuel', description: `Challenge the owner to a duel over the rent (lose = $${Math.round(RULES.duel.loseMultiplier * G.duel.rent)}).` });
       }
     } else if (G.duel.phase === 'response' && actorMatches(G, seat, G.duel.ownerId)) {
-      out.push({ move: 'respondDuel', expect: expectFor('respondDuel'), description: 'Fight! (2d6 + stats per side)' });
-      out.push({ move: 'declineDuel', expect: expectFor('declineDuel'), description: 'Decline — take the normal rent instead.' });
+      if (listable('respondDuel')) out.push({ move: 'respondDuel', expect: expectFor('respondDuel'), description: 'Fight! (2d6 + stats per side)' });
+      if (listable('declineDuel')) out.push({ move: 'declineDuel', expect: expectFor('declineDuel'), description: 'Decline — take the normal rent instead.' });
     }
     return out;
   }
@@ -223,11 +232,11 @@ export function getLegalMoves(G, ctx, seat) {
       const minBid = G.auction.currentBid === 0
         ? RULES.auction.startingBid
         : G.auction.currentBid + RULES.auction.minimumIncrement;
-      if (minBid <= p.money) {
+      if (minBid <= p.money && listable('placeBid')) {
         out.push({ move: 'placeBid', argsHint: { min: minBid, max: p.money }, expect: expectFor('placeBid'),
           description: `Bid on ${spaceName(G, G.auction.propertyId)} (min $${minBid}).` });
       }
-      out.push({ move: 'passAuction', expect: expectFor('passAuction'), description: 'Pass — drop out of this auction.' });
+      if (listable('passAuction')) out.push({ move: 'passAuction', expect: expectFor('passAuction'), description: 'Pass — drop out of this auction.' });
     }
   }
 
@@ -237,8 +246,8 @@ export function getLegalMoves(G, ctx, seat) {
   // No early return here either. ---
   if (G.trade) {
     if (actorMatches(G, seat, G.trade.targetPlayerId)) {
-      out.push({ move: 'acceptTrade', expect: expectFor('acceptTrade'), description: 'Accept the proposed trade.' });
-      out.push({ move: 'rejectTrade', expect: expectFor('rejectTrade'), description: 'Reject the proposed trade.' });
+      if (listable('acceptTrade')) out.push({ move: 'acceptTrade', expect: expectFor('acceptTrade'), description: 'Accept the proposed trade.' });
+      if (listable('rejectTrade')) out.push({ move: 'rejectTrade', expect: expectFor('rejectTrade'), description: 'Reject the proposed trade.' });
     }
     if (isCurrent) { // G.trade.proposerId === ctx.currentPlayer is an invariant while G.trade is set
       out.push({ move: 'cancelTrade', description: 'Withdraw your trade proposal.' });

@@ -104,12 +104,12 @@ async function main() {
     wrap(({ numPlayers }) => session.createMatch({ numPlayers })));
 
   server.registerTool('join_match',
-    { description: 'Join a match as a seat (takes over the session; one active session per server). Numbers are coerced to string seats.',
+    { description: 'Join a match as a seat (takes over the session; one active session per MCP process). Numbers are coerced to string seats.',
       inputSchema: { matchID: z.string(), seat: z.union([z.string(), z.number()]), name: z.string().optional() } },
     wrap(({ matchID, seat, name }) => session.joinMatch({ matchID, seat, name })));
 
   server.registerTool('get_state',
-    { description: 'Structured view of the joined match: seats, flags, canAct/isYourTurn/isAddressed, gameover.', inputSchema: {} },
+    { description: 'Structured view of the joined match: seats, decision flags (canBuy/pendingCard/trade/auction/duel/awaitingRoute), board info (size/movementMode/modId/mapId), canAct/isYourTurn/isAddressed, gameover.', inputSchema: {} },
     wrap(() => session.getState()));
 
   server.registerTool('get_state_digest',
