@@ -671,6 +671,25 @@ class MonopolyBoard {
   // ─────────────────────────────────────────────────────────
   update(state) {
     if (state === null) return;
+    // Online mod/map alignment (MT2-SP3, spec §0b): the server stamps its
+    // active mod/map into G (setup()); a mismatched local selection (online
+    // pins dominion pre-sync) would render the wrong board — atlas positions
+    // index past a 40-space local array and crash — and the wrong roster in
+    // character select. Copy-adapts loadGame()'s align-by-id pattern incl.
+    // its undefined-safe fallbacks. Runs BEFORE the characterSelect branch.
+    // Only ever fires for online clients: local flows install the mod/map
+    // BEFORE the client exists, so ids already match and this no-ops.
+    if (state.G && state.G.activeModId) {
+      const wantMod = state.G.activeModId;
+      const wantMap = state.G.activeMapId;
+      const curMap = this.mapData && this.mapData.id;
+      if (this.activeMod.id !== wantMod || (wantMap || null) !== (curMap || null)) {
+        const mod = MODS.find(m => m.id === wantMod) || MODS[0];
+        if (mod !== this.activeMod) this.selectMod(mod);
+        const targetMap = this.availableMaps.find(m => m.id === wantMap) || this.availableMaps[0];
+        this.setMap(targetMap);
+      }
+    }
     // Release the dice-roll lock once the post-roll state has actually arrived (held
     // across the animation AND the move round-trip, so a high-latency roll can't be
     // double-submitted while #btn-roll lingers).
