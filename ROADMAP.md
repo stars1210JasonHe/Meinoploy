@@ -1,6 +1,6 @@
 # Meinopoly Roadmap
 
-_Last updated: 2026-07-10. This records direction agreed with the project owner; the two
+_Last updated: 2026-07-11. This records direction agreed with the project owner; the two
 major tasks below are to **discuss + design before building** — each is a large initiative._
 
 ## Where we are
@@ -115,7 +115,33 @@ Decomposed 2026-07-06 into: SP1 foundation (events+seats) → SP2 duel/对战 �
 > route auto-commit stuck-UI (pre-existing since 06-24, also heals ancient-empires/silk-road) and sim
 > strength-policy game-truncation. 1018 unit tests + 28 E2E. Events duel_offered/initiated/declined/
 > resolved (registry 42) are the SP3-MCP/SP4-dialogue contract surface.
+> **MT2-SP3 — MCP layer: DONE 2026-07-11 (main `a68847d`).** A 9-tool stdio MCP server
+> (`npm run mcp`; register with `claude mcp add meinopoly -- node <abs>/scripts/mcp-server.js` —
+> NEVER via npm run, its banner corrupts the wire) lets AI agents join a running game server
+> (`MOD=<id> npm run server`) as REAL player seats: list/create/join match (probe-before-connect
+> ghost guardrail, 409 cred-reuse restart recovery, await-first-sync), get_state/digest (seat-scoped
+> projections, no raw-G leak), list_legal_moves (hand-mirrored eligibility table, drift-oracle-tested
+> both directions over 4 seeded full games), make_move (4-layer pipeline: zod schemas → gameover →
+> decisionSeq correlation fail-closed → bounded event-signature attribution incl. challenger-actor'd
+> duel_resolved + stale-trade branch; single-flight), get_events (exclusive cursor, sentinel −1,
+> gap:true on real front-trim), wait_for_my_turn (canAct predicate, independent concurrent waits).
+> Engine: G.activeModId/activeMapId stamping + MOD=/MAP= server boot + App.js online first-sync
+> alignment. Scoped-esm bootstrap (SDK/zod native CJS + src/ via esm shim) with --selftest. Whole-stack
+> smoke test spawns BOTH real processes and speaks raw JSON-RPC (schema serialization pinned).
+> 1093 unit tests; final whole-branch review + re-review = ready-to-merge. PENDING: manual acceptance
+> (browser + MCP seat to gameover incl. a duel response) — blocked on "no second player to add",
+> unblocks when bots land or via a second Claude session. Post-merge tickets: atlas drift coverage,
+> App.js version-skew re-align guard, CLAUDE.md docs pass (npm run mcp + registration flow), small
+> seam polish (onSync client-identity check, waitForMyTurn catch specificity, smoke gameProc stderr).
 - **Other mechanisms (TBD — to discuss):** e.g. AI bot players, alliances/voting, world events.
+
+## Next wave (owner feedback 2026-07-11, experience-first)
+Owner playtested the entry flow and prioritized EXPERIENCE over bots:
+1. **Terra-titans map regions overlap / unreadable** — rendering bug, investigate + fix first.
+2. **Token movement unclear after dice roll** + **dice effect underwhelming** — real movement/dice
+   animation (blocked by full-re-render architecture; needs keyed/diffed render — design first).
+3. **No sound** — confirmed none exists; WebAudio SFX + chiptune (dice, purchase, rent, jingle).
+4. THEN Phase-7 bots (pre-game "add computer player" option) — also unblocks MCP manual acceptance.
 
 ## Sequencing (proposed; to confirm)
 1. Near-term: entry-UI polish (small, visible).
