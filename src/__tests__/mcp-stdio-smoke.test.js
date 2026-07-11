@@ -114,6 +114,23 @@ describe('stdio smoke', () => {
     expect(names).toEqual(['create_match', 'get_events', 'get_state', 'get_state_digest',
       'join_match', 'list_legal_moves', 'list_matches', 'make_move', 'wait_for_my_turn']);
 
+    // Pin the raw-shape -> real JSON Schema serialization (SDK 1.29's registerTool
+    // accepts a plain object of zod fields, not z.object(...) — verified empirically
+    // in task-10-report.md; this locks that behavior into the committed suite).
+    const createTool = tools.result.tools.find(t => t.name === 'create_match');
+    expect(createTool.inputSchema.properties.numPlayers).toMatchObject({
+      type: 'integer', minimum: 2, maximum: 10,
+    });
+    expect(createTool.inputSchema.required).toEqual(['numPlayers']);
+
+    const moveTool = tools.result.tools.find(t => t.name === 'make_move');
+    expect(moveTool.inputSchema.properties).toMatchObject({
+      move: { type: 'string' },
+      args: { type: 'array' },
+      expect: { type: 'object', properties: { decisionSeq: { type: 'number' } }, required: ['decisionSeq'] },
+    });
+    expect(moveTool.inputSchema.required).toEqual(['move']);
+
     const created = toolJson(await mcp.request('tools/call', { name: 'create_match', arguments: { numPlayers: 2 } }));
     expect(created.matchID).toBeTruthy();
 

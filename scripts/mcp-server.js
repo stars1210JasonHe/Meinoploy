@@ -53,6 +53,7 @@ async function main() {
 
   const SERVER_URL = process.env.MEINOPOLY_SERVER_URL || 'http://localhost:8088';
   const MOVE_TIMEOUT = Number(process.env.MEINOPOLY_MCP_MOVE_TIMEOUT_MS) || 1500;
+  const SYNC_TIMEOUT = Number(process.env.MEINOPOLY_MCP_SYNC_TIMEOUT_MS) || 5000;
   const SESSION_FILE = process.env.MEINOPOLY_MCP_SESSION_FILE
     || path.join(__dirname, '..', '.superpowers', 'mcp-session.json');
 
@@ -76,6 +77,7 @@ async function main() {
     credStore,
     setActiveModImpl: (id) => setActiveMod(id),
     moveTimeoutMs: MOVE_TIMEOUT,
+    syncTimeoutMs: SYNC_TIMEOUT,
     log,
   });
 
