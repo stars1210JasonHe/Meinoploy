@@ -8,6 +8,7 @@ import { Local } from 'boardgame.io/multiplayer';
 import { createSession, McpToolError } from '../mcp/session';
 import { buildSeatGame } from './helpers/seatClients';
 import { MODS } from '../../mods/index';
+import { RULES } from '../../mods/active-rules';
 
 const CHAR_IDS = MODS.dominion.characters.map(c => c.id);
 
@@ -179,6 +180,73 @@ describe('event cursor (exclusive, sentinel -1)', () => {
     const replay = s.getEvents({ sinceSeq: -1 });  // pure read, full history
     expect(replay.events[0].seq).toBe(0);
     expect(s.getEvents({}).events).toEqual([]);   // pure read did NOT move the cursor
+    h.cleanup();
+  });
+});
+
+describe('getEvents gap detection (real trim via RULES.core.eventLogCap)', () => {
+  // RULES is a SHARED SINGLETON ("SHARED IDENTITY at load — do not rebind,
+  // mutate in place", mods/active-rules.js) — save/restore in try/finally so
+  // this test never leaks a shrunk cap into any other suite in the file.
+  test('sinceSeq below the trimmed oldest reports gap:true with the real oldestAvailableSeq', async () => {
+    const h = makeHarness();
+    const s = createSession({ serverUrl: 'http://x', fetchImpl: h.lobby.fetchImpl,
+      clientFactory: h.clientFactory, credStore: memoryCredStore(), setActiveModImpl: () => {} });
+    const { matchID } = await s.createMatch({ numPlayers: 2 });
+    await s.joinMatch({ matchID, seat: '0' });
+    await flush();
+
+    const orig = RULES.core.eventLogCap;
+    try {
+      RULES.core.eventLogCap = 1; // cap=1: every logEvent call trims the log to its last 1 entry
+      const other = h.driver('1', 2);
+      other.start();
+
+      // Seat 0 selects (1 event: its own join line) — turn then passes to seat 1.
+      s._client().moves.selectCharacter(CHAR_IDS[0]);
+      await flush();
+      // Seat 1 selects LAST (2 events: its own join line + the allSelected
+      // transition, Game.js selectCharacter L1310+L1317) — 3 events logged
+      // total across both selects, cap=1 trims after each push, so the log
+      // ends holding only the final (allSelected) event: oldest === latest,
+      // and oldest > 0 — a genuine trim, not an assumed one.
+      other.moves.selectCharacter(CHAR_IDS[1]);
+      await flush();
+
+      const r = s.getEvents({ sinceSeq: -1 }); // pure read, well below any real oldest
+      expect(r.gap).toBe(true);
+      expect(r.oldestAvailableSeq).toBeGreaterThan(0);
+      expect(r.latestSeq).toBeGreaterThanOrEqual(r.oldestAvailableSeq);
+    } finally {
+      RULES.core.eventLogCap = orig;
+    }
+    h.cleanup();
+  });
+});
+
+describe('listMatches', () => {
+  test('maps raw lobby REST into {matchID, players:[{id,name,occupied}], createdAt}', async () => {
+    const h = makeHarness();
+    const s = createSession({ serverUrl: 'http://x', fetchImpl: h.lobby.fetchImpl,
+      clientFactory: h.clientFactory, credStore: memoryCredStore(), setActiveModImpl: () => {} });
+    const m1 = await s.createMatch({ numPlayers: 2 });
+    const m2 = await s.createMatch({ numPlayers: 3 });
+    await s.joinMatch({ matchID: m1.matchID, seat: '0' }); // occupy seat 0 of match 1 only
+    await flush();
+
+    const list = await s.listMatches();
+    expect(list).toHaveLength(2);
+
+    const match1 = list.find(m => m.matchID === m1.matchID);
+    const match2 = list.find(m => m.matchID === m2.matchID);
+    expect(match1.createdAt).not.toBeNull();
+    expect(match1.players).toHaveLength(2);
+    expect(typeof match1.players[0].id).toBe('string');
+    expect(match1.players[0]).toMatchObject({ id: '0', name: 'MCP Agent', occupied: true });
+    expect(match1.players[1]).toMatchObject({ id: '1', name: null, occupied: false });
+
+    expect(match2.players).toHaveLength(3);
+    expect(match2.players.every(p => p.occupied === false && p.name === null)).toBe(true);
     h.cleanup();
   });
 });

@@ -8,7 +8,7 @@ export class McpToolError extends Error {}
 
 const credKey = (serverUrl, matchID, seat) => `${serverUrl}|${matchID}|${seat}`;
 
-export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, setActiveModImpl, moveTimeoutMs = 1500, log = () => {} }) {
+export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, setActiveModImpl, moveTimeoutMs = 1500, syncTimeoutMs = 5000, log = () => {} }) {
   let active = null; // { client, matchID, seat, cursor, aligned }
 
   function closeActive() {
@@ -16,6 +16,48 @@ export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, 
     // returned object may be destructured by the tool layer.
     if (active && active.client && active.client.stop) active.client.stop();
     active = null;
+  }
+
+  // Reusable one-shot waiter: resolves the first time `predicate(state)` is
+  // truthy for a non-null bgio state, or rejects with McpToolError after
+  // timeoutMs. Self-contained — does NOT touch active.onState (Task 9's
+  // single listener slot); this owns a private subscription so joinMatch
+  // (and later wait_for_my_turn, Task 9, with a canAct-based predicate) can
+  // each call it independently of any other listener.
+  // client.subscribe(fn) RETURNS an unsubscribe function (verified:
+  // node_modules/boardgame.io client subscribe() "Return a handle that
+  // allows the caller to unsubscribe"), and — once the client is running —
+  // invokes fn SYNCHRONOUSLY with the current state as part of the
+  // subscribe() call itself, before subscribe() returns. `unsubscribe` is
+  // therefore declared with `let` (not `const`) and guarded via a `settled`
+  // flag so a synchronous predicate match during that initial call doesn't
+  // reference `unsubscribe` before it's assigned.
+  function waitForState(client, predicate, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      const initial = client.getState();
+      if (initial && predicate(initial)) { resolve(initial); return; }
+
+      let settled = false;
+      let timer = null;
+      let unsubscribe = null;
+
+      function settle(fn, value) {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        if (unsubscribe) unsubscribe();
+        fn(value);
+      }
+
+      unsubscribe = client.subscribe((state) => {
+        if (state && predicate(state)) settle(resolve, state);
+      });
+      if (settled && unsubscribe) unsubscribe(); // predicate matched synchronously during subscribe() above
+
+      timer = setTimeout(() => {
+        settle(reject, new McpToolError(`timed out after ${timeoutMs}ms waiting for state`));
+      }, timeoutMs);
+    });
   }
 
   async function rest(path, opts) {
@@ -114,7 +156,15 @@ export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, 
       if (client.updateCredentials) client.updateCredentials(credentials);
       client.subscribe(onSync);
       client.start();
-      const phase = (() => { const st = client.getState(); return st ? st.G.phase : 'syncing'; })();
+      // Await the FIRST real sync before reading phase (user-approved fix,
+      // Task 8 review): Local()+InMemory syncs within the same tick, but a
+      // real SocketIOTransport (Task 10, production) needs a handshake round
+      // trip, so reading client.getState() immediately after start() would
+      // read null/'syncing' on ~every production join. This also guarantees
+      // onSync's cursor-init + mod-alignment have already run by the time
+      // joinMatch resolves.
+      await waitForState(client, (s) => !!s, syncTimeoutMs);
+      const phase = client.getState().G.phase;
       return { ok: true, seat, matchID, phase };
     },
 
