@@ -13,6 +13,8 @@ import { loadWorld } from './world-loader';
 import { routeChoices } from './atlas-movement';
 import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
 import { isDuelCooldownBlocked } from './events';
+import { createAnimator, DICE_TUMBLE_MS } from './anim';
+import { createAudio } from './audio';
 
 // Client-side mod registry — static bundle imports (Parcel v1 forces all imports static, so
 // every registered mod is bundled at build; only WHICH is active is chosen at runtime). This
@@ -190,6 +192,13 @@ class MonopolyBoard {
     this.activeChatCharId = null;
     this._lastEventSeq = undefined;
 
+    // Audio + animator: constructed exactly ONCE, here at app-boot — not per-game-start.
+    // this.mapData already exists (setMap() ran above); this.boardEl/tokenLayer don't exist
+    // yet, but the stage's DOM lookups are all lazy closures evaluated at animation-trigger
+    // time, well after createLayout() runs. Booting it here (before createLayout) also means
+    // the mute button's initial paint reflects the REAL localStorage-backed mute state
+    // immediately, instead of defaulting to "SND" until a game is first started.
+    this._ensureAnimator();
     this.createLayout();
     this.showModeSelect();
   }
@@ -219,6 +228,104 @@ class MonopolyBoard {
   }
 
   // ─────────────────────────────────────────────────────────
+  // Animation + SFX pipeline (experience wave)
+  // ─────────────────────────────────────────────────────────
+  // Construct the shared audio + animator pipeline exactly once. Called from the
+  // constructor (not per client-start) so it survives exitToMenu()/loadGame() cycles
+  // without leaking duplicate `pointerdown` listeners or animator instances.
+  _ensureAnimator() {
+    if (this.animator) return;
+    this.audio = createAudio();
+    const stage = this._makeAnimStage();
+    this.animator = createAnimator({
+      stage,
+      // anim.js calls sink.event(e)/sink.dice()/sink.hop(i) — the audio object exposes
+      // playForEvent/dice/hop, NOT an `.event` method, so this adapter shim is required.
+      sink: {
+        dice: () => this.audio.dice(),
+        hop: (i) => this.audio.hop(i),
+        event: (e) => this.audio.playForEvent(e),
+      },
+      boardSize: () => (this.mapData && this.mapData.spaceCount) || 0,
+      isDisabled: () => window.__MEINO_NO_ANIM === true
+        || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches),
+    });
+    // First gesture anywhere: resume the (possibly-suspended) AudioContext. Any input also
+    // fast-forwards in-flight animations — intentional: a click mid-animation snaps it to done
+    // rather than making the player wait it out.
+    document.addEventListener('pointerdown', () => {
+      this.audio.onFirstGesture();
+      if (this.animator) this.animator.fastForward();
+    }, { capture: true });
+  }
+
+  // Real-DOM stage consumed by anim.js's createAnimator. Owns dice-overlay + token
+  // placement during an in-flight animation; renderTokens/_updateGlobeOverlay skip
+  // position writes for animating players (this.animator.isAnimating(id)) so this stage
+  // is the sole writer while a job is running.
+  _makeAnimStage() {
+    const overlay = () => document.getElementById('dice-overlay');
+    // Remember current animated placement per player so reapply() can re-assert it after
+    // a full re-render recreates/repositions token nodes (e.g. a brand-new token element).
+    this._animPlacement = {}; // playerId -> posId
+    const place = (pid, posId) => {
+      if (this.mapData.renderMode === 'globe') {
+        const ov = this.boardEl && this.boardEl.querySelector('.globe-overlay');
+        const el = ov && ov.querySelector(`.gtoken[data-player="${pid}"]`);
+        const sp = this.boardSpaces && this.boardSpaces[posId];
+        const geo = sp && this._globeGeoOf && this._globeGeoOf[sp.placeId];
+        if (el && geo) { el.dataset.lat = geo.lat; el.dataset.lng = geo.lng; }
+        return;
+      }
+      const el = this._tokenLayer && this._tokenLayer.querySelector(`.token[data-player="${pid}"]`);
+      if (!el) return;
+      const c = this.getSpaceCenter(posId);
+      el.classList.add('token--hop');
+      el.style.left = c.x + '%';
+      el.style.top = c.y + '%';
+    };
+    return {
+      diceStart: (d1, d2) => {
+        const ov = overlay(); if (!ov) return;
+        ov.style.display = 'flex';
+        ov.classList.add('dice-overlay--tumbling');
+        this._diceTumbleTimer && clearInterval(this._diceTumbleTimer);
+        const rnd = () => 1 + Math.floor(Math.random() * 6);
+        // Rapid face flips for the tumble window; settle on the real values. Reuses
+        // dieHtml() — the SAME CSS pip-die glyph the sidebar/centerslot dice already
+        // render — instead of inventing a new (unicode-glyph) dice visual language.
+        const tick = () => { ov.querySelectorAll('.bigdie').forEach(el => { el.innerHTML = dieHtml(rnd(), true); }); };
+        tick(); // populate synchronously — a setInterval-only tick would leave the overlay
+        // empty (or showing the PREVIOUS roll's stale faces) for the first 80ms it's visible.
+        this._diceTumbleTimer = setInterval(tick, 80);
+        setTimeout(() => {
+          clearInterval(this._diceTumbleTimer);
+          ov.classList.remove('dice-overlay--tumbling');
+          const dies = ov.querySelectorAll('.bigdie');
+          if (dies[0]) dies[0].innerHTML = dieHtml(d1);
+          if (dies[1]) dies[1].innerHTML = dieHtml(d2);
+        }, DICE_TUMBLE_MS);
+      },
+      diceEnd: () => {
+        const ov = overlay(); if (!ov) return;
+        clearInterval(this._diceTumbleTimer);
+        ov.style.display = 'none';
+      },
+      hopTo: (pid, posId, i, n) => { this._animPlacement[pid] = posId; place(pid, posId); },
+      hopDone: (pid) => {
+        delete this._animPlacement[pid];
+        const el = this._tokenLayer && this._tokenLayer.querySelector(`.token[data-player="${pid}"]`);
+        if (el) el.classList.remove('token--hop');
+        // Final authoritative placement comes from the next renderTokens; force one now.
+        if (this._lastG) this.renderTokens(this._lastG);
+      },
+      reapply: () => {
+        Object.entries(this._animPlacement || {}).forEach(([pid, posId]) => place(pid, posId));
+      },
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────
   // Layout shell
   // ─────────────────────────────────────────────────────────
   createLayout() {
@@ -235,6 +342,7 @@ class MonopolyBoard {
           <button id="btn-save" class="pix-btn pix-btn--default" style="display:none;">SAVE</button>
           <button id="btn-load-menu" class="pix-btn pix-btn--default">LOAD</button>
           <button id="btn-ai-settings" class="pix-btn pix-btn--default">AI</button>
+          <button id="btn-mute" class="pix-btn pix-btn--default">SND</button>
           <button id="btn-exit-game" class="pix-btn pix-btn--danger" style="display:none;">EXIT</button>
         </div>
 
@@ -254,6 +362,7 @@ class MonopolyBoard {
               </div>
               <div class="game__center">
                 <div id="board" class="board"></div>
+                <div id="dice-overlay" style="display:none;"><span class="bigdie" data-die="1"></span><span class="bigdie" data-die="2"></span></div>
               </div>
               <div class="game__right">
                 <div id="turnbox"></div>
@@ -306,6 +415,12 @@ class MonopolyBoard {
     document.getElementById('btn-exit-foot').onclick = () => this.exitToMenu();
     document.getElementById('btn-load-menu').onclick = () => this.showSavesModal();
     document.getElementById('btn-ai-settings').onclick = () => this.showAISettings();
+
+    // Mute toggle (this.audio is constructed in the constructor, before createLayout runs).
+    const muteBtn = document.getElementById('btn-mute');
+    const paintMute = () => { muteBtn.textContent = this.audio && this.audio.isMuted() ? 'MUTED' : 'SND'; };
+    muteBtn.onclick = () => { this.audio.setMuted(!this.audio.isMuted()); paintMute(); };
+    paintMute();
 
     // Theme switcher
     const savedTheme = localStorage.getItem('meinopoly_theme') || 'council';
@@ -705,6 +820,7 @@ class MonopolyBoard {
 
     if (ctx.gameover) {
       this._teardownGlobe(); // results screen doesn't call renderBoard — stop the globe RAF/WebGL
+      if (this.animator) this.animator.reset(); // clear any in-flight dice/hop before results paint
       this._showScreen('results');
       this.renderResults(G, ctx);
       return;
@@ -723,6 +839,7 @@ class MonopolyBoard {
     this.renderStateModal(G, ctx);
     this.wireActions(G, ctx);
     this._resolveAtlasRoute(G, ctx);
+    if (this.animator) { this.animator.onState(G); this.animator.afterRender(); }
   }
 
   // Atlas route-picker: after rollOnly pauses the turn (G.awaitingRoute), either
@@ -1261,6 +1378,7 @@ class MonopolyBoard {
     const places = (this.mapData.atlasPlaces || []).filter(p => p.geo);
     const geoOf = {};
     places.forEach(p => { geoOf[p.id] = p.geo; });
+    this._globeGeoOf = geoOf; // hoisted so _makeAnimStage's globe placement branch can reuse it
 
     // Route picker (globe): highlight the destination city of each branch, clickable.
     const routeTargets = this._globeComputeRouteTargets(G, ctx);
@@ -1309,6 +1427,7 @@ class MonopolyBoard {
       }
       el.style.setProperty('--tcol', this._playerColor(G, pl.id));
       el.textContent = pl.character ? pl.character.name[0] : (parseInt(pl.id) + 1);
+      if (this.animator && this.animator.isAnimating(pl.id)) return; // animator owns placement mid-hop
       el.dataset.lat = geo.lat; el.dataset.lng = geo.lng; el.dataset.alt = '0.08';
       const peers = byPlace[pid];
       const idx = peers.indexOf(pl);
@@ -1570,6 +1689,7 @@ class MonopolyBoard {
       const label = p.character ? p.character.name[0] : (parseInt(id) + 1);
       el.style.setProperty('--tcol', color);
       el.textContent = label;
+      if (this.animator && this.animator.isAnimating(id)) return; // animator owns placement mid-hop
       const c = this.getSpaceCenter(p.position);
       // measured grid center fell back to {50,50} while tiles exist → layout not settled
       if (isSquare && hasTiles && c.x === 50 && c.y === 50) needsRetry = true;
@@ -2431,6 +2551,7 @@ class MonopolyBoard {
     this._cancelRoll(); // kill any in-flight dice animation before the client goes away
     this._teardownGlobe(); // stop the globe RAF loop + WebGL context (update() won't run again)
     this._stopClient();
+    if (this.animator) this.animator.reset(); // clear in-flight hop/dice; next game starts at cursor -1
     if (this._tokenResizeObs) { this._tokenResizeObs.disconnect(); this._tokenResizeObs = null; }
     this._lastG = null;
     this._tokenRetried = false;
@@ -2510,6 +2631,13 @@ class MonopolyBoard {
     const LoadedGame = { ...Monopoly, setup: () => ({ ...savedG, events: savedG.events || [], eventSeq: savedG.eventSeq || 0, enforceSeats: savedG.enforceSeats || false, _resumeLoad: true }) };
     this.client = Client({ game: LoadedGame, numPlayers: saveData.numPlayers, debug: false });
     this.client.start();
+    // Clear any in-flight dice/hop from the PRIOR client before it's replaced, AND seed the
+    // cursor to the save's own eventSeq (matching the `eventSeq: savedG.eventSeq || 0` fallback
+    // two lines up) rather than resetting to -1. A plain reset() would make every event already
+    // baked into the loaded G.events (up to the 200-event window) look "fresh" on the very next
+    // onState() — replaying the save's whole recent history as a burst of dice/hop animation
+    // instead of just resuming play from where the save was taken.
+    if (this.animator) this.animator.reset(savedG.eventSeq || 0);
     this.client.subscribe(state => this.update(state));
     this._bumpClients(1);
   }

@@ -142,6 +142,15 @@
       box-shadow:inset 1px 1px 0 rgba(255,255,255,.5), inset -1px -1px 0 rgba(0,0,0,.4); }
     .token--sm { width:15px; height:15px; font-size:6px; }
 
+    /* experience wave: token hop tween + centered dice-tumble overlay. The overlay reuses
+       the existing .die/.die__cell/.pip pip-die markup (dieHtml()) at 2x size — no new
+       glyph language. */
+    .token--hop { transition: left 0.12s ease, top 0.12s ease; }
+    #dice-overlay { position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+      gap:28px; pointer-events:none; z-index:40; }
+    #dice-overlay .bigdie .die { width:88px; height:88px; gap:4px; padding:10px; }
+    #dice-overlay .bigdie .pip { width:16px; height:16px; }
+
     /* money */
     .money { font-family:var(--disp); color:var(--good); font-size:1em; letter-spacing:.5px; }
     .money--hidden { color:var(--ink-dim); }
@@ -325,7 +334,7 @@
     .game__leftfoot { margin-top:auto; }
 
     /* board */
-    .game__center { display:flex; justify-content:center; }
+    .game__center { display:flex; justify-content:center; position:relative; }
     .board { width:min(74vh, 780px); aspect-ratio:1/1; position:relative; }
     .board__grid-wrap { display:contents; }
     .board__grid { display:grid; width:100%; height:100%; position:relative;
