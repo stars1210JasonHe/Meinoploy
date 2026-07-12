@@ -434,6 +434,12 @@ class MonopolyBoard {
       if (route) { this._routeTargets = null; this._syncRoutePickChrome(); this.client.moves.commitRoute(route); }
     });
     this.turnboxEl = document.getElementById('turnbox');
+    // Chrome-band sizing (Task 2 review fix — see _syncChromeBands below and
+    // the CSS comment above `.app--game .board` in index.html): live refs to
+    // the two floating bars whose ACTUAL rendered height gets reserved so the
+    // full-bleed board never renders underneath either of them.
+    this.chipsBarEl = document.querySelector('.game__chips');
+    this.actionBarEl = document.querySelector('.game__actionbar');
     this.manageEl = document.getElementById('manage');
     this.messagesEl = document.getElementById('log');
     this.aiResponsesEl = document.getElementById('ai-responses');
@@ -1018,7 +1024,49 @@ class MonopolyBoard {
     // globe: _updateGlobeOverlay inside renderBoard, earlier in this update) — sync
     // the route-pick chrome modality. See _syncRoutePickChrome.
     this._syncRoutePickChrome();
+    // Chrome-band sizing runs last, after renderPlayerInfo/renderTurnbox have
+    // written this render's real chip-strip/action-bar markup — see doc
+    // comment on the method for why this is JS-measured instead of a static
+    // CSS worst-case default.
+    this._syncChromeBands();
     if (this.animator) { this.animator.onState(G); this.animator.afterRender(); }
+  }
+
+  // Chrome-band sizing (Task 2 review fix). `.app--game .board` (index.html)
+  // sizes off `calc(100dvh - var(--chrome-top) - var(--chrome-bottom))`
+  // instead of the raw viewport, so the full-bleed board never renders
+  // underneath the floating chip strip (top) or action bar (bottom) — at
+  // rest those two bars measured 64px and 96px tall respectively at
+  // 1400x900, and a plain `min(100dvw,100dvh,1100px)` board (the pre-fix
+  // rule) is exactly 100dvh on any landscape viewport, i.e. zero letterbox
+  // to absorb them.
+  // A STATIC CSS default sized for the worst case would have to cover the
+  // jail turnbox state (ROLL FOR DOUBLES + PAY FINE + disabled END TURN) —
+  // measured 152px tall, 58% taller than the 96px rest state — and pinning
+  // the reserved band there permanently shrinks the board (658px vs the
+  // achievable ~900px at 1400x900) even during the ~95% of turns when the
+  // bar is only 84-96px. Measuring the REAL heights here instead keeps the
+  // board as large as the chrome actually on screen allows, and only
+  // shrinks it while a genuinely taller state (e.g. jail) is really
+  // rendered. this._lastChromeTop/_lastChromeBottom throttle the
+  // `style.setProperty` writes (and the reflow each one triggers) to only
+  // fire when a height genuinely changed — most renders don't change either
+  // bar's content.
+  _syncChromeBands() {
+    if (!this.gameAreaEl || !this.chipsBarEl || !this.actionBarEl) return;
+    // +8 = the bar's own fixed top/bottom offset (index.html: top:8px /
+    // bottom:8px); +4 = a small breathing-room gap so the board's edge
+    // never sits pixel-adjacent to the bar. Same formula for both bars.
+    const top = Math.ceil(this.chipsBarEl.getBoundingClientRect().height) + 8 + 4;
+    const bottom = Math.ceil(this.actionBarEl.getBoundingClientRect().height) + 8 + 4;
+    if (top !== this._lastChromeTop) {
+      this._lastChromeTop = top;
+      this.gameAreaEl.style.setProperty('--chrome-top', `${top}px`);
+    }
+    if (bottom !== this._lastChromeBottom) {
+      this._lastChromeBottom = bottom;
+      this.gameAreaEl.style.setProperty('--chrome-bottom', `${bottom}px`);
+    }
   }
 
   // Fullscreen-stage wave (Task 2 regression fix, caught by gameplay.spec's Terra

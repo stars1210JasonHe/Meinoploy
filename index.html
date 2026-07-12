@@ -457,8 +457,44 @@
        z:50 / tabs z:46 genuinely stack above the z:45 chrome. The base cqmin rule
        (declared above) stays for the non-fullbleed fallback layout. Board measured
        900x900 at 1400x900 after this change — identical to the cqmin figure. */
-    .app--game .game__center { container-type:normal; }
-    .app--game .board { width:min(100dvw, 100dvh, 1100px); }
+    /* Chrome-band reservation (Task 2 review fix). Measured live at 1400x900:
+       the square-board rule above (min(100dvw,100dvh,1100px)) equals exactly
+       100dvh on any landscape viewport (height<=width), leaving ZERO vertical
+       letterbox — the fixed chip strip (top:8, real height 64px at rest) and
+       action bar (bottom:8, real height 84-152px depending on turnbox state —
+       see below) sat ON TOP of the board's top/bottom tile rows the whole
+       time (measured: board 0-900, chips 8-72, actionbar 796-892 at rest).
+       Fix: size the board off the viewport MINUS two reserved bands, one per
+       bar, instead of the raw viewport. --chrome-top/--chrome-bottom hold the
+       reserved px; the CSS fallback defaults are only ever what a broken/
+       pre-JS paint would use — in practice overwritten before first paint
+       (see _syncChromeBands doc comment in App.js: it runs in the same
+       update() tick that first shows the game screen, so there's no flash of
+       the old sizing).
+       --chrome-top default 76px = measured chip-strip content height (64px,
+       stable across every game state — chips only vary by player COUNT, not
+       turn context) + 8px fixed top-offset + 4px gap buffer.
+       --chrome-bottom default 108px = measured action-bar content height at
+       REST (96px, before the first roll of a turn: who-chip + ROLL DICE +
+       disabled END TURN) + 8px fixed bottom-offset + 4px gap buffer. This is
+       a FALLBACK ONLY, not the worst case: injecting the real jail-state
+       turnbox markup (ROLL FOR DOUBLES + PAY FINE + disabled END TURN, a
+       state every game can reach via triple-doubles or a Go-To-Jail tile)
+       measured 152px tall — 58% taller than the CSS-only rest default. A
+       STATIC var pinned to the jail case would permanently reserve that much
+       band even during the ~95% of turns when the bar is 84-96px, shrinking
+       the board from the fullscreen ~900px to ~658px (barely +2.5% over the
+       pre-Task-2 642px baseline) for a state that's only on screen briefly.
+       _syncChromeBands() (App.js, called every update() after renderTurnbox)
+       measures the REAL current heights of both bars and writes them into
+       these two custom properties on #game-area, so the board stays as large
+       as the chrome ACTUALLY on screen allows right now, and only shrinks
+       while a genuinely taller state (e.g. jail) is really rendered — see
+       that method's doc comment for the full reasoning and the CSS-var-only
+       vs JS-sync tradeoff. */
+    .app--game .game__center { container-type:normal;
+      padding-top:var(--chrome-top, 76px); padding-bottom:var(--chrome-bottom, 108px); }
+    .app--game .board { width:min(100dvw, calc(100dvh - var(--chrome-top, 76px) - var(--chrome-bottom, 108px)), 1100px); }
     /* Route-pick modality (regression fix — gameplay.spec "Terra Circuit renders and
        is playable" caught it): the floating chrome overlays the full-bleed board, so
        a route-target tile under the action bar (bottom row) or a .gcity route label
