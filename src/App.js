@@ -1898,7 +1898,18 @@ class MonopolyBoard {
     const name = char ? char.name : `Player ${parseInt(ctx.currentPlayer) + 1}`;
     const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
 
-    let html = `<div class="turnbox"><div class="turnbox__who">${tokenHtml(color, char ? char.name[0] : parseInt(ctx.currentPlayer) + 1, true)} <span style="color:${color}">${esc(name)}</span></div>`;
+    // Horizontal action bar (layout-rebuild Task 4): who-chip carries a real
+    // portrait when available. tokenVisual returns RAW pieces (no escaping —
+    // see its doc comment); this is an HTML-STRING consumer (unlike the
+    // DOM-property consumers in renderTokens/_updateGlobeOverlay), so every
+    // piece is esc()'d here before landing in the template. Portraits only
+    // ever come from the CLIENT character bundle (_clientChar) — G.character
+    // has no portrait field (see _clientChar doc comment).
+    const whoVisual = tokenVisual(this._clientChar(char), color, char ? char.name[0] : parseInt(ctx.currentPlayer) + 1);
+    const whoFace = whoVisual.portraitUrl
+      ? `<img class="turnbox__face" src="${esc(whoVisual.portraitUrl)}" alt="" />`
+      : `<span class="turnbox__face turnbox__face--letter" style="--tcol:${esc(whoVisual.color)}">${esc(whoVisual.text)}</span>`;
+    let html = `<div class="turnbox turnbox--bar"><div class="turnbox__who">${whoFace} <span style="color:${color}">${esc(name)}</span></div>`;
 
     // Duel response (Task 9) is a special case of the isMyTurn gate just below:
     // its actor is the duel OWNER, not ctx.currentPlayer (the challenger, whose
@@ -1932,12 +1943,17 @@ class MonopolyBoard {
       html += `<div class="turnbox__slot">${this._centerSlotHtml(G, ctx)}</div>`;
     }
 
-    // Jail / roll
+    // Jail / roll. pix-btn--full (width:100%) dropped here (layout-rebuild Task
+    // 4): as a direct flex item of .turnbox--bar, a 100%-width button forces
+    // its own full line, defeating the horizontal bar's compactness — the
+    // #btn-roll/#btn-jail ids and every other pix-btn modifier are unchanged,
+    // only the width:100% modifier is removed (no E2E asserts this class —
+    // grepped tests/e2e before removing).
     if (player.inJail && !G.hasRolled) {
-      html += `<button class="pix-btn pix-btn--primary pix-btn--full pix-btn--lg" id="btn-roll">ROLL FOR DOUBLES</button>`;
-      html += `<button class="pix-btn pix-btn--default pix-btn--full" id="btn-jail">PAY $${RULES.core.jailFine} FINE</button>`;
+      html += `<button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-roll">ROLL FOR DOUBLES</button>`;
+      html += `<button class="pix-btn pix-btn--default" id="btn-jail">PAY $${RULES.core.jailFine} FINE</button>`;
     } else if (!G.hasRolled && G.turnPhase === 'roll') {
-      html += `<button class="pix-btn pix-btn--primary pix-btn--full pix-btn--lg" id="btn-roll">ROLL DICE</button>`;
+      html += `<button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-roll">ROLL DICE</button>`;
     }
 
     // Card accept/redraw (also surfaced in modal; keep buttons here as fallback)
@@ -1947,7 +1963,7 @@ class MonopolyBoard {
 
     // Reroll
     if (G.hasRolled && player.rerollsLeft > 0 && !G.canBuy && !G.pendingCard && G.turnPhase === 'done') {
-      html += `<button class="pix-btn pix-btn--default pix-btn--full" id="btn-reroll">REROLL (${player.rerollsLeft})</button>`;
+      html += `<button class="pix-btn pix-btn--default" id="btn-reroll">REROLL (${player.rerollsLeft})</button>`;
     }
 
     // Duel resolution result strip (review fix — see _duelResultStripHtml doc

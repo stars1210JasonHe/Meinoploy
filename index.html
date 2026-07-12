@@ -536,10 +536,18 @@
     .cp__info { font-family:var(--body); font-size:16px; color:var(--ink); text-align:center; }
     .cp__btns { display:flex; gap:7px; flex-wrap:wrap; justify-content:center; }
 
-    /* turn box + log */
-    .turnbox { background:var(--bg2); border:3px solid var(--line); box-shadow:var(--bevel), var(--drop);
-      padding:13px; display:flex; flex-direction:column; gap:11px; }
+    /* turn box + log — layout-rebuild Task 4: horizontal action bar. .turnbox
+       keeps only the GB card visual language (bg/border/bevel); all layout
+       (direction/gap/padding) lives in .turnbox--bar, always applied together
+       by renderTurnbox (no plain-.turnbox vertical consumer remains — grepped
+       before deleting the old column/gap/padding rule this replaced). */
+    .turnbox { background:var(--bg2); border:3px solid var(--line); box-shadow:var(--bevel), var(--drop); }
+    .turnbox--bar { display:flex; align-items:center; gap:14px; flex-wrap:wrap; justify-content:center; padding:8px 14px; }
     .turnbox__who { display:flex; align-items:center; gap:8px; font-family:var(--disp); font-size:11px; }
+    /* 24px who-chip portrait, mirroring chip__face/chip__face--letter's pattern
+       (game-chrome.js chipHtml) at turnbox scale. */
+    .turnbox__face { width:24px; height:24px; image-rendering:pixelated; object-fit:cover; border:2px solid var(--tcol,var(--line)); flex:none; }
+    .turnbox__face--letter { display:flex; align-items:center; justify-content:center; font-family:var(--disp); font-size:10px; background:var(--bg3); color:var(--tcol,var(--ink)); }
     .turnbox__btnrow { display:flex; gap:8px; }
     .turnbox__btnrow .pix-btn { flex:1; }
     .turnbox__waiting { font-family:var(--disp); font-size:9px; color:var(--accent); text-align:center; padding:8px; animation:blink 1.4s steps(1) infinite; line-height:1.5; }
