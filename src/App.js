@@ -333,6 +333,13 @@ class MonopolyBoard {
       reapply: () => {
         Object.entries(this._animPlacement || {}).forEach(([pid, posId]) => place(pid, posId));
       },
+      // Bulk-release hook for anim.js reset(): queued-never-played hop jobs (see
+      // hopQueued above) leave an entry in _animPlacement that no hopDone will ever
+      // clean up, since they're cleared out of the queue directly rather than played.
+      // Without this, a stale entry survives exit-to-menu/new-game and reapply()
+      // force-places that player's token at the old (possibly other-map) position on
+      // every render until their first hop of the new game completes.
+      resetAll: () => { this._animPlacement = {}; },
     };
   }
 

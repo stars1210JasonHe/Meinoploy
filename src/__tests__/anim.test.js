@@ -152,6 +152,36 @@ describe('animator queue', () => {
     expect(log.length).toBe(before); // nothing scheduled survived
   });
 
+  // ─── resetAll: bulk-release for queued-never-played hop jobs ───
+  test('reset() releases a hop queued behind a still-playing dice job via stage.resetAll', () => {
+    const log = []; const clock = makeClock();
+    // Fake stage extended with a resetAll logger, scoped to THIS test only — the
+    // shared makeStage() above deliberately does NOT define resetAll, so every
+    // other test's fake stage exercises the `if (stage.resetAll)` optional-hook
+    // guard in anim.js reset() and proves old fakes without it still work.
+    const stage = { ...makeStage(log), resetAll: () => log.push('resetAll') };
+    const a = createAnimator({ stage, sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([])); // Fix 3 warm-up
+    // Dice job starts playing immediately; the hop job for actor '0' queues
+    // behind it (hopQueued fires at enqueue time) but never gets to play or
+    // run finishJob/hopDone before we exit — this is exactly the "roll then
+    // exit during the dice tumble" repro.
+    a.onState(gWith([
+      ev(0, 'dice_rolled', '0', { d1: 2, d2: 3, total: 5, doubles: false }),
+      ev(1, 'moved', '0', { from: 0, to: 2, path: [1, 2] }),
+    ]));
+    expect(log).toContain('hopQueued:0@0'); // stage-side placement state created at enqueue
+    expect(a.isAnimating('0')).toBe(true);  // dice still tumbling; hop never started
+    a.reset();
+    expect(log[log.length - 1]).toBe('resetAll'); // bulk-release hook fired
+    expect(a.isAnimating('0')).toBe(false);
+    const before = log.length;
+    clock.tick(2000); // well past the dice tumble/hold and hop windows
+    // Nothing scheduled survived the reset — no reapply/hopTo/hopDone/dice
+    // activity fires for the actor whose hop was only ever queued, not played.
+    expect(log.length).toBe(before);
+  });
+
   test('disabled -> everything completes synchronously, sounds still fire', () => {
     const log = []; const clock = makeClock();
     const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => true });

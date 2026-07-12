@@ -184,6 +184,16 @@ export function createAnimator(opts) {
       if (playing && playing.kind === 'dice') stage.diceEnd();
       playing = null;
       inFlight.clear();
+      // Bulk-release for queued-never-played hop jobs: hopQueued (onState) writes
+      // stage-side placement state at ENQUEUE time, before the job ever plays, so a
+      // job sitting behind another (e.g. a hop queued behind a still-playing dice
+      // job) has no corresponding hopDone here to clean it up — only `playing` gets
+      // one, above. Without this, that stale placement survives into the NEXT
+      // game/session and reapply() (which wins over renderTokens while it thinks
+      // the entry is live) force-places the token there on every render until the
+      // player's first hop of the new game completes. Optional hook — old stage
+      // fakes without it keep working.
+      if (stage.resetAll) stage.resetAll();
       // No arg (bare reset — exit-to-menu/gameover) -> cursor becomes undefined
       // -> first-sight absorb on the next onState (fresh game / next join).
       // Explicit arg (loadGame's seeded reset) -> that exact cursor, no absorb.
