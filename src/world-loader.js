@@ -434,6 +434,28 @@ export function validateWorld(world, archetypes) {
   return errors;
 }
 
+// Fit-to-canvas spread (spec 2026-07-12 §1): affine per-axis normalization of
+// the place-position bounding box to [pad, 100-pad]. The board is schematic —
+// filling the canvas beats strict geographic proportion (owner: sanguo's
+// cluster left half the board empty). Runs BEFORE declutterPositions.
+export function fitPositions(places, opts) {
+  var pad = (opts && opts.pad !== undefined) ? opts.pad : 8;
+  var lo = pad, hi = 100 - pad;
+  var xs = places.map(function (p) { return p.pos.x; });
+  var ys = places.map(function (p) { return p.pos.y; });
+  var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+  var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+  function scale(v, min, max) {
+    if (max - min < 1) return 50; // degenerate axis: center it
+    return lo + (v - min) / (max - min) * (hi - lo);
+  }
+  var out = {};
+  places.forEach(function (p) {
+    out[p.id] = { x: scale(p.pos.x, minX, maxX), y: scale(p.pos.y, minY, maxY) };
+  });
+  return out;
+}
+
 // Deterministic min-distance relaxation for FLAT atlas worlds (spec 2026-07-11
 // §3.3): geo-faithful positions cluster real-world neighbors so fixed-size
 // tiles stack unreadably (sanguo: 18 central-plains cities in ~1/4 board).
@@ -441,10 +463,16 @@ export function validateWorld(world, archetypes) {
 // elliptical distance matched to the tile footprint; only pushes (no global
 // re-layout), so approximate geography survives. Deterministic: places are
 // processed in sorted-id order regardless of input order.
+// minX/minY recalibrated 14/9 -> 17/11 (2026-07-12, atlas-fill wave task 2:
+// tile footprint grows to 9.5% of the board) — tuned empirically against the
+// sanguo fixture (19 places) for zero elliptical overlaps post-fit at
+// iterations=120; the fit-first pipeline gives the relaxation a much wider
+// starting spread than raw geo positions, so convergence still holds at the
+// larger min-distance without needing more iterations.
 export function declutterPositions(places, opts) {
   var o = opts || {};
-  var minX = o.minX !== undefined ? o.minX : 14;
-  var minY = o.minY !== undefined ? o.minY : 9;
+  var minX = o.minX !== undefined ? o.minX : 17;
+  var minY = o.minY !== undefined ? o.minY : 11;
   var iterations = o.iterations !== undefined ? o.iterations : 120;
   var pad = o.pad !== undefined ? o.pad : 3;
   function clamp(v) { return Math.max(pad, Math.min(100 - pad, v)); }
@@ -491,11 +519,16 @@ export function loadWorld(world, archetypes) {
 
   // Per-space positions: the place's pos with a small deterministic slot offset
   // (x + (slotIndex - (n-1)/2) * step, clamped 0-100) so tokens don't fully overlap.
-  // FLAT worlds get decluttered place positions (spec 2026-07-11 §3.3);
+  // FLAT worlds get fit-to-canvas + decluttered place positions (spec
+  // 2026-07-12 §1/§3.3: fit FIRST so the schematic board fills the canvas,
+  // declutter SECOND so post-fit overlaps still get pushed apart);
   // globe worlds render on real geo and are untouched.
   var placePos = null;
   if (world.renderMode === 'flat') {
-    placePos = declutterPositions(world.places);
+    var fitted = fitPositions(world.places);
+    placePos = declutterPositions(world.places.map(function (p) {
+      return { id: p.id, pos: fitted[p.id] };
+    }));
   }
   var slotCounts = {};
   ex.spaces.forEach(function (s) {

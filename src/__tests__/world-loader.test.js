@@ -1,6 +1,34 @@
 import { ARCHETYPES } from '../../mods/dominion/atlas/archetypes';
-import { ATLAS_DEFAULTS, computePlaceValues, expandWorld, aggregateTraits, validateWorld, loadWorld, declutterPositions } from '../world-loader';
+import { ATLAS_DEFAULTS, computePlaceValues, expandWorld, aggregateTraits, validateWorld, loadWorld, declutterPositions, fitPositions } from '../world-loader';
 import { MINI_WORLD } from '../../mods/dominion/atlas/fixtures/mini-world';
+
+// Real overlapping-world fixture: the 19-place 三国 world that motivated
+// declutterPositions/fitPositions (mods/sanguo-excerpt is uncommitted owner
+// WIP — do NOT import from it; this is a frozen copy of its place id/pos data
+// only, read verbatim from mods/sanguo-excerpt/sanguo-excerpt.data.json on
+// 2026-07-12). Module-scoped so both the declutter and fit describe blocks
+// (and the fit->declutter pipeline test) share one fixture.
+const SANGUO_PLACES = [
+  { id: 'luoyang',     pos: { x: 43.95139542306998,  y: 41.745307452649264 } },
+  { id: 'jizhou',      pos: { x: 64.7422906871714,   y: 29.00684668071955 } },
+  { id: 'youzhou',     pos: { x: 62.9810218296363,   y: 12 } },
+  { id: 'zhuoxian',    pos: { x: 70.40201602480111,  y: 14.988117326229622 } },
+  { id: 'hulaoguan',   pos: { x: 65.37020784768185,  y: 47.30700065397624 } },
+  { id: 'chenliu',     pos: { x: 67.12295424481329,  y: 39.275439436338374 } },
+  { id: 'yingchuan',   pos: { x: 57.27528698214765,  y: 49.50029459761153 } },
+  { id: 'qingzhou',    pos: { x: 72.51851851851859,  y: 31.703703703703688 } },
+  { id: 'sishuiguan',  pos: { x: 58.41863599098211,  y: 33.906988646336075 } },
+  { id: 'zhongshan',   pos: { x: 56.69122493261428,  y: 25.83639450600389 } },
+  { id: 'jiuchong',    pos: { x: 50.655599894566045, y: 35.8396734539795 } },
+  { id: 'beimangshan', pos: { x: 59.54105739515649,  y: 41.82785792889575 } },
+  { id: 'nanyang',     pos: { x: 50.73649629819217,  y: 54.902898160113914 } },
+  { id: 'jiademen',    pos: { x: 51.690295554660516, y: 43.77247906681132 } },
+  { id: 'anxixian',    pos: { x: 70.00097066188069,  y: 22.978058666242347 } },
+  { id: 'dingzhou',    pos: { x: 54.34000963938084,  y: 17.419804338573876 } },
+  { id: 'wancheng',    pos: { x: 59.08767940917528,  y: 57.29229265269514 } },
+  { id: 'jianning',    pos: { x: 27.481481481481417, y: 88 } },
+  { id: 'quyang',      pos: { x: 62.1116719988849,   y: 19.952624150037117 } },
+];
 
 describe('archetype library', () => {
   const REQUIRED = ['downtown','port','industrial','financial-district','tech-hub','market',
@@ -232,33 +260,7 @@ describe('loadWorld', () => {
 });
 
 describe('declutterPositions (flat-atlas overlap fix)', () => {
-  // Real overlapping-world fixture: the 19-place 三国 world that motivated this
-  // (mods/sanguo-excerpt is uncommitted owner WIP — do NOT import from it; this
-  // is a frozen copy of its place id/pos data only, read verbatim from
-  // mods/sanguo-excerpt/sanguo-excerpt.data.json on 2026-07-12).
-  const SANGUO_PLACES = [
-    { id: 'luoyang',     pos: { x: 43.95139542306998,  y: 41.745307452649264 } },
-    { id: 'jizhou',      pos: { x: 64.7422906871714,   y: 29.00684668071955 } },
-    { id: 'youzhou',     pos: { x: 62.9810218296363,   y: 12 } },
-    { id: 'zhuoxian',    pos: { x: 70.40201602480111,  y: 14.988117326229622 } },
-    { id: 'hulaoguan',   pos: { x: 65.37020784768185,  y: 47.30700065397624 } },
-    { id: 'chenliu',     pos: { x: 67.12295424481329,  y: 39.275439436338374 } },
-    { id: 'yingchuan',   pos: { x: 57.27528698214765,  y: 49.50029459761153 } },
-    { id: 'qingzhou',    pos: { x: 72.51851851851859,  y: 31.703703703703688 } },
-    { id: 'sishuiguan',  pos: { x: 58.41863599098211,  y: 33.906988646336075 } },
-    { id: 'zhongshan',   pos: { x: 56.69122493261428,  y: 25.83639450600389 } },
-    { id: 'jiuchong',    pos: { x: 50.655599894566045, y: 35.8396734539795 } },
-    { id: 'beimangshan', pos: { x: 59.54105739515649,  y: 41.82785792889575 } },
-    { id: 'nanyang',     pos: { x: 50.73649629819217,  y: 54.902898160113914 } },
-    { id: 'jiademen',    pos: { x: 51.690295554660516, y: 43.77247906681132 } },
-    { id: 'anxixian',    pos: { x: 70.00097066188069,  y: 22.978058666242347 } },
-    { id: 'dingzhou',    pos: { x: 54.34000963938084,  y: 17.419804338573876 } },
-    { id: 'wancheng',    pos: { x: 59.08767940917528,  y: 57.29229265269514 } },
-    { id: 'jianning',    pos: { x: 27.481481481481417, y: 88 } },
-    { id: 'quyang',      pos: { x: 62.1116719988849,   y: 19.952624150037117 } },
-  ];
-
-  const MINX = 14, MINY = 9;
+  const MINX = 17, MINY = 11; // recalibrated to match declutterPositions' new defaults (§2, 9.5% tile)
   function overlaps(a, b) {
     const dx = (a.x - b.x) / MINX, dy = (a.y - b.y) / MINY;
     return dx * dx + dy * dy < 1 - 1e-9;
@@ -313,5 +315,47 @@ describe('declutterPositions (flat-atlas overlap fix)', () => {
       { id: 'c', pos: { x: 90, y: 90 } },
     ];
     expect(declutterPositions(spread)).toEqual({ a: { x: 10, y: 10 }, b: { x: 50, y: 50 }, c: { x: 90, y: 90 } });
+  });
+});
+
+describe('fitPositions (fit-to-canvas spread)', () => {
+  test('fills the canvas: bounding box reaches [pad, 100-pad] on both axes', () => {
+    const out = fitPositions(SANGUO_PLACES);
+    const xs = Object.values(out).map(p => p.x);
+    const ys = Object.values(out).map(p => p.y);
+    expect(Math.min(...xs)).toBeCloseTo(8, 0);
+    expect(Math.max(...xs)).toBeCloseTo(92, 0);
+    expect(Math.min(...ys)).toBeCloseTo(8, 0);
+    expect(Math.max(...ys)).toBeCloseTo(92, 0);
+  });
+  test('preserves relative order (west-of stays west-of, north-of stays north-of)', () => {
+    const out = fitPositions(SANGUO_PLACES);
+    expect(out.jianning.x).toBeLessThan(out.qingzhou.x);
+    expect(out.jianning.y).toBeGreaterThan(out.youzhou.y);
+  });
+  test('deterministic and input-order independent', () => {
+    expect(fitPositions(SANGUO_PLACES.slice().reverse())).toEqual(fitPositions(SANGUO_PLACES));
+  });
+  test('degenerate: single point centers at 50; flat-line axis centers that axis', () => {
+    expect(fitPositions([{ id: 'solo', pos: { x: 30, y: 70 } }]).solo).toEqual({ x: 50, y: 50 });
+    const line = fitPositions([
+      { id: 'a', pos: { x: 10, y: 40 } }, { id: 'b', pos: { x: 60, y: 40 } },
+    ]);
+    expect(line.a.y).toBe(50); expect(line.b.y).toBe(50);
+    expect(line.a.x).toBeCloseTo(8, 0); expect(line.b.x).toBeCloseTo(92, 0);
+  });
+});
+
+describe('fit → declutter pipeline (recalibrated)', () => {
+  test('sanguo fixture: zero elliptical overlaps at the NEW min-distances after fit', () => {
+    const fitted = SANGUO_PLACES.map(p => ({ id: p.id, pos: fitPositions(SANGUO_PLACES)[p.id] }));
+    const out = declutterPositions(fitted); // new defaults 17/11
+    const ids = Object.keys(out);
+    const MINX = 17, MINY = 11;
+    for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
+      const a = out[ids[i]], b = out[ids[j]];
+      const dx = (a.x - b.x) / MINX, dy = (a.y - b.y) / MINY;
+      expect(dx * dx + dy * dy).toBeGreaterThanOrEqual(1 - 1e-9);
+    }
   });
 });
