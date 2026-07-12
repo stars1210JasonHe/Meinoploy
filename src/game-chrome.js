@@ -99,20 +99,22 @@ export function drawerShellHtml() {
     </div>`;
 }
 
-// Shared portrait-vs-letter decision for board tokens. Pure: returns plain
-// strings/booleans, no DOM. Consumed by both token renderers (Task 3).
+// Shared portrait-vs-letter decision for board tokens. Pure: returns RAW data
+// pieces, no DOM, NO HTML escaping. Consumed by both token renderers (Task 3:
+// App.js renderTokens for the flat/grid board, _updateGlobeOverlay for the
+// globe) — both apply the result via DOM PROPERTY assignments (el.style.
+// backgroundImage, el.style.setProperty('--tcol', ...), el.textContent,
+// el.classList.toggle(<face-class>, !!v.portraitUrl)), never via innerHTML/
+// attribute strings. Property assignment needs NO escaping, so this function
+// must NOT esc() its output — entity-escaped text landing in textContent would
+// double-escape (a name starting with "<" would literally render "&lt;").
+// Task 1 originally returned an HTML-flavored {style, className} pair; Task 3
+// review found both real consumers assign via textContent, so the contract
+// was rebuilt around raw pieces instead (see task-3-report.md).
 export function tokenVisual(char, color, fallbackLabel) {
   if (char && char.portrait) {
-    return {
-      style: `background-image:url('${esc(char.portrait)}');--tcol:${esc(color)}`,
-      className: 'token token--face',
-      text: '',
-    };
+    return { portraitUrl: char.portrait, color, text: '' };
   }
-  const text = char && char.name ? esc(char.name[0]) : esc(String(fallbackLabel));
-  return {
-    style: `--tcol:${esc(color)}`,
-    className: 'token',
-    text,
-  };
+  const text = char && char.name ? char.name[0] : String(fallbackLabel);
+  return { portraitUrl: null, color, text };
 }

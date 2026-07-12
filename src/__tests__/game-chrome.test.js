@@ -45,20 +45,30 @@ describe('chipHtml', () => {
 });
 
 describe('tokenVisual', () => {
-  test('portrait char -> background-image style + token--face class', () => {
+  // Consumers (App.js renderTokens + _updateGlobeOverlay) apply these via DOM
+  // PROPERTY assignments (style.backgroundImage, style.setProperty('--tcol', ...),
+  // textContent, classList.toggle) — properties need NO HTML escaping. tokenVisual
+  // must return RAW text/portraitUrl/color, not entity-escaped strings, or a
+  // textContent assignment would double-escape.
+  test('portrait char -> raw portraitUrl + color passed through, empty text', () => {
     const v = tokenVisual({ name: 'Hammurabi', portrait: '/p.png' }, '#e8a33d', '1');
-    expect(v.style).toContain("background-image:url('/p.png')");
-    expect(v.className).toContain('token--face');
+    expect(v.portraitUrl).toBe('/p.png');
+    expect(v.color).toBe('#e8a33d');
     expect(v.text).toBe('');
   });
-  test('no portrait -> letter text, no face class', () => {
+  test('no portrait -> letter text, null portraitUrl', () => {
     const v = tokenVisual({ name: 'Hammurabi', portrait: null }, '#e8a33d', '1');
+    expect(v.portraitUrl).toBeNull();
     expect(v.text).toBe('H');
-    expect(v.className).not.toContain('token--face');
   });
-  test('no character at all -> fallback label', () => {
+  test('no character at all -> fallback label, null portraitUrl', () => {
     const v = tokenVisual(null, '#888', '2');
+    expect(v.portraitUrl).toBeNull();
     expect(v.text).toBe('2');
+  });
+  test('hostile name text is returned RAW, not HTML-escaped (consumers use textContent)', () => {
+    const v = tokenVisual({ name: '<b>x</b>' }, '#fff', '1');
+    expect(v.text).toBe('<');
   });
 });
 

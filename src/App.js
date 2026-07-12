@@ -15,7 +15,7 @@ import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
 import { isDuelCooldownBlocked } from './events';
 import { createAnimator, DICE_TUMBLE_MS } from './anim';
 import { createAudio } from './audio';
-import { chipHtml, chipDetailHtml, drawerShellHtml } from './game-chrome';
+import { chipHtml, chipDetailHtml, drawerShellHtml, tokenVisual } from './game-chrome';
 
 // Client-side mod registry — static bundle imports (Parcel v1 forces all imports static, so
 // every registered mod is bundled at build; only WHICH is active is chosen at runtime). This
@@ -329,7 +329,7 @@ class MonopolyBoard {
         const el = this._tokenLayer && this._tokenLayer.querySelector(`.token[data-player="${pid}"]`);
         if (el) el.classList.remove('token--hop');
         // Final authoritative placement comes from the next renderTokens; force one now.
-        if (this._lastG) this.renderTokens(this._lastG);
+        if (this._lastG) this.renderTokens(this._lastG, this._lastCtx);
       },
       reapply: () => {
         Object.entries(this._animPlacement || {}).forEach(([pid, posId]) => place(pid, posId));
@@ -726,6 +726,7 @@ class MonopolyBoard {
       this._stopClient();
       this._pendingCharId = null;
       this._lastG = null;
+      this._lastCtx = null;
     }
     fn();
   }
@@ -911,7 +912,7 @@ class MonopolyBoard {
     this._showScreen('game');
     this.detectAndTriggerAI(G, ctx);
     this.renderBoard(G, ctx);
-    this.renderTokens(G);
+    this.renderTokens(G, ctx);
     this.renderPlayerInfo(G, ctx);
     this.renderTurnbox(G, ctx);
     this.renderManage(G, ctx);
@@ -1251,6 +1252,20 @@ class MonopolyBoard {
     return p && p.character ? p.character.color : PLAYER_COLORS[parseInt(id)];
   }
 
+  // Resolve the CLIENT (portrait-bearing) character for a G-sourced Tier-A character.
+  // mods/index.js is explicitly server/test-safe ("NO image imports here") — every
+  // player.character read straight off G (id/name/stats/passive/color) has no `portrait`
+  // field, by design, so both online and offline matches serialize identically. The client
+  // resolves the real asset by id against its own roster, the same pattern already used by
+  // showLoreModal/_sendChat/_charSelectIntro (this.activeMod.characters.find(c => c.id ===
+  // charId)). Task 3 discovery: renderTokens/_updateGlobeOverlay previously read
+  // p.character.portrait directly (always undefined) — this is why tokens never actually
+  // showed a portrait; see task-3-report.md.
+  _clientChar(gChar) {
+    if (!gChar || !this.activeMod || !this.activeMod.characters) return gChar || null;
+    return this.activeMod.characters.find(c => c.id === gChar.id) || gChar;
+  }
+
   renderBoard(G, ctx) {
     const mode = this.mapData.renderMode;
     // Tear down the globe when we leave globe mode (frees the WebGL context + RAF loop).
@@ -1507,8 +1522,15 @@ class MonopolyBoard {
         el.dataset.player = String(pl.id);
         ov.appendChild(el);
       }
-      el.style.setProperty('--tcol', this._playerColor(G, pl.id));
-      el.textContent = pl.character ? pl.character.name[0] : (parseInt(pl.id) + 1);
+      const color = this._playerColor(G, pl.id);
+      const label = pl.character ? pl.character.name[0] : (parseInt(pl.id) + 1);
+      // Same raw-data contract as renderTokens (game-chrome.js tokenVisual) — applied
+      // via DOM property assignments only, no HTML escaping needed.
+      const v = tokenVisual(this._clientChar(pl.character), color, label);
+      el.style.setProperty('--tcol', v.color);
+      el.style.backgroundImage = v.portraitUrl ? `url('${v.portraitUrl}')` : '';
+      el.classList.toggle('gtoken--face', !!v.portraitUrl);
+      el.textContent = v.text;
       if (this.animator && this.animator.isAnimating(pl.id)) return; // animator owns placement mid-hop
       el.dataset.lat = geo.lat; el.dataset.lng = geo.lng; el.dataset.alt = '0.08';
       const peers = byPlace[pid];
@@ -1738,9 +1760,14 @@ class MonopolyBoard {
 
   // Persistent token overlay: keep one .token node per non-bankrupt player in
   // #token-layer, repositioning (not rebuilding) it each tick via getSpaceCenter.
-  renderTokens(G) {
+  // ctx drives the current-turn highlight (token--turn) — cached alongside G
+  // (_lastCtx) so the resize-observer/rAF-retry/hopDone re-render paths (which
+  // only have a stale G/ctx pair lying around, not fresh call-site args) can
+  // still call back in with both.
+  renderTokens(G, ctx) {
     if (!this._tokenLayer) return;
     this._lastG = G;
+    this._lastCtx = ctx;
     this._ensureTokenResizeObserver();
 
     const active = G.players.filter(p => !p.bankrupt);
@@ -1763,14 +1790,21 @@ class MonopolyBoard {
       let el = this._tokenLayer.querySelector(`.token[data-player="${id}"]`);
       if (!el) {
         el = document.createElement('span');
-        el.className = 'token token--sm';
+        el.className = 'token';
         el.dataset.player = id;
         this._tokenLayer.appendChild(el);
       }
       const color = this._playerColor(G, id);
       const label = p.character ? p.character.name[0] : (parseInt(id) + 1);
-      el.style.setProperty('--tcol', color);
-      el.textContent = label;
+      // tokenVisual returns RAW pieces (no HTML escaping) — applied here via DOM
+      // property assignments only (style.*, classList.toggle, textContent), never
+      // innerHTML, so no escaping is needed or wanted.
+      const v = tokenVisual(this._clientChar(p.character), color, label);
+      el.style.setProperty('--tcol', v.color);
+      el.style.backgroundImage = v.portraitUrl ? `url('${v.portraitUrl}')` : '';
+      el.classList.toggle('token--face', !!v.portraitUrl);
+      el.classList.toggle('token--turn', !!ctx && ctx.currentPlayer === id);
+      el.textContent = v.text;
       if (this.animator && this.animator.isAnimating(id)) return; // animator owns placement mid-hop
       const c = this.getSpaceCenter(p.position);
       // measured grid center fell back to {50,50} while tiles exist → layout not settled
@@ -1786,7 +1820,7 @@ class MonopolyBoard {
     // retry once on next frame if a square-board measurement was unsettled
     if (needsRetry && !this._tokenRetried) {
       this._tokenRetried = true;
-      requestAnimationFrame(() => { this._tokenRetried = false; if (this._lastG) this.renderTokens(this._lastG); });
+      requestAnimationFrame(() => { this._tokenRetried = false; if (this._lastG) this.renderTokens(this._lastG, this._lastCtx); });
     }
   }
 
@@ -1794,7 +1828,7 @@ class MonopolyBoard {
   _ensureTokenResizeObserver() {
     if (this._tokenResizeObs || typeof ResizeObserver === 'undefined' || !this.boardEl) return;
     this._tokenResizeObs = new ResizeObserver(() => {
-      if (this._lastG) this.renderTokens(this._lastG);
+      if (this._lastG) this.renderTokens(this._lastG, this._lastCtx);
     });
     this._tokenResizeObs.observe(this.boardEl);
   }
@@ -2638,6 +2672,7 @@ class MonopolyBoard {
     if (this.animator) this.animator.reset(); // clear in-flight hop/dice; next game starts at cursor -1
     if (this._tokenResizeObs) { this._tokenResizeObs.disconnect(); this._tokenResizeObs = null; }
     this._lastG = null;
+    this._lastCtx = null;
     this._tokenRetried = false;
     this.onlinePlayerID = null;
     this._pendingCharId = null;

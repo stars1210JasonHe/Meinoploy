@@ -422,7 +422,27 @@
     @keyframes routePulse { 0%,100% { outline-color:var(--good); } 50% { outline-color:var(--accent); } }
     /* persistent token overlay — survives grid rebuilds, repositioned each tick */
     #token-layer { position:absolute; inset:0; pointer-events:none; z-index:5; }
-    #token-layer .token { position:absolute; transform:translate(-50%,-50%); }
+    /* layout-rebuild Task 3: portrait tokens. Centering STAYS transform:translate(-50%,-50%)
+       (not margin-based) — preserved exactly from the pre-task rule. Sized/scoped to
+       #token-layer only so the shared .token/.token--sm classes used elsewhere (turnbox/
+       auction/trade sideheads via App.js tokenHtml()) are untouched. background-color is a
+       neutral fallback fill behind background-image (portrait) or the letter glyph
+       (no portrait); color:var(--tcol) (not the old near-black #0a0a12) so the fallback
+       letter stays legible against that dark neutral fill. */
+    #token-layer .token { position:absolute; transform:translate(-50%,-50%);
+      width:32px; height:32px; border:2px solid var(--tcol); background-size:cover;
+      background-position:center; image-rendering:pixelated; background-color:var(--bg2);
+      color:var(--tcol); font-size:12px; }
+    #token-layer .token--face { font-size:0; }
+    #token-layer .token--turn { box-shadow:0 0 0 2px var(--tcol), 0 0 10px var(--tcol);
+      animation: token-bob 0.9s ease-in-out infinite; }
+    /* Combine the bob offset WITH the base translate(-50%,-50%) at every keyframe —
+       an animation replaces (not merges with) the element's transform value, so a bare
+       `transform:translateY(-2px)` at 50% would blow away the centering for that instant.
+       Only touches `transform`; .token--hop's transition targets left/top, so a token
+       that is both mid-hop and the current turn animates both without conflict. */
+    @keyframes token-bob { 0%,100% { transform:translate(-50%,-50%); }
+      50% { transform:translate(-50%,-50%) translateY(-2px); } }
     .tile { position:relative; background:var(--bg2); border:1.5px solid #060a14; overflow:hidden; display:flex; }
     .tile--corner { background:var(--bg3); }
     .tile--abs { position:absolute; transform:translate(-50%,-50%); z-index:1; }
@@ -470,9 +490,18 @@
       color:#fff; text-shadow:0 0 3px #000, 0 1px 2px #000; white-space:nowrap; letter-spacing:-.5px; pointer-events:none; }
     .gcity--route { color:var(--good); pointer-events:auto; cursor:pointer; padding:3px 5px;
       background:rgba(8,12,28,.7); outline:2px dashed var(--good); animation:routePulse 1s infinite; }
-    .gtoken { position:absolute; top:0; left:0; width:16px; height:16px; border-radius:50%;
-      background:var(--tcol); border:2px solid #fff; color:#fff; font-family:var(--disp); font-size:7px;
+    /* layout-rebuild Task 3: portrait face at 28px, mirroring #token-layer .token's
+       treatment. Positioning mechanism UNCHANGED — _globeTick() (App.js) writes
+       style.transform = 'translate(-50%,-50%) translate(x,y)' every frame from
+       dataset.lat/lng/offx, so centering lives in that JS string, not in a static
+       CSS rule here; border stays circular (border-radius:50%), just player-colored
+       (var(--tcol)) instead of static white, matching the flat-board token's identity cue. */
+    .gtoken { position:absolute; top:0; left:0; width:28px; height:28px; border-radius:50%;
+      border:2px solid var(--tcol); background-size:cover; background-position:center;
+      image-rendering:pixelated; background-color:var(--bg2); color:var(--tcol);
+      font-family:var(--disp); font-size:11px;
       display:flex; align-items:center; justify-content:center; box-shadow:0 2px 5px rgba(0,0,0,.6); pointer-events:none; }
+    .gtoken--face { font-size:0; }
 
     .board__center { display:flex; flex-direction:column; align-items:center; justify-content:space-between;
       padding:14px; gap:8px; background:repeating-linear-gradient(135deg, #0c1f12 0 8px, #0e2415 8px 16px); }
