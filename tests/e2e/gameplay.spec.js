@@ -315,6 +315,73 @@ test.describe('Basic Gameplay', () => {
     }
     expect(bought).toBe(true);
   });
+
+  // Atlas-fill-ownership wave (Task 3): the visual ownership signal on the
+  // board itself — a colored border (tile--owned) plus a portrait/letter
+  // flag (.tile__flag), per App.js _tileHtml (spec 2026-07-12 §3). Reuses
+  // this describe block's established bounded buy-loop pattern rather than
+  // layout.spec.js's, since ownership/deeds assertions already live here
+  // ("buying a property updates ownership" above) — same helpers, same file.
+  test('bought tile shows ownership border and flag; unbought tile does not', async ({ page }) => {
+    let bought = false;
+    for (let turn = 0; turn < 12 && !bought; turn++) {
+      const rollBtn = page.locator('#btn-roll');
+      if (await rollBtn.isVisible().catch(() => false)) {
+        await rollBtn.click();
+        await page.waitForTimeout(300);
+      }
+
+      const evAccept = page.locator('#ev-accept');
+      if (await evAccept.isVisible().catch(() => false)) {
+        await evAccept.click();
+        await page.waitForTimeout(300);
+      }
+
+      const buyBtn = page.locator('#btn-buy');
+      if (await buyBtn.isVisible().catch(() => false)) {
+        await buyBtn.click();
+        await page.waitForTimeout(400);
+
+        // Discover N (the bought space) from the DOM itself rather than
+        // threading it through from the roll: the RNG-driven landing space
+        // isn't known ahead of time, but a fresh 2-player game has exactly
+        // one owned tile at this point.
+        const ownedTiles = page.locator('.tile[data-space].tile--owned');
+        await expect(ownedTiles).toHaveCount(1);
+        const boughtSpace = await ownedTiles.first().getAttribute('data-space');
+        const boughtTile = page.locator(`.tile[data-space="${boughtSpace}"]`);
+        await expect(boughtTile).toHaveClass(/tile--owned/);
+        await expect(boughtTile.locator('.tile__flag')).toHaveCount(1);
+
+        // An unbought property tile (has a price tag, i.e. purchasable) does
+        // NOT carry the ownership border or a flag.
+        const unbought = page.locator('.tile[data-space]:not(.tile--owned)')
+          .filter({ has: page.locator('.tile__price') }).first();
+        await expect(unbought).toBeVisible();
+        await expect(unbought).not.toHaveClass(/tile--owned/);
+        await expect(unbought.locator('.tile__flag')).toHaveCount(0);
+
+        bought = true;
+        break;
+      }
+
+      const endBtn = page.locator('#btn-end');
+      if (await endBtn.isVisible().catch(() => false) && await endBtn.isEnabled().catch(() => false)) {
+        await endBtn.click();
+        await page.waitForTimeout(300);
+      }
+
+      // Clear stray auctions
+      const passAuctionBtn = page.locator('#btn-pass-auction');
+      for (let i = 0; i < 6; i++) {
+        if (await passAuctionBtn.isVisible().catch(() => false)) {
+          await passAuctionBtn.click();
+          await page.waitForTimeout(200);
+        } else break;
+      }
+    }
+    expect(bought).toBe(true);
+  });
 });
 
 // ─── AUCTION ────────────────────────────────────────────
