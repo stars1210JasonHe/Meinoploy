@@ -505,6 +505,22 @@
        turnbox's "CHOOSE YOUR ROUTE" hint stays readable through the dim. */
     .app--game #game-area.game--routepick .game__chips,
     .app--game #game-area.game--routepick .game__actionbar { pointer-events:none; opacity:.45; }
+    /* Owner acceptance fix wave, Fix 1 ("卡住了" — the game was WAITING for a
+       route click the owner couldn't see): a floating banner INSIDE
+       .game__center, shown ONLY under .game--routepick, so it can never be
+       dimmed by the routepick opacity drop above (that rule only ever
+       targets .game__chips/.game__actionbar). Purely CSS-gated — no JS
+       visibility toggle needed beyond the existing _syncRoutePickChrome
+       class flip. Lives in .game__center so it's renderer-agnostic (flat
+       atlas AND globe both render into the same .game__center; see the
+       .gcity--route rule below for the globe-side twin of this pulse). */
+    #route-banner { display:none; position:absolute; top:14px; left:50%; transform:translateX(-50%);
+      z-index:20; pointer-events:none; font-family:var(--disp); font-size:11px; letter-spacing:1px;
+      color:#161009; background:var(--good); border:3px solid #000; box-shadow:var(--bevel), 4px 4px 0 rgba(0,0,0,.5);
+      padding:10px 16px; text-align:center; white-space:nowrap; animation:routeBannerPulse 1s ease-in-out infinite; }
+    @keyframes routeBannerPulse { 0%,100% { filter:brightness(1); } 50% { filter:brightness(1.25); } }
+    @media (max-width:680px) { #route-banner { white-space:normal; max-width:88vw; font-size:9px; top:8px; } }
+    .app--game #game-area.game--routepick #route-banner { display:block; }
     .app--game .game__chips { position:fixed; top:8px; left:50%; transform:translateX(-50%);
       z-index:45; max-width:calc(100vw - 24px); background:color-mix(in srgb, var(--bg2) 85%, transparent);
       border:2px solid var(--line); box-shadow:var(--bevel); padding:6px 9px; }
@@ -523,6 +539,37 @@
     .app--game #dice-overlay { z-index:50; } /* above the floating chrome (45) — tumble never clipped */
     .app--game #drawer-tabs { z-index:46; } /* above the chrome bars if they ever meet the right edge */
     .app--game .drawer { z-index:55; } /* above the floating chrome (45) when open */
+
+    /* ============ WIDE-SCREEN GUTTER MODE (owner acceptance fix wave, Fix 3) ============
+       Owner's choice for the horizontal voids beside the height-driven square board on
+       wide monitors: fill them with UI instead of leaving them blank. App.js
+       _syncGutterMode() measures the real per-side gutter ((viewport width - board
+       width) / 2) every render + on resize, toggles `.game--gutters` on #game-area at
+       the >=300px-per-side threshold, and writes the REAL width into --gutter-w so
+       both panels below are provably sized from the actual void (the zero-overlap
+       invariant holds in both modes, same guarantee style as --chrome-top/
+       --chrome-bottom above). Below the threshold this whole block is inert — today's
+       floating slim chips + overlay drawer render exactly as before.
+       LEFT gutter: the chip strip becomes a vertical column (position/flex-direction
+       flip only — chipHtml's markup is untouched) with full info visible (no hover
+       needed): the ID-selector specificity here (#game-area.game--gutters) beats the
+       plain-class hover-reveal rule above without needing !important.
+       RIGHT gutter: the SAME #drawer element (mechanism untouched — _openDrawer/
+       _closeDrawer, Escape-to-close, tab switching all keep working byte-for-byte)
+       just gets repositioned/resized into the gutter instead of overlaying the board,
+       and _syncGutterMode auto-opens it (LOG tab) once per mode-ENTRY. */
+    .app--game #game-area.game--gutters .game__chips {
+      flex-direction:column; align-items:stretch;
+      top:8px; bottom:8px; left:8px; right:auto; transform:none;
+      width:calc(var(--gutter-w, 300px) - 16px); max-width:calc(var(--gutter-w, 300px) - 16px);
+      overflow-y:auto; overflow-x:hidden;
+    }
+    .app--game #game-area.game--gutters .pcard--chip .pcard__name,
+    .app--game #game-area.game--gutters .pcard--chip .chip__deeds { display:inline; }
+    .app--game #game-area.game--gutters .drawer {
+      position:fixed; top:8px; bottom:8px; right:8px; left:auto;
+      width:calc(var(--gutter-w, 300px) - 16px);
+    }
 
     /* chip popover (openUiModal(chipDetailHtml(d))) — full tall-card body */
     .chip-detail { padding:16px; display:flex; flex-direction:column; gap:9px; }
@@ -580,10 +627,33 @@
       z-index: 0;
     }
     .board__edges line {
-      stroke: var(--accent);
-      stroke-width: 0.5;
-      opacity: 0.45;
+      /* Owner acceptance fix wave, Fix 2 ("线条非常凌乱" — rank-fit spread the
+         positions; geographic-adjacency edges now cross the whole board): the
+         base network is CONTEXT, not content — faint + thin at rest.
+         vector-effect keeps the stroke a constant ~1 SCREEN px regardless of
+         how big the board actually renders (the SVG viewBox is a fixed
+         0-100 unit square scaled up to the board's real size — without this,
+         the same stroke-width gets visibly THICKER as the board grows, e.g.
+         a fullscreen 900px+ board vs a small window). */
+      stroke: var(--ink-dim);
+      stroke-width: 1;
+      vector-effect: non-scaling-stroke;
+      opacity: 0.18;
       stroke-linecap: round;
+      transition: opacity .15s ease, stroke .15s ease, stroke-width .15s ease;
+    }
+    /* Route-pick modality: dim the base network to near-invisible and let ONLY
+       the pending fork's branch edges (`edge--hot`, toggled by
+       _resolveAtlasRoute per the `data-from`/`data-to` identity set at SVG
+       build time — see _renderAbsoluteBoard) pop bright. This is the
+       PER-EDGE-HOT mechanism (chosen over the "dim everything, rely on the
+       tile pulses alone" fallback the brief allowed) — per-edge
+       identification turned out cheap, not invasive: routeChoices() already
+       returns full node-list routes, and consecutive pairs in a path ARE the
+       edges. See task report for the write-up. */
+    .app--game #game-area.game--routepick .board__edges line { opacity:0.06; }
+    .app--game #game-area.game--routepick .board__edges line.edge--hot {
+      opacity:1; stroke:var(--good); stroke-width:2.2;
     }
     /* atlas: city label above each place's tile cluster */
     .place-label { position:absolute; transform:translateX(-50%); z-index:2; pointer-events:none;
@@ -591,10 +661,21 @@
       text-shadow:1px 1px 0 #000; white-space:nowrap; }
     /* atlas: ring around capital-hub tiles so they stand out from plain arrows */
     .tile--hub { outline:2px solid var(--accent); outline-offset:1px; }
-    /* atlas route-picker: pulse the reachable destination cities at a fork */
-    .tile--route-target { outline:2px dashed var(--good); outline-offset:2px; cursor:pointer;
-      animation: routePulse 0.9s ease-in-out infinite; }
-    @keyframes routePulse { 0%,100% { outline-color:var(--good); } 50% { outline-color:var(--accent); } }
+    /* atlas route-picker: pulse the reachable destination cities at a fork.
+       Owner acceptance fix wave, Fix 1 ("卡住了" — the pending pick wasn't
+       visible enough to notice): solid (not dashed) 3px outline + a
+       box-shadow BREATHE, not a transform/scale pulse — tokens already
+       animate `transform` via token-bob (index.html below), and a CSS
+       animation REPLACES rather than merges an element's transform, so a
+       transform-based pulse here would fight any token sharing the tile.
+       z-index raised so the glow isn't clipped by an adjacent tile's box in
+       the grid/absolute layouts. */
+    .tile--route-target { outline:3px solid var(--good); outline-offset:2px; cursor:pointer;
+      z-index:3; animation: routePulse 0.9s ease-in-out infinite; }
+    @keyframes routePulse {
+      0%,100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--good) 70%, transparent); }
+      50% { box-shadow:0 0 18px 7px color-mix(in srgb, var(--good) 70%, transparent); }
+    }
     /* persistent token overlay — survives grid rebuilds, repositioned each tick */
     #token-layer { position:absolute; inset:0; pointer-events:none; z-index:5; }
     /* layout-rebuild Task 3: portrait tokens. Centering STAYS transform:translate(-50%,-50%)
@@ -710,7 +791,10 @@
     .gcity { position:absolute; top:0; left:0; font-family:var(--disp); font-size:7px; line-height:1;
       color:#fff; text-shadow:0 0 3px #000, 0 1px 2px #000; white-space:nowrap; letter-spacing:-.5px; pointer-events:none; }
     .gcity--route { color:var(--good); pointer-events:auto; cursor:pointer; padding:3px 5px;
-      background:rgba(8,12,28,.7); outline:2px dashed var(--good); animation:routePulse 1s infinite;
+      /* Owner acceptance fix wave, Fix 1: same stronger-pulse treatment as the flat
+         board's .tile--route-target above — solid (not dashed) 3px outline, shared
+         box-shadow-breathe routePulse keyframe (ease-in-out, not the old linear). */
+      background:rgba(8,12,28,.7); outline:3px solid var(--good); animation:routePulse 1s ease-in-out infinite;
       /* Task 3: route-commit ABSOLUTELY outranks the token popover (spec: "keeps ABSOLUTE
          priority... before any popover logic"). A player's gtoken can visually sit on/near
          their OWN current city while it is simultaneously a route-pick fork (e.g. Terra

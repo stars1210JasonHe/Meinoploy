@@ -376,6 +376,7 @@ class MonopolyBoard {
             <div id="game-area" class="screen screen--game" style="display:none;">
               <div class="game__chips"><div id="player-info"></div></div>
               <div class="game__center">
+                <div id="route-banner">CHOOSE YOUR ROUTE — CLICK A HIGHLIGHTED CITY</div>
                 <div id="board" class="board"></div>
                 <div id="dice-overlay" style="display:none;"><span class="bigdie" data-die="1"></span><span class="bigdie" data-die="2"></span></div>
                 <div id="drawer-tabs"></div>
@@ -631,7 +632,7 @@ class MonopolyBoard {
     // `resize` event on fullscreen ENTER and EXIT (viewport dimensions actually
     // change), so a dedicated `fullscreenchange` hook is not needed — see
     // task-4-report.md for the verification note.
-    window.addEventListener('resize', () => this._syncChromeBands());
+    window.addEventListener('resize', () => { this._syncGutterMode(); this._syncChromeBands(); });
 
     // Modal close on scrim click
     this.stateModalEl.addEventListener('click', (e) => { if (e.target === this.stateModalEl) { /* state-driven; ignore */ } });
@@ -1098,6 +1099,10 @@ class MonopolyBoard {
     // globe: _updateGlobeOverlay inside renderBoard, earlier in this update) — sync
     // the route-pick chrome modality. See _syncRoutePickChrome.
     this._syncRoutePickChrome();
+    // Gutter-mode sync runs BEFORE the chrome-band sizing below — _syncChromeBands
+    // reads the `.game--gutters` class this writes to decide whether the chip
+    // strip's height still belongs in the TOP band (see that method's doc comment).
+    this._syncGutterMode();
     // Chrome-band sizing runs last, after renderPlayerInfo/renderTurnbox have
     // written this render's real chip-strip/action-bar markup — see doc
     // comment on the method for why this is JS-measured instead of a static
@@ -1128,10 +1133,21 @@ class MonopolyBoard {
   // bar's content.
   _syncChromeBands() {
     if (!this.gameAreaEl || !this.chipsBarEl || !this.actionBarEl) return;
+    // Owner acceptance fix wave, Fix 3 (wide-screen gutter mode): under
+    // `.game--gutters` the chip strip moves into the LEFT gutter (CSS,
+    // `.game--gutters .game__chips`) and stops floating over the TOP of the
+    // board entirely — see _syncGutterMode. The top band then only needs the
+    // same fixed offset/buffer every band reserves, NOT the chip strip's real
+    // height: in column layout that height is now tall (up to the full
+    // viewport), and reserving it would crush the board back down instead of
+    // growing it, defeating the whole point of the gutter-mode wave.
+    const gutters = this.gameAreaEl.classList.contains('game--gutters');
     // +8 = the bar's own fixed top/bottom offset (index.html: top:8px /
     // bottom:8px); +4 = a small breathing-room gap so the board's edge
     // never sits pixel-adjacent to the bar. Same formula for both bars.
-    const top = Math.ceil(this.chipsBarEl.getBoundingClientRect().height) + 8 + 4;
+    const top = gutters
+      ? (8 + 4)
+      : (Math.ceil(this.chipsBarEl.getBoundingClientRect().height) + 8 + 4);
     const bottom = Math.ceil(this.actionBarEl.getBoundingClientRect().height) + 8 + 4;
     if (top !== this._lastChromeTop) {
       this._lastChromeTop = top;
@@ -1141,6 +1157,67 @@ class MonopolyBoard {
       this._lastChromeBottom = bottom;
       this.gameAreaEl.style.setProperty('--chrome-bottom', `${bottom}px`);
     }
+  }
+
+  // Owner acceptance fix wave, Fix 3 ("wide-screen gutter layout" — the owner's
+  // choice for the horizontal voids beside the height-driven square board on
+  // wide monitors): when the board leaves a gutter of >=300px on EACH side, fill
+  // both voids with UI instead of leaving them blank — index.html's
+  // `.game--gutters` rules move the chip strip into a vertical column in the
+  // LEFT gutter (full info, no hover needed) and turn the right drawer into a
+  // persistent, non-overlay panel in the RIGHT gutter. Below the threshold,
+  // layout is untouched (today's floating slim chips + overlay drawer).
+  //
+  // --gutter-w carries the gutter width the CSS panels are sized FROM, never
+  // wider than it, so the zero-overlap invariant holds in both modes.
+  //
+  // MEASURED, not analytic, would seem the obvious choice (mirroring
+  // --chrome-top/--chrome-bottom above) — but it's wrong here, and the bug is
+  // real, not theoretical (caught live by tests/e2e/layout.spec.js's gutter
+  // test: chips overlapped the board by ~22px on gutter-mode ENTRY). The
+  // reason: on the very render gutter mode turns ON, `this.boardEl`'s rect
+  // still reflects the OLD, not-yet-shrunk --chrome-top (the shrink happens
+  // in _syncChromeBands, called right after this method — see update()) — so
+  // a measured board width here is systematically SMALLER, and the gutter
+  // computed from it SYSTEMATICALLY BIGGER, than the board will actually be
+  // once the top band shrinks a few lines later in the same render. Sizing
+  // the chip column off that stale, oversized gutter overlaps the board that
+  // grows into the gap immediately after. Computing the POST-shrink board
+  // width analytically instead — mirroring `.app--game .board`'s CSS formula
+  // (index.html) exactly, with top hardcoded to the same 8+4 gutter-mode
+  // constant _syncChromeBands uses — sidesteps the ordering dependency
+  // entirely and is correct from the very first gutter-mode render, no
+  // convergence lag.
+  //
+  // Auto-opens the LOG tab exactly once per mode-ENTRY (the `on && !wasOn` edge
+  // below, not every render): a user who deliberately closes the drawer while
+  // still in gutter mode does not get it reopened out from under them on the
+  // next render — the transition check itself is what makes the dismissal
+  // "stick" until the mode is left and re-entered, no separate memory flag
+  // needed.
+  _syncGutterMode() {
+    if (!this.gameAreaEl || !this.boardEl || !this.actionBarEl) return;
+    // Decide on/off from the board's CURRENTLY rendered width — a simple,
+    // non-circular "is there already a wide void" read (whatever this
+    // render's chrome-top happens to be doesn't change the ON/OFF verdict by
+    // more than a render's worth of chip-strip height, nowhere near the
+    // 300px threshold's margin in practice).
+    const boardWNow = this.boardEl.getBoundingClientRect().width;
+    const gutterNow = (window.innerWidth - boardWNow) / 2;
+    const on = gutterNow >= 300;
+    const wasOn = this.gameAreaEl.classList.contains('game--gutters');
+    this.gameAreaEl.classList.toggle('game--gutters', on);
+    if (on) {
+      // Analytic post-shrink board width — see doc comment above. Must match
+      // `.app--game .board`'s CSS formula and _syncChromeBands' gutter-mode
+      // top constant exactly, or the two drift apart again.
+      const bottom = Math.ceil(this.actionBarEl.getBoundingClientRect().height) + 8 + 4;
+      const top = 8 + 4;
+      const boardWFinal = Math.min(window.innerWidth, window.innerHeight - top - bottom, 1100);
+      const gutterFinal = (window.innerWidth - boardWFinal) / 2;
+      this.gameAreaEl.style.setProperty('--gutter-w', `${Math.floor(gutterFinal)}px`);
+    }
+    if (on && !wasOn) this._openDrawer('log');
   }
 
   // Fullscreen-stage wave (Task 2 regression fix, caught by gameplay.spec's Terra
@@ -1192,6 +1269,31 @@ class MonopolyBoard {
     Object.keys(targets).forEach(id => {
       const tile = this.boardEl.querySelector(`.tile[data-space="${id}"]`);
       if (tile) tile.classList.add('tile--route-target');
+    });
+    // Owner acceptance fix wave, Fix 2 ("线条非常凌乱" — rank-fit spread the
+    // positions; geographic-adjacency edges now cross the whole board): light
+    // up ONLY the pending fork's branch edges instead of dimming/re-coloring
+    // the whole network. Per-edge identification turned out cheap rather than
+    // invasive — routeChoices() already returns full node-list routes, and
+    // consecutive pairs in a path ARE the edges — so this is the primary fix,
+    // not the "dim everything, rely on tile pulses" fallback the brief allowed.
+    // `<line data-from data-to>` identity is set once at SVG build time in
+    // _renderAbsoluteBoard; the base network's near-invisible dim under
+    // `.game--routepick` is pure CSS (index.html), this only toggles the
+    // `edge--hot` opt-in class (+ swaps the arrowhead marker to the bright
+    // variant) on the lines that belong to a reachable branch. routeChoices()
+    // omits the player's CURRENT tile from each route, so prepend
+    // player.position first — same reasoning as _globeSetRouteArcs's path-
+    // building (see that method's doc comment for the globe-side twin of this).
+    const hotEdges = new Set();
+    choices.forEach(c => {
+      const path = [player.position].concat(c.route);
+      for (let i = 0; i < path.length - 1; i++) hotEdges.add(`${path[i]}>${path[i + 1]}`);
+    });
+    this.boardEl.querySelectorAll('.board__edges line[data-from]').forEach(line => {
+      const hot = hotEdges.has(`${line.dataset.from}>${line.dataset.to}`);
+      line.classList.toggle('edge--hot', hot);
+      line.setAttribute('marker-end', hot ? 'url(#atlas-arrow-hot)' : 'url(#atlas-arrow)');
     });
   }
 
@@ -1768,11 +1870,15 @@ class MonopolyBoard {
         // hot:false in _renderGlobeBoard and stay that way until a genuine fork). Task 3
         // (spec §2.6) bumped the base opacity/stroke — 0.33 alpha + 0.8px read as
         // near-invisible against the globe texture at rest (owner's original complaint,
-        // confirmed live at 1400x900 before this change); still clearly dimmer than hot
-        // (2.3px, near-solid gold) so the fork highlight keeps its contrast.
+        // confirmed live at 1400x900 before this change).
+        // Owner acceptance fix wave, Fix 2 ("线条非常凌乱"): Task 3's bump (0.33->0.5,
+        // 0.8->1.2) overshot — the owner's later screenshot read as too busy/flat again.
+        // Pulled back to a middle, more-restrained resting point (0.35/1.0) that still
+        // clears "near-invisible" (Task 3's original bug) while staying clearly dimmer
+        // than hot (2.3px, near-solid gold) so the fork highlight keeps its contrast.
         .arcsData(d.arcs)
-        .arcColor(a => a.hot ? ['#fff3c0', '#ffd24a'] : 'rgba(233,178,60,0.5)')
-        .arcStroke(a => a.hot ? 2.3 : 1.2)
+        .arcColor(a => a.hot ? ['#fff3c0', '#ffd24a'] : 'rgba(233,178,60,0.35)')
+        .arcStroke(a => a.hot ? 2.3 : 1.0)
         .arcAltitude(a => a.hot ? 0.3 : 0.2)
         .arcDashLength(a => a.hot ? 0.5 : 1)
         .arcDashGap(a => a.hot ? 0.22 : 0)
@@ -2163,12 +2269,20 @@ class MonopolyBoard {
         tos.forEach(to => {
           const b = pos[to];
           if (!b) return;
-          lines += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" marker-end="url(#atlas-arrow)"></line>`;
+          // data-from/data-to (line-tidiness fix, acceptance fix wave): gives
+          // _resolveAtlasRoute a per-edge identity so it can light up ONLY the
+          // pending fork's branch edges (edge--hot) instead of the whole
+          // network at once — see that method's doc comment.
+          lines += `<line data-from="${from}" data-to="${to}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" marker-end="url(#atlas-arrow)"></line>`;
         });
       });
       edgesSvg = `<svg class="board__edges" viewBox="0 0 100 100" preserveAspectRatio="none">`
-        + `<defs><marker id="atlas-arrow" markerWidth="4" markerHeight="4" refX="3" refY="2" orient="auto">`
-        + `<path d="M0,0 L4,2 L0,4 Z" fill="var(--accent)"></path></marker></defs>`
+        + `<defs>`
+        + `<marker id="atlas-arrow" markerWidth="4" markerHeight="4" refX="3" refY="2" orient="auto">`
+        + `<path d="M0,0 L4,2 L0,4 Z" fill="var(--ink-dim)"></path></marker>`
+        + `<marker id="atlas-arrow-hot" markerWidth="4" markerHeight="4" refX="3" refY="2" orient="auto">`
+        + `<path d="M0,0 L4,2 L0,4 Z" fill="var(--good)"></path></marker>`
+        + `</defs>`
         + lines + `</svg>`;
     }
     // Real-city world map behind the board (atlas worlds with a bundled asset set).

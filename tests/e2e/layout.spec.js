@@ -77,6 +77,18 @@ async function selectCharacters(page, count = 2) {
 test.describe('Map-dominant layout (layout-rebuild)', () => {
   test('big board, portrait chips, popover, drawer, animation intact', async ({ page }) => {
     test.setTimeout(60000);
+    // Owner acceptance fix wave, Fix 3 (wide-screen gutter mode): the file's
+    // pinned 1400x900 default now crosses the new >=300px-per-side gutter
+    // threshold (the rest-state board already left a ~342px gutter at that
+    // width even before Fix 3 — see the "Wide-screen gutter mode" describe
+    // block below), which would move the chip strip into a LEFT-gutter
+    // COLUMN and auto-open the drawer — both of which this test's assertions
+    // (a0's "drawer never opened yet" premise, the single-row/hover-reveal
+    // chip mechanics later in this file) assume are OFF. This test is about
+    // chrome MECHANISM (popover/drawer/animation), not gutter layout — pin it
+    // narrow so it keeps exercising exactly what it always has; the new
+    // gutter-specific behavior gets its own dedicated tests below.
+    await page.setViewportSize({ width: 1180, height: 900 });
     const pageErrors = [];
     page.on('pageerror', err => pageErrors.push(err.message));
 
@@ -226,6 +238,12 @@ test.describe('Map-dominant layout (layout-rebuild)', () => {
   // a column) AND the board-dominance floor still holds at that count.
   test('6-player chip strip stays a single row and board dominance holds', async ({ page }) => {
     test.setTimeout(60000);
+    // Owner acceptance fix wave, Fix 3: same narrow pin as the test above and
+    // for the same reason — this test specifically proves the chip strip is a
+    // single ROW, which is the <300px-gutter (today's) layout; Fix 3's gutter
+    // mode intentionally turns the strip into a COLUMN above the threshold, so
+    // pin below it to keep testing what this test is actually about.
+    await page.setViewportSize({ width: 1180, height: 900 });
     await selectCharacters(page, 6);
 
     const chips = page.locator('.game__chips .pcard--chip');
@@ -259,6 +277,14 @@ test.describe('Map-dominant layout (layout-rebuild)', () => {
 test.describe('Fullscreen stage (Task 4)', () => {
   test('full-bleed geometry: zero board/chrome overlap, topbar auto-hide + reveal, chips slim, #btn-fs', async ({ page }) => {
     test.setTimeout(30000);
+    // Owner acceptance fix wave, Fix 3: pin narrow, same reasoning as the two
+    // tests above. This test's zero-overlap assertion assumes the ROW layout
+    // (chips ABOVE the board, action bar BELOW it) and its slim-chip
+    // assertion assumes the HOVER-reveal mechanic — both are the <300px-
+    // gutter behavior; gutter mode replaces both intentionally above the
+    // threshold and gets its own zero-overlap + always-visible-info
+    // assertions in the "Wide-screen gutter mode" describe block below.
+    await page.setViewportSize({ width: 1180, height: 900 });
     const pageErrors = [];
     page.on('pageerror', err => pageErrors.push(err.message));
 
@@ -414,5 +440,174 @@ test.describe('Fullscreen stage (Task 4)', () => {
     await expect(page.locator('.chip-detail__lore')).toBeVisible(); // every mod ships lore
     await page.keyboard.press('Escape');
     await expect(page.locator('#ui-modal')).not.toHaveClass(/open/);
+  });
+});
+
+// ─── Owner acceptance fix wave: wide-screen gutter mode (Fix 3) ───
+//
+// >=300px-per-side gutter threshold (App.js _syncGutterMode). 1535x900 is
+// comfortably above it (the rest-state board is height-driven — ~776-900px
+// per the chrome-band math below — leaving a wide gutter at this width);
+// scoped to its own describe block via test.use so it doesn't affect the
+// narrower-pinned tests above (which deliberately test the <300px fallback).
+test.describe('Wide-screen gutter mode (Fix 3)', () => {
+  test.use({ viewport: { width: 1535, height: 900 } });
+
+  test('chips column fills the left gutter, drawer is a persistent right-gutter panel, board grows, zero overlap', async ({ page }) => {
+    test.setTimeout(30000);
+    const pageErrors = [];
+    page.on('pageerror', err => pageErrors.push(err.message));
+
+    await selectCharacters(page);
+
+    // Gutter mode ON at this width (App.js _syncGutterMode toggles this class
+    // on #game-area once the measured per-side gutter clears 300px).
+    await expect(page.locator('#game-area')).toHaveClass(/game--gutters/);
+
+    const chipsRect = await page.locator('.game__chips').evaluate(el => el.getBoundingClientRect());
+    const boardRect = await page.locator('#board').evaluate(el => el.getBoundingClientRect());
+    const drawerRect = await page.locator('#drawer').evaluate(el => el.getBoundingClientRect());
+
+    // Zero-overlap invariant, gutter-mode flavor (must hold in BOTH modes,
+    // per the brief): the chip column sits fully left of the board, the
+    // drawer panel fully right of it — neither ever renders under the board.
+    expect(chipsRect.right).toBeLessThanOrEqual(boardRect.left + 1);
+    expect(drawerRect.left).toBeGreaterThanOrEqual(boardRect.right - 1);
+
+    // Full chip info visible WITHOUT hover — the narrow-mode hover-reveal
+    // mechanic (tested at 1180x900 above) is overridden in gutter mode.
+    const activeName = page.locator('.game__chips .pcard--active .pcard__name');
+    await expect(activeName).toBeVisible();
+
+    // Drawer auto-opens (LOG tab) on gutter-mode entry — a persistent panel,
+    // not an overlay the user has to open themselves.
+    await expect(page.locator('#drawer')).not.toBeHidden();
+    await expect(page.locator('.drawer-tabs__btn[data-tab="log"]')).toHaveClass(/drawer-tabs__btn--active/);
+
+    // The user can still close it, and it does NOT get forced back open on
+    // the next render — App.js _syncGutterMode only auto-opens on the
+    // mode-ENTRY transition (on && !wasOn), not every render. Closed via
+    // Escape, not a second tab click: `#drawer-tabs` (positioned `right:0`
+    // inside the viewport-spanning `.game__center`) sits at the same right
+    // edge the open drawer panel occupies in EVERY mode — narrow or gutter —
+    // so a click aimed at the tab rail while the drawer is genuinely open
+    // there hits the drawer panel first (Playwright: "#drawer intercepts
+    // pointer events"), a PRE-EXISTING overlap this fix wave did not touch
+    // (every other drawer-close in this file already goes through Escape,
+    // never a second tab click on an open drawer — see test (d) above).
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#drawer')).toBeHidden();
+    await page.locator('.pcard--active').click(); // trigger another state render
+    await expect(page.locator('.chip-detail')).toBeVisible();
+    await page.locator('#ui-modal').click({ position: { x: 5, y: 5 } });
+    await expect(page.locator('#drawer')).toBeHidden();
+
+    // Board grows once the chip strip stops eating a horizontal TOP band
+    // (--chrome-top shrinks to a fixed offset instead of the chip strip's
+    // real height — see _syncChromeBands). Logged for the task report.
+    const vw = await page.evaluate(() => window.innerWidth);
+    console.log(`[gutter-mode] board px @${vw}x900: ${boardRect.width}`);
+    expect(boardRect.width / vw).toBeGreaterThan(0.5);
+
+    expect(pageErrors).toEqual([]);
+  });
+});
+
+// ─── Owner acceptance fix wave: route-pick visibility + line tidiness (Fix 1 + Fix 2) ───
+//
+// Drives the Terra Circuit atlas world to a genuine multi-choice fork (reusing
+// gameplay.spec.js's atlas-world setup/turn-resolution flow, duplicated per
+// this file's own setup-helper convention — see the header comment) and
+// asserts the NEW primary cue (#route-banner) is visible, the base edge
+// network is dimmed, and at least one edge is marked hot — then that
+// everything clears immediately on commit. Runs at the file's default
+// viewport (1400x900); the banner/edge mechanism is renderer/mode-agnostic
+// (index.html: .game__center-scoped, gated purely by .game--routepick) so it
+// doesn't matter whether gutter mode happens to be on or off at that width.
+test.describe('Route-pick visibility + line tidiness (Fix 1 + Fix 2)', () => {
+  async function selectCharactersAtlas(page) {
+    await page.goto('/');
+    await page.waitForSelector('#btn-mode-local', { timeout: 10000 });
+    await page.click('#btn-mode-local');
+    await selectMod(page, 'Dominion');
+    await page.waitForSelector('.map-card[data-map-idx]', { timeout: 10000 });
+    await page.locator('.map-card[data-map-idx]', { hasText: 'Terra Circuit' }).click();
+    await page.waitForSelector('.count-btn[data-count="2"]', { timeout: 10000 });
+    await page.click('.count-btn[data-count="2"]');
+    await page.waitForSelector('#btn-vic-start', { timeout: 10000 });
+    await page.click('#btn-vic-start');
+    await page.waitForSelector('.charcard', { timeout: 10000 });
+    await pickAndConfirm(page);
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.select__p');
+      return el && /PLAYER 2/.test(el.textContent);
+    }, { timeout: 10000 });
+    await pickAndConfirm(page);
+    await page.waitForSelector('#btn-roll', { timeout: 10000 });
+  }
+
+  test('route banner + pulse are the primary cue at a fork; base network dims, fork edges pop', async ({ page }) => {
+    test.setTimeout(60000);
+    await selectCharactersAtlas(page);
+
+    let forkSeen = false;
+    for (let turn = 0; turn < 40 && !forkSeen; turn++) {
+      const rollBtn = page.locator('#btn-roll');
+      if (await rollBtn.isVisible().catch(() => false)) {
+        await rollBtn.click();
+        await page.waitForTimeout(1100); // wait out the ~0.9s dice animation + dispatch
+
+        const target = page.locator('.tile--route-target').first();
+        if (await target.isVisible().catch(() => false)) {
+          forkSeen = true;
+
+          // Fix 1: the banner is the primary "you're stuck here" cue — must
+          // be genuinely visible (not merely present-but-dimmed like the
+          // floating chip/action-bar chrome under routepick).
+          await expect(page.locator('#game-area')).toHaveClass(/game--routepick/);
+          await expect(page.locator('#route-banner')).toBeVisible();
+          await expect(page.locator('#route-banner')).toHaveText(/CHOOSE YOUR ROUTE/);
+
+          // Fix 2: base network dimmed, pending-fork edges lit (per-edge-hot
+          // mechanism — data-from/data-to identity set at SVG build time,
+          // edge--hot toggled by _resolveAtlasRoute).
+          const hotEdges = await page.locator('.board__edges line.edge--hot').count();
+          expect(hotEdges).toBeGreaterThan(0);
+          const baseOpacity = await page.locator('.board__edges line:not(.edge--hot)').first()
+            .evaluate(el => getComputedStyle(el).opacity).catch(() => null);
+          if (baseOpacity !== null) expect(parseFloat(baseOpacity)).toBeLessThan(0.1);
+
+          await target.click();
+          await page.waitForTimeout(350);
+
+          // Clears immediately on commit.
+          await expect(page.locator('#game-area')).not.toHaveClass(/game--routepick/);
+          await expect(page.locator('#route-banner')).toBeHidden();
+          break;
+        }
+      }
+
+      // No fork this roll — clear whatever resulted and move to the next
+      // turn (same resolution steps as gameplay.spec.js's completeTurnAtlas).
+      const evAccept = page.locator('#ev-accept');
+      if (await evAccept.isVisible().catch(() => false)) { await evAccept.click(); await page.waitForTimeout(300); }
+      const buyBtn = page.locator('#btn-buy');
+      if (await buyBtn.isVisible().catch(() => false)) {
+        await page.locator('#btn-pass').click();
+        await page.waitForTimeout(300);
+        const passAuctionBtn = page.locator('#btn-pass-auction');
+        for (let i = 0; i < 6; i++) {
+          if (await passAuctionBtn.isVisible().catch(() => false)) { await passAuctionBtn.click(); await page.waitForTimeout(200); }
+          else break;
+        }
+      }
+      const endBtn = page.locator('#btn-end');
+      if (await endBtn.isVisible().catch(() => false) && await endBtn.isEnabled().catch(() => false)) {
+        await endBtn.click();
+        await page.waitForTimeout(300);
+      }
+    }
+
+    expect(forkSeen).toBe(true);
   });
 });
