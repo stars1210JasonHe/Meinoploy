@@ -67,4 +67,26 @@ describe('chipDetailHtml', () => {
     expect(h).toContain('Code of Law');
     expect(h).toContain('propchip');
   });
+
+  // Carry-forward from Task 1 review: inJail/isBankrupt/isCurrent status badges
+  // (same class names as the live tall pcard: pcard__jail / pcard__bankrupt / pcard__turn)
+  // must not silently vanish from the popover.
+  test('status badges: inJail/isBankrupt/isCurrent render the same classes as the live pcard', () => {
+    const base = { name: 'H', title: 'T', color: '#fff', portraitUrl: null, moneyHtml: '$1', deeds: 2 };
+    const h = chipDetailHtml({ ...base, inJail: true, isBankrupt: true, isCurrent: true });
+    expect(h).toContain('pcard__jail');
+    expect(h).toContain('IN JAIL');
+    expect(h).toContain('pcard__bankrupt');
+    expect(h).toContain('OUT');
+    expect(h).toContain('pcard__turn');
+    expect(h).toContain('TURN');
+  });
+
+  test('status badges: absent flags render no badge markup', () => {
+    const base = { name: 'H', title: 'T', color: '#fff', portraitUrl: null, moneyHtml: '$1', deeds: 2 };
+    const h = chipDetailHtml(base);
+    expect(h).not.toContain('pcard__jail');
+    expect(h).not.toContain('pcard__bankrupt');
+    expect(h).not.toContain('pcard__turn');
+  });
 });

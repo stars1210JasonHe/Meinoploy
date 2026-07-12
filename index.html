@@ -308,14 +308,20 @@
     .select__chosen-empty { font-family:var(--body); font-size:18px; color:var(--ink-dim); }
 
     /* ============ GAME ============ */
-    .screen--game { display:grid; grid-template-columns:286px 1fr 304px; gap:16px; align-items:start;
-      min-height:100vh; padding:20px; }
-    .game__left, .game__right { display:flex; flex-direction:column; gap:12px; position:sticky; top:20px; }
-    .game__panels-title { font-family:var(--disp); font-size:10px; color:var(--accent); letter-spacing:2px; }
+    /* Rows layout: top chip strip / map-dominant center / bottom action bar.
+       --chrome-h measured in a real 1400x900 browser (topbar 50px fixed overlay
+       + .screen padding 26px top/bottom + .game__chips row + .game__actionbar
+       row + gaps) — see task-2-report.md for the measured breakdown. */
+    .screen--game { display:grid; grid-template-rows:auto minmax(0,1fr) auto; gap:10px;
+      height:calc(100dvh - 74px); padding:20px; }
+    .game__chips { display:flex; gap:8px; overflow-x:auto; align-items:stretch; }
     .pcard { background:var(--bg2); border:3px solid var(--line); box-shadow:var(--bevel), var(--drop); padding:11px;
       display:flex; flex-direction:column; gap:8px; }
     .pcard--active { border-color:var(--pc); box-shadow:0 0 0 2px var(--pc), var(--bevel), 0 0 16px color-mix(in srgb,var(--pc) 45%, transparent); }
     .pcard--bankrupt { opacity:.45; filter:grayscale(.6); }
+    .pcard--chip { display:flex; flex-direction:row; align-items:center; gap:7px; padding:5px 9px; min-width:0; cursor:pointer; flex:none; }
+    .pcard--chip .pcard__name { font-size:8px; max-width:90px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .pcard--chip .pcard__money { font-size:13px; }
     .pcard__head { display:flex; gap:9px; align-items:center; }
     .pcard__id { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
     .pcard__name { font-family:var(--disp); font-size:9px; }
@@ -333,11 +339,58 @@
     .propchip { font-family:var(--body); font-size:13px; color:var(--ink); background:var(--bg3);
       border:2px solid var(--line); border-left-width:5px; padding:1px 5px; }
     .propchip--mortgaged { opacity:.5; text-decoration:line-through; }
-    .game__leftfoot { margin-top:auto; }
+    .chip__face { width:32px; height:32px; image-rendering:pixelated; object-fit:cover; border:2px solid var(--pc); flex:none; }
+    .chip__face--letter { display:flex; align-items:center; justify-content:center; font-family:var(--disp); background:var(--bg3); color:var(--tcol,var(--ink)); }
+    .chip__deeds { font-family:var(--disp); font-size:7px; color:var(--ink-dim); }
 
     /* board */
-    .game__center { display:flex; justify-content:center; position:relative; }
-    .board { width:min(74vh, 780px); aspect-ratio:1/1; position:relative; }
+    /* Sized from .game__center's own (grid-computed) height, not a hand-tuned
+       "chrome height" constant. Two real-browser measurements at 1400x900 drove
+       this: (1) align-items defaults to stretch, which makes a flex item ignore
+       its own aspect-ratio for cross-axis sizing — silently turned the board
+       into a 690x505 non-square rectangle. (2) Fixing that with align-items:
+       center + a width formula keyed to a *guessed* chrome height (100dvh minus
+       a constant) overflowed the row instead — the grid's minmax(0,1fr) middle
+       track was 504.8px tall, not the guessed budget, so a 690x690 centered
+       board spilled up into the chip strip and down into the action bar.
+       Sizing from height:min(100%, 1100px) with width:auto + aspect-ratio lets
+       the actual grid-track height (already exactly "100dvh minus everything
+       else", computed by the browser, not guessed) govern the square — no
+       magic number, self-adjusts if the chip strip or action bar changes
+       height (e.g. Task 4's turnbox re-template). */
+    .game__center { display:flex; justify-content:center; align-items:center; position:relative; min-height:0; }
+    .board { height:min(100%, 1100px); width:auto; max-width:100%; aspect-ratio:1/1; position:relative; }
+    .game__actionbar { display:flex; justify-content:center; overflow-y:auto; min-height:0; }
+
+    /* drawer tab rail — vertical strip anchored to .game__center's right edge */
+    #drawer-tabs { position:absolute; right:0; top:50%; transform:translateY(-50%);
+      display:flex; flex-direction:column; gap:6px; z-index:30; }
+    .drawer-tabs__btn { font-family:var(--disp); text-transform:uppercase; letter-spacing:1px;
+      color:var(--ink); background:var(--bg3); border:3px solid var(--line);
+      box-shadow:var(--bevel), 3px 3px 0 rgba(0,0,0,.5); writing-mode:vertical-rl; padding:8px 4px; font-size:7px; }
+    .drawer-tabs__btn:hover { filter:brightness(1.18); }
+    .drawer-tabs__btn--active { background:var(--accent); color:#161009; border-color:#000; }
+
+    /* right drawer — log / chat / manage. Section containers (#log/#ai-responses/
+       #chat-panel/#manage) live inside permanently (see App.js createLayout);
+       [hidden] only visually hides it — render functions keep writing into them. */
+    .drawer { position:fixed; right:0; top:74px; bottom:0; width:min(340px, 90vw);
+      background:var(--bg2); border-left:3px solid var(--line); z-index:35;
+      display:flex; flex-direction:column; gap:10px; padding:10px; overflow-y:auto; }
+    .drawer[hidden] { display:none; }
+    .drawer__foot { margin-top:auto; }
+    @media (max-width:700px) {
+      .drawer { top:auto; height:60dvh; width:100vw; border-left:none; border-top:3px solid var(--line); }
+    }
+
+    /* chip popover (openUiModal(chipDetailHtml(d))) — full tall-card body */
+    .chip-detail { padding:16px; display:flex; flex-direction:column; gap:9px; }
+    .chip-detail__head { display:flex; gap:10px; align-items:center; }
+    .chip-detail__id { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
+    .chip-detail__face { width:56px; height:56px; image-rendering:pixelated; object-fit:cover;
+      border:3px solid var(--pc); box-shadow:var(--bevel), 3px 3px 0 rgba(0,0,0,.5); flex:none; }
+    .chip-detail__face--letter { display:flex; align-items:center; justify-content:center;
+      font-family:var(--disp); font-size:20px; background:var(--bg3); color:var(--tcol,var(--ink)); }
     .board__grid-wrap { display:contents; }
     .board__grid { display:grid; width:100%; height:100%; position:relative;
       background:#0c1f12; border:4px solid #07140a;
@@ -638,8 +691,6 @@
 
     /* ============ RESPONSIVE ============ */
     @media (max-width:1180px) {
-      .screen--game { grid-template-columns:1fr; }
-      .game__left, .game__right { position:static; }
       .board { width:min(92vw, 640px); margin:0 auto; }
       .select__grid { grid-template-columns:repeat(2,1fr); }
       .title__logo-line { font-size:44px; }

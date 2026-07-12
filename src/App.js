@@ -15,6 +15,7 @@ import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
 import { isDuelCooldownBlocked } from './events';
 import { createAnimator, DICE_TUMBLE_MS } from './anim';
 import { createAudio } from './audio';
+import { chipHtml, chipDetailHtml, drawerShellHtml } from './game-chrome';
 
 // Client-side mod registry — static bundle imports (Parcel v1 forces all imports static, so
 // every registered mod is bundled at build; only WHICH is active is chosen at runtime). This
@@ -371,25 +372,15 @@ class MonopolyBoard {
             <div id="character-select" style="display:none;"></div>
             <div id="results-area" style="display:none;"></div>
             <div id="game-area" class="screen screen--game" style="display:none;">
-              <div class="game__left">
-                <div class="game__panels-title">COUNCIL</div>
-                <div id="player-info"></div>
-                <div class="game__leftfoot">
-                  <button id="btn-exit-foot" class="pix-btn pix-btn--ghost pix-btn--full pix-btn--sm">EXIT TO MENU</button>
-                </div>
-              </div>
+              <div class="game__chips"><div id="player-info"></div></div>
               <div class="game__center">
                 <div id="board" class="board"></div>
                 <div id="dice-overlay" style="display:none;"><span class="bigdie" data-die="1"></span><span class="bigdie" data-die="2"></span></div>
+                <div id="drawer-tabs"></div>
               </div>
-              <div class="game__right">
-                <div id="turnbox"></div>
-                <div id="manage"></div>
-                <div id="ai-responses"></div>
-                <div id="chat-panel"></div>
-                <div id="log"></div>
-              </div>
+              <div class="game__actionbar"><div id="turnbox"></div></div>
             </div>
+            <div id="drawer" class="drawer" hidden></div>
           </div>
         </div>
 
@@ -398,6 +389,19 @@ class MonopolyBoard {
       </div>
     `;
 
+    // Right drawer shell (Task 1 builder, game-chrome.js): ONE builder returns
+    // two top-level siblings — `.drawer-tabs` rail + `#drawer` panel (see
+    // task-1-report.md "Option A"). Build in a DETACHED container (so the
+    // builder's own #drawer id never collides with the live one above) and
+    // copy each half's inner content into its template slot. #manage/
+    // #ai-responses/#chat-panel/#log/#btn-exit-foot must exist in the live DOM
+    // from this point on — every update() writes into them whether the
+    // drawer is open or not.
+    const _drawerBuild = document.createElement('div');
+    _drawerBuild.innerHTML = drawerShellHtml();
+    document.getElementById('drawer-tabs').innerHTML = _drawerBuild.querySelector('.drawer-tabs').innerHTML;
+    document.getElementById('drawer').innerHTML = _drawerBuild.querySelector('#drawer').innerHTML;
+
     this.appRootEl = document.getElementById('app-root');
     this.menuEl = document.getElementById('menu-screen');
     this.lobbyEl = document.getElementById('online-lobby');
@@ -405,6 +409,17 @@ class MonopolyBoard {
     this.resultsEl = document.getElementById('results-area');
     this.gameAreaEl = document.getElementById('game-area');
     this.playerInfoEl = document.getElementById('player-info');
+    // Chip click -> detail popover. Delegated on the persistent #player-info
+    // (its children are fully rebuilt every renderPlayerInfo call). Reads
+    // this._chipDetail[idx], rebuilt every renderPlayerInfo alongside the
+    // chip strip itself — same one-render-stale freshness contract as
+    // this._lastG/renderTokens.
+    this.playerInfoEl.addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-chip]');
+      if (!chip) return;
+      const d = this._chipDetail && this._chipDetail[parseInt(chip.dataset.chip, 10)];
+      if (d) this.openUiModal(chipDetailHtml(d));
+    });
     this.boardEl = document.getElementById('board');
     // Atlas route-picker: one delegated listener on the persistent boardEl
     // (survives grid rebuilds). Reads this._routeTargets {nodeId:route} at click
@@ -425,6 +440,24 @@ class MonopolyBoard {
     this.stateModalBoxEl = document.getElementById('state-modal-box');
     this.uiModalEl = document.getElementById('ui-modal');
     this.uiModalBoxEl = document.getElementById('ui-modal-box');
+
+    // Right drawer (log/chat/manage) + its tab rail.
+    this.drawerEl = document.getElementById('drawer');
+    this.drawerTabsEl = document.getElementById('drawer-tabs');
+    this._drawerOpen = false;
+    this._drawerTab = null;
+    this.drawerTabsEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('.drawer-tabs__btn');
+      if (!btn) return;
+      const tab = btn.dataset.tab;
+      if (this._drawerOpen && this._drawerTab === tab) { this._closeDrawer(); return; }
+      this._openDrawer(tab);
+    });
+    // Escape, and a pointerdown on the board area, close the drawer. A
+    // SEPARATE listener from _ensureAnimator's document-level capture
+    // pointerdown (animation fastForward) — intentionally not overloaded.
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && this._drawerOpen) this._closeDrawer(); });
+    this.boardEl.addEventListener('pointerdown', () => { if (this._drawerOpen) this._closeDrawer(); });
 
     // Topbar buttons
     this.exitBtnEl = document.getElementById('btn-exit-game');
@@ -462,6 +495,32 @@ class MonopolyBoard {
     // Modal close on scrim click
     this.stateModalEl.addEventListener('click', (e) => { if (e.target === this.stateModalEl) { /* state-driven; ignore */ } });
     this.uiModalEl.addEventListener('click', (e) => { if (e.target === this.uiModalEl) this.closeUiModal(); });
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Right drawer (log / chat / manage) — always in the DOM (see createLayout);
+  // this only toggles [hidden] + which tab looks active + scrolls the target
+  // section into view.
+  // ─────────────────────────────────────────────────────────
+  _openDrawer(tab) {
+    if (!this.drawerEl) return;
+    this.drawerEl.hidden = false;
+    this._drawerOpen = true;
+    this._drawerTab = tab;
+    if (this.drawerTabsEl) {
+      this.drawerTabsEl.querySelectorAll('.drawer-tabs__btn').forEach(b => {
+        b.classList.toggle('drawer-tabs__btn--active', b.dataset.tab === tab);
+      });
+    }
+    const target = tab === 'log' ? this.messagesEl : tab === 'chat' ? this.chatPanelEl : this.manageEl;
+    if (target && target.scrollIntoView) target.scrollIntoView({ block: 'nearest' });
+  }
+
+  _closeDrawer() {
+    if (!this.drawerEl) return;
+    this.drawerEl.hidden = true;
+    this._drawerOpen = false;
+    if (this.drawerTabsEl) this.drawerTabsEl.querySelectorAll('.drawer-tabs__btn').forEach(b => b.classList.remove('drawer-tabs__btn--active'));
   }
 
   _setCrt(on) {
@@ -1736,10 +1795,14 @@ class MonopolyBoard {
   }
 
   // ─────────────────────────────────────────────────────────
-  // Left column — council player cards
+  // Top chip strip — one compact chip per player (game-chrome.js chipHtml).
+  // Full detail (title/passive/abilities/propchips/status badges) moves to
+  // the click-to-open popover (chipDetailHtml) — see the delegated listener
+  // wired on #player-info in createLayout.
   // ─────────────────────────────────────────────────────────
   renderPlayerInfo(G, ctx) {
     let html = '';
+    this._chipDetail = []; // popover cache, rebuilt every render (see click listener in createLayout)
     G.players.forEach((player, i) => {
       const isCurrent = ctx.currentPlayer === String(i);
       const char = player.character;
@@ -1748,6 +1811,7 @@ class MonopolyBoard {
 
       const isOphelia = char && char.passive.id === 'shadow';
       const hideMoney = isOphelia && !isCurrent;
+      const moneyHtml = money(hideMoney ? null : player.money, hideMoney);
 
       const props = player.properties.map(pid => {
         const sp = this.boardSpaces[pid];
@@ -1763,26 +1827,23 @@ class MonopolyBoard {
         if (player.regulatedProperty !== null && player.regulatedProperty !== undefined) abilities.push(`REG: ${this.boardSpaces[player.regulatedProperty].name}`);
       }
 
-      html += `
-        <div class="pcard ${isCurrent ? 'pcard--active' : ''} ${player.bankrupt ? 'pcard--bankrupt' : ''}" style="--pc:${color}">
-          <div class="pcard__head">
-            ${portraitHtml(char, 48, isCurrent)}
-            <div class="pcard__id">
-              <span class="pcard__name" style="color:${color}">${esc(name)}</span>
-              ${char ? `<span class="pcard__title">${esc(char.title)}</span>` : ''}
-            </div>
-            ${isCurrent ? '<span class="pcard__turn">TURN</span>' : ''}
-            ${player.bankrupt ? '<span class="pcard__bankrupt">OUT</span>' : ''}
-          </div>
-          <div class="pcard__money">${money(hideMoney ? null : player.money, hideMoney)}</div>
-          <div class="pcard__meta">
-            <span>${tokenHtml(color, char ? char.name[0] : i + 1, true)} ${player.properties.length} DEEDS</span>
-            ${char ? `<span class="pcard__passive">${esc(char.passive.name)}</span>` : ''}
-          </div>
-          ${player.inJail ? '<div class="pcard__jail">IN JAIL</div>' : ''}
-          ${abilities.length ? `<div class="pcard__abilities">${abilities.join(' · ')}</div>` : ''}
-          ${props ? `<div class="pcard__props">${props}</div>` : ''}
-        </div>`;
+      html += chipHtml({
+        idx: i, name, color,
+        portraitUrl: char ? char.portrait : null,
+        money: moneyHtml, hideMoney,
+        isCurrent, isBankrupt: !!player.bankrupt,
+        deeds: player.properties.length,
+      });
+
+      this._chipDetail[i] = {
+        name, title: char ? char.title : '', color,
+        portraitUrl: char ? char.portrait : null,
+        moneyHtml, deeds: player.properties.length,
+        passiveName: char ? char.passive.name : '',
+        passiveDesc: char ? char.passive.description : '',
+        abilities, propsHtml: props,
+        inJail: !!player.inJail, isBankrupt: !!player.bankrupt, isCurrent,
+      };
     });
     this.playerInfoEl.innerHTML = html;
   }
@@ -2583,6 +2644,7 @@ class MonopolyBoard {
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
     this.closeUiModal();
+    this._closeDrawer(); // drawer is position:fixed outside #game-area — must not linger over the menu
     this.stateModalEl.classList.remove('open');
     setVictoryConfig(null);
     this.setMap(this.availableMaps[0]); // active mod's default board (classic for Dominion)

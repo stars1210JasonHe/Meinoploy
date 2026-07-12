@@ -35,6 +35,11 @@ export function chipHtml(p) {
 // Content mirrors App.js renderPlayerInfo's tall pcard (name/title/money/deeds/
 // abilities/passive/propchips) verbatim; propsHtml arrives pre-built (App keeps
 // building it — needs boardSpaces access this module intentionally lacks).
+//
+// Task 2 review carry-forward: the `d` interface originally omitted inJail/
+// isBankrupt/isCurrent, silently dropping the live tall pcard's IN JAIL /
+// OUT / TURN status badges (App.js renderPlayerInfo ~1775-1783) from the
+// popover. Extended below with the SAME class names so status stays visible.
 export function chipDetailHtml(d) {
   const face = d.portraitUrl
     ? `<img class="chip-detail__face" src="${esc(d.portraitUrl)}" alt="">`
@@ -48,12 +53,15 @@ export function chipDetailHtml(d) {
           <span class="pcard__name" style="color:${esc(d.color)}">${esc(d.name)}</span>
           ${d.title ? `<span class="pcard__title">${esc(d.title)}</span>` : ''}
         </div>
+        ${d.isCurrent ? '<span class="pcard__turn">TURN</span>' : ''}
+        ${d.isBankrupt ? '<span class="pcard__bankrupt">OUT</span>' : ''}
       </div>
       <div class="pcard__money">${d.moneyHtml || ''}</div>
       <div class="pcard__meta">
         <span>${d.deeds} DEEDS</span>
         ${d.passiveName ? `<span class="pcard__passive" title="${esc(d.passiveDesc || '')}">${esc(d.passiveName)}</span>` : ''}
       </div>
+      ${d.inJail ? '<div class="pcard__jail">IN JAIL</div>' : ''}
       ${abilities.length ? `<div class="pcard__abilities">${abilities.map(esc).join(' · ')}</div>` : ''}
       ${d.propsHtml ? `<div class="pcard__props">${d.propsHtml}</div>` : ''}
     </div>`;
