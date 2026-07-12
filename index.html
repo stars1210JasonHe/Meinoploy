@@ -383,6 +383,15 @@
       box-shadow:var(--bevel), 3px 3px 0 rgba(0,0,0,.5); writing-mode:vertical-rl; padding:8px 4px; font-size:7px; }
     .drawer-tabs__btn:hover { filter:brightness(1.18); }
     .drawer-tabs__btn--active { background:var(--accent); color:#161009; border-color:#000; }
+    /* q2: unread dot on the LOG tab — square (not round) to fit the GB pixel
+       aesthetic; positioned via the button's own writing-mode:vertical-rl flow
+       rather than absolute placement so it doesn't need the button's box
+       measured. Toggled via [hidden] on .drawer-tabs__dot (see App.js
+       _updateLogUnread) + .drawer-tabs__btn--unread for the outline accent. */
+    .drawer-tabs__btn--unread { border-color:var(--accent2); }
+    .drawer-tabs__dot { display:inline-block; width:6px; height:6px; margin-top:6px;
+      background:var(--accent2); border:1px solid #000; }
+    .drawer-tabs__dot[hidden] { display:none; }
 
     /* right drawer — log / chat / manage. Section containers (#log/#ai-responses/
        #chat-panel/#manage) live inside permanently (see App.js createLayout);

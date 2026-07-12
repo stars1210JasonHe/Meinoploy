@@ -446,6 +446,7 @@ class MonopolyBoard {
     this.drawerTabsEl = document.getElementById('drawer-tabs');
     this._drawerOpen = false;
     this._drawerTab = null;
+    this._logSeenCount = 0; // q2: G.messages.length last seen while the LOG tab was open/visible
     this.drawerTabsEl.addEventListener('click', (e) => {
       const btn = e.target.closest('.drawer-tabs__btn');
       if (!btn) return;
@@ -512,6 +513,11 @@ class MonopolyBoard {
         b.classList.toggle('drawer-tabs__btn--active', b.dataset.tab === tab);
       });
     }
+    // q2: opening the LOG tab marks everything logged so far as "seen" —
+    // this._lastG is the freshest G (renderTokens caches it every update(),
+    // ahead of renderPlayerInfo/renderMessages); fall back to 0 pre-first-render.
+    if (tab === 'log') this._logSeenCount = this._lastG ? this._lastG.messages.length : 0;
+    this._updateLogUnread(); // clear the dot immediately, don't wait for the next state push
     const target = tab === 'log' ? this.messagesEl : tab === 'chat' ? this.chatPanelEl : this.manageEl;
     if (target && target.scrollIntoView) target.scrollIntoView({ block: 'nearest' });
   }
@@ -521,6 +527,26 @@ class MonopolyBoard {
     this.drawerEl.hidden = true;
     this._drawerOpen = false;
     if (this.drawerTabsEl) this.drawerTabsEl.querySelectorAll('.drawer-tabs__btn').forEach(b => b.classList.remove('drawer-tabs__btn--active'));
+  }
+
+  // q2: LOG tab unread dot. Compares G.messages.length against the count last
+  // seen while the LOG tab was open/visible (this._logSeenCount). While the
+  // tab is actively open (viewingLog), the seen-count is kept in sync on every
+  // render so new lines arriving while the user is looking never flag unread;
+  // the moment the drawer closes or the tab switches away, that count freezes
+  // and anything appended after it lights the dot on the next render.
+  _updateLogUnread(G) {
+    if (!this.drawerTabsEl) return;
+    const btn = this.drawerTabsEl.querySelector('.drawer-tabs__btn[data-tab="log"]');
+    if (!btn) return;
+    const g = G || this._lastG;
+    const count = g && g.messages ? g.messages.length : 0;
+    const viewingLog = this._drawerOpen && this._drawerTab === 'log';
+    if (viewingLog) this._logSeenCount = count;
+    const unread = !viewingLog && count > this._logSeenCount;
+    btn.classList.toggle('drawer-tabs__btn--unread', unread);
+    const dot = btn.querySelector('.drawer-tabs__dot');
+    if (dot) dot.hidden = !unread;
   }
 
   _setCrt(on) {
@@ -917,6 +943,7 @@ class MonopolyBoard {
     this.renderTurnbox(G, ctx);
     this.renderManage(G, ctx);
     this.renderMessages(G);
+    this._updateLogUnread(G);
     this._renderAIResponses();
     this.renderChatPanel(G, ctx);
     this.renderStateModal(G, ctx);
@@ -1873,6 +1900,7 @@ class MonopolyBoard {
         money: moneyHtml, hideMoney,
         isCurrent, isBankrupt: !!player.bankrupt,
         deeds: player.properties.length,
+        inJail: !!player.inJail,
       });
 
       this._chipDetail[i] = {
@@ -2691,6 +2719,7 @@ class MonopolyBoard {
     this._lastG = null;
     this._lastCtx = null;
     this._tokenRetried = false;
+    this._logSeenCount = 0; // q2: G.messages resets each match — a stale leftover count would suppress the next game's dot
     this.onlinePlayerID = null;
     this._pendingCharId = null;
     this._setupSel = null; // FULL reset: the merged SETUP screen returns to fresh defaults next entry

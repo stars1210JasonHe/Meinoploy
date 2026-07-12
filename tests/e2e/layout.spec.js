@@ -82,6 +82,13 @@ test.describe('Map-dominant layout (layout-rebuild)', () => {
 
     await selectCharacters(page);
 
+    // (a0) LOG tab unread dot (q2): character select's "All characters
+    // selected! Game begins!" logline (src/events.js formatEventMessage,
+    // character_selected/allSelected) already exists in G.messages at this
+    // point and the drawer has never been opened — deterministic proof the
+    // dot lights from real unseen state, not a hardcoded flag.
+    await expect(page.locator('.drawer-tabs__btn[data-tab="log"]')).toHaveClass(/drawer-tabs__btn--unread/);
+
     // (a) board dominance — #board occupies a majority-ish share of the viewport
     // width. The 594px/0.42 figure this comment used to cite was WRONG — it
     // encoded the Critical chip-column bug (final fix wave): #player-info was a
@@ -160,6 +167,9 @@ test.describe('Map-dominant layout (layout-rebuild)', () => {
     // (d) drawer: open the LOG tab -> .logline visible inside #drawer; Escape closes.
     await page.click('#drawer-tabs .drawer-tabs__btn[data-tab="log"]');
     await expect(page.locator('#drawer .logline').first()).toBeVisible();
+    // (d2) opening the LOG tab clears the unread dot (q2) — _openDrawer('log')
+    // snapshots this._logSeenCount to the current G.messages.length.
+    await expect(page.locator('.drawer-tabs__btn[data-tab="log"]')).not.toHaveClass(/drawer-tabs__btn--unread/);
     await page.keyboard.press('Escape');
     await expect(page.locator('#drawer')).toBeHidden();
 

@@ -31,6 +31,7 @@ export function chipHtml(p) {
       <span class="chip__deeds">${p.deeds}D</span>
       ${p.isCurrent ? '<span class="pcard__turn">TURN</span>' : ''}
       ${p.isBankrupt ? '<span class="pcard__bankrupt">OUT</span>' : ''}
+      ${p.inJail ? '<span class="pcard__jail">JAIL</span>' : ''}
     </div>`;
 }
 
@@ -84,7 +85,7 @@ export function chipDetailHtml(d) {
 export function drawerShellHtml() {
   return `
     <div class="drawer-tabs">
-      <button class="drawer-tabs__btn" data-tab="log">LOG</button>
+      <button class="drawer-tabs__btn" data-tab="log">LOG<span class="drawer-tabs__dot" hidden></span></button>
       <button class="drawer-tabs__btn" data-tab="chat">CHAT</button>
       <button class="drawer-tabs__btn" data-tab="manage">MANAGE</button>
     </div>

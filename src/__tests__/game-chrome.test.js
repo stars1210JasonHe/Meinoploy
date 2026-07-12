@@ -18,6 +18,11 @@ describe('chipHtml', () => {
     expect(chipHtml({ ...P, isCurrent: false })).not.toContain('pcard--active');
     expect(chipHtml({ ...P, isCurrent: false, isBankrupt: true })).toContain('pcard--bankrupt');
   });
+  test('inJail renders the pcard__jail badge; absent when false', () => {
+    expect(chipHtml({ ...P, inJail: true })).toContain('pcard__jail');
+    expect(chipHtml({ ...P, inJail: true })).toContain('JAIL');
+    expect(chipHtml({ ...P, inJail: false })).not.toContain('pcard__jail');
+  });
   test('portrait renders as pixelated img; null portrait falls back to letter block', () => {
     expect(chipHtml(P)).toContain('/portraits/h.png');
     const fb = chipHtml({ ...P, portraitUrl: null });
@@ -78,6 +83,12 @@ describe('drawerShellHtml', () => {
     ['data-tab="log"', 'data-tab="chat"', 'data-tab="manage"',
      'id="log"', 'id="chat-panel"', 'id="manage"', 'id="ai-responses"',
      'id="btn-exit-foot"'].forEach(s => expect(h).toContain(s));
+  });
+  // q2 (LOG tab unread dot): the dot element is static markup, starts hidden;
+  // App.js toggles [hidden] + the drawer-tabs__btn--unread class at runtime.
+  test('LOG tab button carries a hidden unread dot placeholder', () => {
+    const h = drawerShellHtml();
+    expect(h).toMatch(/data-tab="log">LOG<span class="drawer-tabs__dot" hidden><\/span>/);
   });
 });
 
