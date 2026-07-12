@@ -305,7 +305,7 @@ function countOwnedUtilities(G, ownerID) {
   }).length;
 }
 
-function calculateRent(G, space, diceTotal, visitor) {
+export function calculateRent(G, space, diceTotal, visitor) {
   const owner = G.ownership[space.id];
   if (owner === null || owner === undefined) return 0;
 

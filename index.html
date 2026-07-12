@@ -532,6 +532,40 @@
       border:3px solid var(--pc); box-shadow:var(--bevel), 3px 3px 0 rgba(0,0,0,.5); flex:none; }
     .chip-detail__face--letter { display:flex; align-items:center; justify-content:center;
       font-family:var(--disp); font-size:20px; background:var(--bg3); color:var(--tcol,var(--ink)); }
+    /* Task 3 (spec §2.5b): first-paragraph lore excerpt, shared by the chip AND
+       token popovers (same builder/cache — chip-detail__lore lives inside chipDetailHtml
+       regardless of which click opened it). Raw pass-through in the builder (App esc()'d
+       upstream — see chipDetailHtml's doc comment), styled as flowing body copy, not
+       pixel-display type, to stay readable at paragraph length. */
+    .chip-detail__lore { font-family:var(--body); font-size:13px; line-height:1.5; color:var(--ink-dim); }
+    .chip-detail__lore p { margin:0; }
+    .chip-detail__lore strong { color:var(--ink); }
+
+    /* Tile popover (openUiModal(tileDetailHtml(d))) — spec §2.5/§2.5b. Same GB-pixel
+       class family as .chip-detail above; .tile-detail__description/__flavor use --body
+       (flowing prose) while labels/stats stay --disp (pixel display type), mirroring the
+       chip popover's lore-vs-labels split. */
+    .tile-detail { padding:16px; display:flex; flex-direction:column; gap:9px; max-width:420px; }
+    .tile-detail__head { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+    .tile-detail__name { font-family:var(--disp); font-size:13px; color:var(--ink); }
+    .tile-detail__type { font-family:var(--disp); font-size:7px; color:var(--ink-dim); letter-spacing:1px; white-space:nowrap; }
+    .tile-detail__price { font-family:var(--disp); font-size:18px; color:var(--good); }
+    .tile-detail__owner { display:flex; align-items:center; gap:8px; }
+    .tile-detail__owner--unowned { font-family:var(--disp); font-size:8px; letter-spacing:1px; color:var(--ink-dim); }
+    .tile-detail__owner-face { width:32px; height:32px; border:2px solid var(--line); image-rendering:pixelated; object-fit:cover; flex:none; }
+    .tile-detail__owner-name { font-family:var(--disp); font-size:9px; }
+    .tile-detail__level { display:flex; gap:3px; }
+    .tile-detail__pip { width:10px; height:10px; background:var(--accent); border:1px solid #000; }
+    .tile-detail__mortgaged { font-family:var(--disp); font-size:7px; color:var(--bad); letter-spacing:1px; }
+    .tile-detail__rent { font-family:var(--disp); font-size:9px; color:var(--accent2); letter-spacing:.5px; }
+    .tile-detail__stats { display:flex; gap:12px; font-family:var(--disp); font-size:7px; color:var(--ink-dim); letter-spacing:.5px; }
+    .tile-detail__archetypes { display:flex; flex-wrap:wrap; gap:4px; }
+    .tile-detail__archetype { font-family:var(--disp); font-size:6px; letter-spacing:.5px; color:var(--accent2);
+      background:var(--bg3); border:1px solid var(--line); padding:3px 5px; }
+    .tile-detail__description { font-family:var(--body); font-size:13px; line-height:1.5; color:var(--ink); }
+    .tile-detail__flavor { font-family:var(--body); font-size:13px; line-height:1.5; color:var(--ink-dim); font-style:italic; }
+    .tile-detail__group { display:flex; flex-wrap:wrap; gap:3px; }
+
     .board__grid-wrap { display:contents; }
     .board__grid { display:grid; width:100%; height:100%; position:relative;
       background:#0c1f12; border:4px solid #07140a;
@@ -573,7 +607,11 @@
     #token-layer .token { position:absolute; transform:translate(-50%,-50%);
       width:32px; height:32px; border:2px solid var(--tcol); background-size:cover;
       background-position:center; image-rendering:pixelated; background-color:var(--bg2);
-      color:var(--tcol); font-size:12px; }
+      color:var(--tcol); font-size:12px;
+      /* Task 3 (spec §2.5b): tokens are clickable (player-detail popover), but the
+         #token-layer CONTAINER stays pointer-events:none (it must not steal clicks
+         meant for the tile grid underneath) — only the token itself opts back in. */
+      pointer-events:auto; cursor:pointer; }
     #token-layer .token--face { font-size:0; }
     #token-layer .token--turn { box-shadow:0 0 0 2px var(--tcol), 0 0 10px var(--tcol);
       animation: token-bob 0.9s ease-in-out infinite; }
@@ -642,7 +680,17 @@
     .gcity { position:absolute; top:0; left:0; font-family:var(--disp); font-size:7px; line-height:1;
       color:#fff; text-shadow:0 0 3px #000, 0 1px 2px #000; white-space:nowrap; letter-spacing:-.5px; pointer-events:none; }
     .gcity--route { color:var(--good); pointer-events:auto; cursor:pointer; padding:3px 5px;
-      background:rgba(8,12,28,.7); outline:2px dashed var(--good); animation:routePulse 1s infinite; }
+      background:rgba(8,12,28,.7); outline:2px dashed var(--good); animation:routePulse 1s infinite;
+      /* Task 3: route-commit ABSOLUTELY outranks the token popover (spec: "keeps ABSOLUTE
+         priority... before any popover logic"). A player's gtoken can visually sit on/near
+         their OWN current city while it is simultaneously a route-pick fork (e.g. Terra
+         Titans: the active player's token IS at the fork city) — .gtoken is later in DOM
+         order (tokens render after city labels in _updateGlobeOverlay) so without an
+         explicit z-index it would win the browser's hit-test and silently eat the route
+         click (caught live: Playwright's actionability check refused to click, reporting
+         ".gtoken intercepts pointer events" — a real user would have the same click swallowed).
+         z-index wins regardless of DOM order. */
+      z-index:2; }
     /* layout-rebuild Task 3: portrait face at 28px, mirroring #token-layer .token's
        treatment. Positioning mechanism UNCHANGED — _globeTick() (App.js) writes
        style.transform = 'translate(-50%,-50%) translate(x,y)' every frame from
@@ -653,7 +701,10 @@
       border:2px solid var(--tcol); background-size:cover; background-position:center;
       image-rendering:pixelated; background-color:var(--bg2); color:var(--tcol);
       font-family:var(--disp); font-size:11px;
-      display:flex; align-items:center; justify-content:center; box-shadow:0 2px 5px rgba(0,0,0,.6); pointer-events:none; }
+      display:flex; align-items:center; justify-content:center; box-shadow:0 2px 5px rgba(0,0,0,.6);
+      /* Task 3 (spec §2.5b): clickable, same opt-back-in as .gcity--route above —
+         the .globe-overlay container stays pointer-events:none. */
+      pointer-events:auto; cursor:pointer; }
     .gtoken--face { font-size:0; }
 
     .board__center { display:flex; flex-direction:column; align-items:center; justify-content:space-between;

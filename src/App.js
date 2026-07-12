@@ -1,6 +1,6 @@
 import { Client } from 'boardgame.io/client';
 import { SocketIO } from 'boardgame.io/multiplayer';
-import { Monopoly, setActiveMap, setActiveMod, setVictoryConfig } from './Game';
+import { Monopoly, setActiveMap, setActiveMod, setVictoryConfig, calculateRent } from './Game';
 import { PLAYER_COLORS, BUILDING_ICONS, BUILDING_NAMES, UPGRADE_COST_MULTIPLIERS, RENT_MULTIPLIERS, SEASONS } from './constants';
 // RULES is the live engine singleton (mutated in place by setActiveMod) — NOT the Dominion
 // barrel. Mod CONTENT (characters/lore/maps/keyart/atlas) is read off `this.activeMod` (the
@@ -15,7 +15,7 @@ import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
 import { isDuelCooldownBlocked } from './events';
 import { createAnimator, DICE_TUMBLE_MS } from './anim';
 import { createAudio } from './audio';
-import { chipHtml, chipDetailHtml, drawerShellHtml, tokenVisual } from './game-chrome';
+import { chipHtml, chipDetailHtml, tileDetailHtml, drawerShellHtml, tokenVisual } from './game-chrome';
 
 // Client-side mod registry — static bundle imports (Parcel v1 forces all imports static, so
 // every registered mod is bundled at build; only WHICH is active is chosen at runtime). This
@@ -415,23 +415,51 @@ class MonopolyBoard {
     // (its children are fully rebuilt every renderPlayerInfo call). Reads
     // this._chipDetail[idx], rebuilt every renderPlayerInfo alongside the
     // chip strip itself — same one-render-stale freshness contract as
-    // this._lastG/renderTokens.
+    // this._lastG/renderTokens. Shared with board/globe token clicks (Task 3)
+    // via _openPlayerDetail — see that method's doc comment.
     this.playerInfoEl.addEventListener('click', (e) => {
       const chip = e.target.closest('[data-chip]');
       if (!chip) return;
-      const d = this._chipDetail && this._chipDetail[parseInt(chip.dataset.chip, 10)];
-      if (d) this.openUiModal(chipDetailHtml(d));
+      this._openPlayerDetail(chip.dataset.chip);
     });
     this.boardEl = document.getElementById('board');
-    // Atlas route-picker: one delegated listener on the persistent boardEl
-    // (survives grid rebuilds). Reads this._routeTargets {nodeId:route} at click
-    // time — set by _resolveAtlasRoute when a fork is awaiting a choice.
+    // Delegated on the persistent boardEl (survives grid rebuilds). Three
+    // things share this one listener, in strict priority order (Task 3):
+    //   1. A board TOKEN click (.token[data-player], #token-layer) opens the
+    //      player-detail popover (same builder as the chip click above) and
+    //      stops here — it must never also open the tile popover underneath
+    //      (structurally can't anyway: #token-layer is a SIBLING of the tile
+    //      grid, not a descendant, so `.closest('.tile[data-space]')` from a
+    //      token never finds a tile ancestor — stopPropagation is belt-and-
+    //      braces per spec §2.5b, not load-bearing here).
+    //   2. Atlas route-picker: reads this._routeTargets {nodeId:route} at
+    //      click time (set by _resolveAtlasRoute when a fork is awaiting a
+    //      choice) and ABSOLUTELY takes over ANY tile click while a route
+    //      pick is pending — target hits commit the move, misses no-op, but
+    //      either way the tile-detail popover never opens mid-pick (keeps
+    //      the existing priority/behavior byte-for-byte, just early-returns
+    //      after instead of implicitly falling through to nothing).
+    //   3. Otherwise (no pending route pick): open the tile-detail popover
+    //      (spec §2.5) via the live client state (G/ctx), not the stale
+    //      closure args this listener was created with.
     this.boardEl.addEventListener('click', (e) => {
-      if (!this._routeTargets) return;
+      const tokenEl = e.target.closest('.token[data-player]');
+      if (tokenEl) {
+        e.stopPropagation();
+        this._openPlayerDetail(tokenEl.dataset.player);
+        return;
+      }
       const tile = e.target.closest('.tile[data-space]');
       if (!tile) return;
-      const route = this._routeTargets[tile.dataset.space];
-      if (route) { this._routeTargets = null; this._syncRoutePickChrome(); this.client.moves.commitRoute(route); }
+      if (this._routeTargets) {
+        const route = this._routeTargets[tile.dataset.space];
+        if (route) { this._routeTargets = null; this._syncRoutePickChrome(); this.client.moves.commitRoute(route); }
+        return;
+      }
+      const state = this.client && this.client.getState();
+      if (!state) return;
+      const d = this._tileDetailData(parseInt(tile.dataset.space, 10), state.G, state.ctx);
+      if (d) this.openUiModal(tileDetailHtml(d));
     });
     this.turnboxEl = document.getElementById('turnbox');
     // Chrome-band sizing (Task 2 review fix — see _syncChromeBands below and
@@ -465,7 +493,17 @@ class MonopolyBoard {
     // Escape, and a pointerdown on the board area, close the drawer. A
     // SEPARATE listener from _ensureAnimator's document-level capture
     // pointerdown (animation fastForward) — intentionally not overloaded.
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && this._drawerOpen) this._closeDrawer(); });
+    // Modal-first ordering (Task 3, resolves the earlier y10/Escape-order
+    // minor for BOTH the chip and tile popovers): if the ui-modal is open,
+    // Escape closes THAT and stops — the drawer only gets a look on a
+    // separate, later Escape press with no modal open. One consolidated
+    // handler (not two independent listeners) so a single keypress can't
+    // close both at once.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (this.uiModalEl && this.uiModalEl.classList.contains('open')) { this.closeUiModal(); return; }
+      if (this._drawerOpen) this._closeDrawer();
+    });
     this.boardEl.addEventListener('pointerdown', () => { if (this._drawerOpen) this._closeDrawer(); });
 
     // Topbar buttons
@@ -1423,6 +1461,132 @@ class MonopolyBoard {
     return `<div class="${cls}" data-space="${spaceId}"${style}>${photo}${bar}<div class="tile__inner">${glyph}<span class="tile__name">${esc(space.name)}</span>${price}</div>${owned}${flag}${mort}${pot}</div>`;
   }
 
+  // Human-readable type label for the tile popover header (spec §2.5). Covers
+  // every space.type value that either classic boards (mods/dominion/board.js)
+  // or atlas worlds (world-loader.js ROLE_TO_TYPE) can produce.
+  _tileTypeLabel(space) {
+    switch (space.type) {
+      case 'go': return 'GO';
+      case 'property': return 'PROPERTY';
+      case 'railroad': return 'RAILROAD';
+      case 'utility': return 'UTILITY';
+      case 'tax': return 'TAX';
+      case 'chance': return 'CHANCE';
+      case 'community': return 'COMMUNITY CHEST';
+      case 'jail': return 'JAIL';
+      case 'goToJail': return 'GO TO JAIL';
+      case 'parking': return 'FREE PARKING';
+      default: return String(space.type || '').toUpperCase();
+    }
+  }
+
+  // Flavor line for non-property corners/specials (spec §2.5: "still show a
+  // popover — name + type + flavor line"). Static, engine-flavored text — no
+  // per-map authoring surface for this today (classic board.js has no
+  // description field on these spaces; atlas worlds don't expand these roles
+  // with one either). Tax reuses `space.rent`, which board.js/world-loader.js
+  // both (over)load as the tax AMOUNT for type:'tax' spaces (not a rent value —
+  // same field, different meaning, pre-existing convention, not introduced here).
+  _tileFlavorText(space) {
+    switch (space.type) {
+      case 'go': return 'Collect on every pass around the board.';
+      case 'jail': return 'Just visiting — or serving time.';
+      case 'goToJail': return 'Go directly to jail. Do not pass GO.';
+      case 'chance': return 'Draw a Chance card.';
+      case 'community': return 'Draw a Community Chest card.';
+      case 'tax': return `Pay $${space.rent || 0} to the treasury.`;
+      case 'parking': return RULES.core.freeParkingPot ? 'Free Parking — collects the accumulated pot.' : 'Free Parking. Take a breather.';
+      default: return null;
+    }
+  }
+
+  // Sibling chips for the tile popover's group/place section (spec §2.5:
+  // "group/place siblings — other spaces of the same color group / placeId").
+  // Reuses groupKeyOf (color-first for classic, placeId-first for atlas — same
+  // rule Game.js's own groupKeyOf uses) and the SAME .propchip markup/CSS
+  // already shipped for renderPlayerInfo's per-player property chips (raw
+  // pass-through into tileDetailHtml's groupHtml slot — see that builder's
+  // doc comment). '' (not just no siblings) when the space has no group key
+  // at all (classic railroads/utilities: color is null, no group).
+  _tileGroupHtml(space, G) {
+    const gk = groupKeyOf(space);
+    if (!gk) return '';
+    const siblings = this.boardSpaces.filter(sp => sp && sp.id !== space.id && groupKeyOf(sp) === gk);
+    if (!siblings.length) return '';
+    return siblings.map(sp => {
+      const mort = G.mortgaged[sp.id] || false;
+      const barColor = sp.color || (sp.placeId ? placeIdColor(sp.placeId) : 'var(--line)');
+      return `<span class="propchip ${mort ? 'propchip--mortgaged' : ''}" style="border-left-color:${barColor}">${esc(sp.name)}</span>`;
+    }).join('');
+  }
+
+  // Assemble the `d` object for tileDetailHtml (spec §2.5) from a spaceId +
+  // live G/ctx. Mirrors _tileHtml's owner/level/mortgaged derivation (same
+  // G.ownership/G.buildings/G.mortgaged reads, same _clientChar portrait
+  // resolution) rather than reimplementing it, per task-1-report.md's note.
+  _tileDetailData(spaceId, G, ctx) {
+    const space = this.boardSpaces[spaceId];
+    if (!space) return null;
+
+    const owner = G.ownership[spaceId];
+    const hasOwner = owner !== null && owner !== undefined;
+    const ownerColor = hasOwner ? this._playerColor(G, owner) : '';
+    let ownerName = null, ownerPortraitUrl = null;
+    if (hasOwner) {
+      const ownerPlayer = G.players[Number(owner)];
+      const ochar = ownerPlayer && ownerPlayer.character;
+      const cchar = ochar && this._clientChar(ochar);
+      ownerName = ochar ? ochar.name : `Player ${Number(owner) + 1}`;
+      ownerPortraitUrl = (cchar && cchar.portrait) || null;
+    }
+
+    // price:0 on non-property spaces (classic board.js) vs undefined on LIVE
+    // atlas maps (world-loader.js only sets .price for property/transit slots)
+    // both normalize to null here — the `price > 0` precedent from _tileHtml
+    // above (spec §2.5's price-normalization note).
+    const price = space.price > 0 ? space.price : null;
+
+    // Atlas place extras (spec §2.5): this.mapData.atlasPlaces is the RAW
+    // world places array (mapJson.places, set verbatim in setMap) already
+    // scoped to the CURRENTLY ACTIVE map — a more direct route to the same
+    // data the brief's "activeMod.worlds place lookup" describes, without
+    // re-searching every world the mod ships (avoids ambiguity if two worlds
+    // in one mod ever reused a placeId). null for classic boards (no
+    // placeId), which gracefully omits every field below (each independently
+    // gated by tileDetailHtml).
+    const place = (space.placeId && this.mapData.atlasPlaces)
+      ? this.mapData.atlasPlaces.find(p => p.id === space.placeId) : null;
+
+    const name = place ? place.realName : space.name;
+
+    let rentText = null;
+    if (hasOwner) {
+      if (space.type === 'utility') {
+        rentText = 'varies by dice'; // calculateRent's utility branch multiplies by diceTotal — a nominal total here would mislead
+      } else {
+        const visitor = G.players[parseInt(ctx.currentPlayer, 10)];
+        rentText = `$${calculateRent(G, space, 0, visitor)}`; // railroad/property branches ignore diceTotal — 0 is inert
+      }
+    }
+
+    return {
+      name,
+      typeLabel: this._tileTypeLabel(space),
+      price,
+      ownerName,
+      ownerColor,
+      ownerPortraitUrl,
+      level: G.buildings[spaceId] || 0,
+      mortgaged: G.mortgaged[spaceId] || false,
+      rentText,
+      groupHtml: this._tileGroupHtml(space, G),
+      placeStats: place && place.data ? { population: place.data.population, gdp: place.data.gdp, fame: place.data.fame } : null,
+      archetypes: place && place.archetypes && place.archetypes.length ? place.archetypes : null,
+      description: (place && place.description) || null,
+      flavorText: this._tileFlavorText(space),
+    };
+  }
+
   _playerColor(G, id) {
     const p = G.players[parseInt(id)];
     return p && p.character ? p.character.color : PLAYER_COLORS[parseInt(id)];
@@ -1557,10 +1721,17 @@ class MonopolyBoard {
         .pointsData(d.points).pointLat('lat').pointLng('lng')
         .pointColor(() => '#ff5c5c').pointAltitude(0.02).pointRadius(0.9)
         // Arcs are dim by default; the walkable travel route lights up + flows when the
-        // player rolls into a fork (see _globeSetRouteArcs). 'hot' is set per-arc.
+        // player rolls into a fork (see _globeSetRouteArcs). 'hot' is set per-arc. The base
+        // (non-hot) network is drawn from the FIRST render — hot only ever tightens the
+        // filter, it never gates initial visibility (see _globeSetRouteArcs: arcs start
+        // hot:false in _renderGlobeBoard and stay that way until a genuine fork). Task 3
+        // (spec §2.6) bumped the base opacity/stroke — 0.33 alpha + 0.8px read as
+        // near-invisible against the globe texture at rest (owner's original complaint,
+        // confirmed live at 1400x900 before this change); still clearly dimmer than hot
+        // (2.3px, near-solid gold) so the fork highlight keeps its contrast.
         .arcsData(d.arcs)
-        .arcColor(a => a.hot ? ['#fff3c0', '#ffd24a'] : 'rgba(233,178,60,0.33)')
-        .arcStroke(a => a.hot ? 2.3 : 0.8)
+        .arcColor(a => a.hot ? ['#fff3c0', '#ffd24a'] : 'rgba(233,178,60,0.5)')
+        .arcStroke(a => a.hot ? 2.3 : 1.2)
         .arcAltitude(a => a.hot ? 0.3 : 0.2)
         .arcDashLength(a => a.hot ? 0.5 : 1)
         .arcDashGap(a => a.hot ? 0.22 : 0)
@@ -1606,8 +1777,19 @@ class MonopolyBoard {
       ov = document.createElement('div');
       ov.className = 'globe-overlay';
       this._gridWrap.appendChild(ov);
-      // Delegated click: committing a chosen branch at a fork (route picker on the globe).
+      // Delegated click: two things share this one listener (Task 3, spec §2.5b/§2.6).
+      //   1. A globe TOKEN click (.gtoken[data-player]) opens the same player-detail
+      //      popover as the chip/flat-token click (_openPlayerDetail) — checked first,
+      //      stopPropagation + return (mirrors the flat-board token listener).
+      //   2. Otherwise: committing a chosen branch at a fork (route picker on the globe) —
+      //      UNCHANGED from before this task.
       ov.addEventListener('click', (e) => {
+        const tok = e.target.closest('.gtoken[data-player]');
+        if (tok) {
+          e.stopPropagation();
+          this._openPlayerDetail(tok.dataset.player);
+          return;
+        }
         const m = e.target.closest('.gcity[data-route]');
         if (!m || !this._globeRouteTargets) return;
         const route = this._globeRouteTargets[m.dataset.place];
@@ -2052,6 +2234,36 @@ class MonopolyBoard {
     this._tokenResizeObs.observe(this.boardEl);
   }
 
+  // Shared player-detail popover opener (spec §2.5b) — the chip-click listener
+  // AND both token click listeners (#token-layer + the globe overlay) all
+  // funnel through here. Reads the SAME this._chipDetail[idx] cache rebuilt
+  // every renderPlayerInfo (one-render-stale freshness contract, same as
+  // this._lastG/renderTokens) — no separate d-assembly for tokens, per brief.
+  _openPlayerDetail(playerId) {
+    const idx = parseInt(playerId, 10);
+    const d = this._chipDetail && this._chipDetail[idx];
+    if (d) this.openUiModal(chipDetailHtml(d));
+  }
+
+  // First-paragraph lore excerpt for the chip/token popover (spec §2.5b).
+  // Every mod ships lore (activeMod.getLoreById); `lore.background` is the
+  // biography field common to every mod's lore data (dominion/terra-titans/
+  // ancient-empires/sanguo-excerpt all use the same shape — verified). Split
+  // on the first blank line (paragraph break) rather than truncating by
+  // length, so the excerpt never cuts mid-sentence. esc()'d BEFORE the
+  // ** -> <strong> markdown pass (asterisks survive escaping unchanged), same
+  // order as the full lore modal's renderLoreText, minus its multi-paragraph/
+  // blockquote handling — this is deliberately simpler (one paragraph only).
+  _loreParagraphHtml(charId) {
+    if (!charId || !this.activeMod || !this.activeMod.getLoreById) return null;
+    const lore = this.activeMod.getLoreById(charId);
+    if (!lore || !lore.background) return null;
+    const first = String(lore.background).split('\n\n')[0].trim();
+    if (!first) return null;
+    const html = esc(first).replace(/\n/g, '<br/>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    return `<p>${html}</p>`;
+  }
+
   // ─────────────────────────────────────────────────────────
   // Top chip strip — one compact chip per player (game-chrome.js chipHtml).
   // Full detail (title/passive/abilities/propchips/status badges) moves to
@@ -2103,6 +2315,9 @@ class MonopolyBoard {
         passiveDesc: char ? char.passive.description : '',
         abilities, propsHtml: props,
         inJail: !!player.inJail, isBankrupt: !!player.bankrupt, isCurrent,
+        // Task 3 (spec §2.5b): first-paragraph lore excerpt, shown in both the
+        // chip-click and token-click popovers (same cache, same builder).
+        loreHtml: char ? this._loreParagraphHtml(char.id) : null,
       };
     });
     this.playerInfoEl.innerHTML = html;
