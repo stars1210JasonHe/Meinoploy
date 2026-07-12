@@ -1,4 +1,4 @@
-import { chipHtml, chipDetailHtml, drawerShellHtml, tokenVisual } from '../game-chrome';
+import { chipHtml, chipDetailHtml, drawerShellHtml, tokenVisual, tileDetailHtml } from '../game-chrome';
 
 const P = { idx: 0, name: 'Hammurabi', title: 'The Lawgiver', color: '#e8a33d',
   money: '$3,085', portraitUrl: '/portraits/h.png', isCurrent: true, isBankrupt: false,
@@ -122,5 +122,104 @@ describe('chipDetailHtml', () => {
     expect(h).not.toContain('pcard__jail');
     expect(h).not.toContain('pcard__bankrupt');
     expect(h).not.toContain('pcard__turn');
+  });
+
+  // Task 1: optional bottom lore section — raw pass-through (App escapes/truncates
+  // upstream), mirrors propsHtml's raw-passthrough documentation style.
+  test('loreHtml renders as a bottom section when present', () => {
+    const base = { name: 'H', title: 'T', color: '#fff', portraitUrl: null, moneyHtml: '$1', deeds: 2 };
+    const h = chipDetailHtml({ ...base, loreHtml: '<p class="lore">Once a lawgiver...</p>' });
+    expect(h).toContain('chip-detail__lore');
+    expect(h).toContain('<p class="lore">Once a lawgiver...</p>');
+  });
+
+  test('loreHtml absent when not provided', () => {
+    const base = { name: 'H', title: 'T', color: '#fff', portraitUrl: null, moneyHtml: '$1', deeds: 2 };
+    const h = chipDetailHtml(base);
+    expect(h).not.toContain('chip-detail__lore');
+  });
+});
+
+describe('tileDetailHtml', () => {
+  const OWNED = {
+    name: 'Stuttgart Fracture', typeLabel: 'PROPERTY', price: 240,
+    ownerName: 'Hammurabi', ownerColor: '#e8a33d', ownerPortraitUrl: '/portraits/h.png',
+    level: 2, mortgaged: false, rentText: '$120',
+    groupHtml: '<span class="propchip">Sibling A</span>',
+    placeStats: { population: '600K', gdp: '$40B', fame: 82 },
+    archetypes: ['industrial', 'gritty'],
+    description: 'A fractured industrial district.',
+    flavorText: null,
+  };
+
+  test('root class is tile-detail (E2E contract)', () => {
+    const h = tileDetailHtml(OWNED);
+    expect(h).toMatch(/class="tile-detail[\s"]/);
+  });
+
+  test('full-owned case: name/price/owner portrait/level pips/rent all render', () => {
+    const h = tileDetailHtml(OWNED);
+    expect(h).toContain('Stuttgart Fracture');
+    expect(h).toContain('PROPERTY');
+    expect(h).toContain('$240');
+    expect(h).toContain('<img');
+    expect(h).toContain('/portraits/h.png');
+    expect(h).toContain('Hammurabi');
+    expect(h).toContain('#e8a33d');
+    expect(h).toContain('tile-detail__pip');
+    // level 2 -> exactly 2 pip spans
+    expect((h.match(/tile-detail__pip/g) || []).length).toBe(2);
+    expect(h).toContain('$120');
+    expect(h).not.toContain('UNOWNED');
+  });
+
+  test('unowned case: UNOWNED state, no owner portrait img rendered', () => {
+    const h = tileDetailHtml({ ...OWNED, ownerName: null, ownerPortraitUrl: null, level: 0 });
+    expect(h).toContain('UNOWNED');
+    expect(h).not.toContain('<img');
+  });
+
+  test('mortgaged badge renders when mortgaged, absent when not', () => {
+    const h = tileDetailHtml({ ...OWNED, mortgaged: true });
+    expect(h).toContain('tile-detail__mortgaged');
+    const h2 = tileDetailHtml({ ...OWNED, mortgaged: false });
+    expect(h2).not.toContain('tile-detail__mortgaged');
+  });
+
+  test('null-section absence: placeStats/archetypes/description/flavorText/groupHtml/rentText fully absent when null', () => {
+    const h = tileDetailHtml({ ...OWNED, placeStats: null, archetypes: null, description: null,
+      flavorText: null, groupHtml: '', rentText: null });
+    expect(h).not.toContain('tile-detail__stats');
+    expect(h).not.toContain('tile-detail__archetypes');
+    expect(h).not.toContain('tile-detail__description');
+    expect(h).not.toContain('tile-detail__flavor');
+    expect(h).not.toContain('tile-detail__group');
+    expect(h).not.toContain('tile-detail__rent');
+  });
+
+  test('flavor-only corner variant: no price/owner section, flavorText renders', () => {
+    const h = tileDetailHtml({
+      name: 'Go', typeLabel: 'CORNER', price: null, ownerName: null, ownerColor: null,
+      ownerPortraitUrl: null, level: 0, mortgaged: false, rentText: null, groupHtml: '',
+      placeStats: null, archetypes: null, description: null, flavorText: 'Collect on the way past.',
+    });
+    expect(h).toContain('Collect on the way past.');
+    expect(h).not.toContain('tile-detail__price');
+    expect(h).not.toContain('tile-detail__owner');
+    expect(h).not.toContain('UNOWNED');
+    expect(h).not.toContain('$');
+  });
+
+  test('escapes hostile name + description into entities', () => {
+    const h = tileDetailHtml({ ...OWNED, name: '<script>x</script>', description: '<img src=x onerror=alert(1)>' });
+    expect(h).not.toContain('<script>x</script>');
+    expect(h).toContain('&lt;script&gt;x&lt;/script&gt;');
+    expect(h).not.toContain('<img src=x onerror=alert(1)>');
+    expect(h).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  });
+
+  test('groupHtml is a raw pass-through (not escaped)', () => {
+    const h = tileDetailHtml(OWNED);
+    expect(h).toContain('<span class="propchip">Sibling A</span>');
   });
 });

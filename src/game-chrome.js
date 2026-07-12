@@ -68,6 +68,89 @@ export function chipDetailHtml(d) {
       ${d.inJail ? '<div class="pcard__jail">IN JAIL</div>' : ''}
       ${abilities.length ? `<div class="pcard__abilities">${abilities.map(esc).join(' · ')}</div>` : ''}
       ${d.propsHtml ? `<div class="pcard__props">${d.propsHtml}</div>` : ''}
+      ${d.loreHtml ? `<div class="chip-detail__lore">${d.loreHtml}</div>` : ''}
+    </div>`;
+}
+
+// Tile detail popover — opened when a board tile is clicked. Same GB-pixel
+// class-family style as chipDetailHtml, rooted at .tile-detail (E2E asserts
+// this class is present). `groupHtml` is the ONLY raw pass-through field
+// (App pre-builds sibling-in-color-group chips, mirroring propsHtml above);
+// every other user-influenced string (name/typeLabel/ownerName/description/
+// flavorText/archetypes entries/rentText) is esc()'d here, even rentText —
+// it arrives PRE-FORMATTED by App from a number ("$120"/"varies by dice"),
+// but escaping it is cheap and keeps this builder's discipline uniform.
+//
+// `price` gates the whole "ownable" block (price line, owner section, level
+// pips, mortgaged badge): non-property corner spaces (GO, jail, etc.) pass
+// price: null and rely on flavorText alone, per spec. placeStats/archetypes/
+// description/flavorText/groupHtml/rentText are each independently optional —
+// null/'' means the section is fully absent from the html, not just empty.
+export function tileDetailHtml(d) {
+  const isOwnable = d.price != null;
+
+  const priceHtml = isOwnable ? `<div class="tile-detail__price">$${esc(d.price)}</div>` : '';
+
+  let ownerHtml = '';
+  if (isOwnable) {
+    if (d.ownerName) {
+      const face = d.ownerPortraitUrl
+        ? `<img class="tile-detail__owner-face" src="${esc(d.ownerPortraitUrl)}" alt="">`
+        : '';
+      ownerHtml = `<div class="tile-detail__owner">${face}<span class="tile-detail__owner-name" style="color:${esc(d.ownerColor)}">${esc(d.ownerName)}</span></div>`;
+    } else {
+      ownerHtml = '<div class="tile-detail__owner tile-detail__owner--unowned">UNOWNED</div>';
+    }
+  }
+
+  let pipsHtml = '';
+  if (isOwnable) {
+    const level = d.level || 0;
+    let pips = '';
+    for (let i = 0; i < level; i++) pips += '<span class="tile-detail__pip"></span>';
+    pipsHtml = `<div class="tile-detail__level">${pips}</div>`;
+  }
+
+  const mortgagedHtml = (isOwnable && d.mortgaged) ? '<div class="tile-detail__mortgaged">MORTGAGED</div>' : '';
+
+  const rentHtml = d.rentText ? `<div class="tile-detail__rent">RENT ${esc(d.rentText)}</div>` : '';
+
+  const stats = d.placeStats;
+  const statsHtml = stats
+    ? `<div class="tile-detail__stats">
+        <span class="tile-detail__stat">POP ${esc(stats.population)}</span>
+        <span class="tile-detail__stat">GDP ${esc(stats.gdp)}</span>
+        <span class="tile-detail__stat">FAME ${esc(stats.fame)}</span>
+      </div>`
+    : '';
+
+  const archetypesHtml = (d.archetypes && d.archetypes.length)
+    ? `<div class="tile-detail__archetypes">${d.archetypes.map(a => `<span class="tile-detail__archetype">${esc(a)}</span>`).join('')}</div>`
+    : '';
+
+  const descriptionHtml = d.description ? `<div class="tile-detail__description">${esc(d.description)}</div>` : '';
+
+  const flavorHtml = d.flavorText ? `<div class="tile-detail__flavor">${esc(d.flavorText)}</div>` : '';
+
+  // groupHtml: RAW pass-through, same discipline as propsHtml in chipDetailHtml.
+  const groupHtml = d.groupHtml ? `<div class="tile-detail__group">${d.groupHtml}</div>` : '';
+
+  return `
+    <div class="tile-detail">
+      <div class="tile-detail__head">
+        <span class="tile-detail__name">${esc(d.name)}</span>
+        <span class="tile-detail__type">${esc(d.typeLabel)}</span>
+      </div>
+      ${priceHtml}
+      ${ownerHtml}
+      ${pipsHtml}
+      ${mortgagedHtml}
+      ${rentHtml}
+      ${statsHtml}
+      ${archetypesHtml}
+      ${descriptionHtml}
+      ${flavorHtml}
+      ${groupHtml}
     </div>`;
 }
 
