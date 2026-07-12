@@ -210,8 +210,12 @@ test.describe('Duel mechanism (Terra Titans, duel.enabled=true)', () => {
     // itself is visible, not who won: the "Duel! ... — X wins!" log line
     // (events.js formatEventMessage) and the static two-roll result strip
     // (App.js _duelResultStripHtml) both surface unconditionally either way.
-    await expect(page.locator('.logline', { hasText: 'Duel!' }).first()).toBeVisible();
+    // layout-rebuild: log lives in the drawer; opening it preserves the player-can-see guarantee.
+    await page.click('#drawer-tabs .drawer-tabs__btn[data-tab="log"]');
+    await expect(page.locator('#drawer .logline', { hasText: 'Duel!' }).first()).toBeVisible();
     await expect(page.locator('.turnbox__slot', { hasText: 'WINS' }).first()).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#drawer')).toBeHidden();
 
     expect(pageErrors).toEqual([]);
   });
