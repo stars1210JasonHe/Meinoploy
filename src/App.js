@@ -313,6 +313,15 @@ class MonopolyBoard {
         clearTimeout(this._diceSettleTimer);
         ov.style.display = 'none';
       },
+      // Fix 2 (enqueue-claim ownership): fires the moment anim.js QUEUES a hop
+      // job (before the dice window even starts playing), carrying the actor's
+      // ORIGIN position. Places the token there immediately and holds it — this
+      // is what keeps renderTokens (guarded by animator.isAnimating) from
+      // painting the token at its G-state DESTINATION for the whole ~1.1s dice
+      // window in front of this job. Same place() helper hopTo uses below, so
+      // reapply() re-asserts whichever placement (queued-origin or in-flight
+      // tile) is current if a full re-render recreates the token node.
+      hopQueued: (pid, fromPosId) => { this._animPlacement[pid] = fromPosId; place(pid, fromPosId); },
       hopTo: (pid, posId, i, n) => { this._animPlacement[pid] = posId; place(pid, posId); },
       hopDone: (pid) => {
         delete this._animPlacement[pid];
@@ -2634,12 +2643,19 @@ class MonopolyBoard {
     this.client = Client({ game: LoadedGame, numPlayers: saveData.numPlayers, debug: false });
     this.client.start();
     // Clear any in-flight dice/hop from the PRIOR client before it's replaced, AND seed the
-    // cursor to the save's own eventSeq (matching the `eventSeq: savedG.eventSeq || 0` fallback
-    // two lines up) rather than resetting to -1. A plain reset() would make every event already
-    // baked into the loaded G.events (up to the 200-event window) look "fresh" on the very next
-    // onState() — replaying the save's whole recent history as a burst of dice/hop animation
-    // instead of just resuming play from where the save was taken.
-    if (this.animator) this.animator.reset(savedG.eventSeq || 0);
+    // cursor to the save's own LAST-BAKED seq (matching the `eventSeq: savedG.eventSeq || 0`
+    // fallback two lines up) rather than resetting to -1. A plain reset() would make every event
+    // already baked into the loaded G.events (up to the 200-event window) look "fresh" on the
+    // very next onState() — replaying the save's whole recent history as a burst of dice/hop
+    // animation instead of just resuming play from where the save was taken.
+    // `- 1`: events.js's logEvent assigns `seq: G.eventSeq++` (POST-increment), so a save's
+    // `eventSeq` is NEXT-to-assign = lastSeq + 1, not lastSeq itself. Seeding the cursor straight
+    // from eventSeq over-advances it by one: the FIRST event after resume then has
+    // `seq === cursor`, fails anim.js's `seq > cursor` filter, and is silently swallowed (the
+    // first roll after a load loses its dice overlay/sound; an awaitingRoute save can lose a
+    // hop). `- 1` also makes the legacy-save fallback (no eventSeq -> `savedG.eventSeq || 0` -> 0)
+    // land on cursor -1, the correct "consume everything" sentinel for a save with no event log.
+    if (this.animator) this.animator.reset((savedG.eventSeq || 0) - 1);
     this.client.subscribe(state => this.update(state));
     this._bumpClients(1);
   }

@@ -17,6 +17,10 @@ function makeStage(log) {
   return {
     diceStart: (d1, d2) => log.push(`dice:${d1},${d2}`),
     diceEnd: () => log.push('diceEnd'),
+    // Fix 2: enqueue-claim callback — fires when a hop job is QUEUED (delivery
+    // time), carrying the actor's ORIGIN position, distinct from hopTo (which
+    // fires per tile once the job actually starts playing).
+    hopQueued: (pid, from) => log.push(`hopQueued:${pid}@${from}`),
     hopTo: (pid, pos, i, n) => log.push(`hop:${pid}@${pos}(${i}/${n})`),
     hopDone: (pid) => log.push(`done:${pid}`),
     reapply: () => log.push('reapply'),
@@ -38,14 +42,26 @@ describe('animator queue', () => {
   test('dice then hop play in seq order with sounds at milestones', () => {
     const log = []; const clock = makeClock();
     const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([])); // Fix 3 warm-up: absorbs the empty log so the real events below aren't mistaken for a first-sight join
     a.onState(gWith([
       ev(0, 'dice_rolled', '0', { d1: 2, d2: 3, total: 5, doubles: false }),
       ev(1, 'moved', '0', { from: 0, to: 2, path: [1, 2] }),
     ]));
     clock.tick(0);
-    expect(log[0]).toBe('snd:dice');       // dice sound at tumble start
-    expect(log[1]).toBe('dice:2,3');
-    expect(a.isAnimating('0')).toBe(false); // hop not started until dice finishes
+    // Fix 2: hopQueued fires SYNCHRONOUSLY while onState is still enqueueing
+    // (seq 1's moved event), which happens before runNext() ever starts
+    // playing the queue (seq 0's dice job) — so it lands ahead of the dice
+    // sound in the log despite dice_rolled having the lower seq.
+    expect(log[0]).toBe('hopQueued:0@0');
+    expect(log[1]).toBe('snd:dice');       // dice sound at tumble start
+    expect(log[2]).toBe('dice:2,3');
+    // Fix 2 contract change: ownership is claimed at ENQUEUE time (when onState
+    // delivers the 'moved' event and pushes its hop job), not at hop-job-start.
+    // This REVERSES the old assertion here (`toBe(false)`, commented "hop not
+    // started until dice finishes") — that belief is exactly the bug: it let
+    // renderTokens paint the token at its destination for the whole dice
+    // window before visibly snapping back to path[0] to walk.
+    expect(a.isAnimating('0')).toBe(true);
     clock.tick(1100);                       // 700 tumble + 400 hold
     expect(log).toContain('diceEnd');
     expect(a.isAnimating('0')).toBe(true);
@@ -61,6 +77,7 @@ describe('animator queue', () => {
   test('non-animated audible events forward to sink immediately in seq order', () => {
     const log = []; const clock = makeClock();
     const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([])); // Fix 3 warm-up
     a.onState(gWith([ev(0, 'property_bought', '0', {})]));
     expect(log).toEqual(['snd:property_bought']);
   });
@@ -68,6 +85,7 @@ describe('animator queue', () => {
   test('cursor: events are consumed once across onState calls', () => {
     const log = []; const clock = makeClock();
     const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([])); // Fix 3 warm-up
     const events = [ev(0, 'property_bought', '0', {})];
     a.onState(gWith(events));
     a.onState(gWith(events)); // same state re-delivered (re-render) -> no double sound
@@ -77,6 +95,7 @@ describe('animator queue', () => {
   test('fastForward completes everything instantly', () => {
     const log = []; const clock = makeClock();
     const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([])); // Fix 3 warm-up
     a.onState(gWith([
       ev(0, 'dice_rolled', '0', { d1: 1, d2: 1, total: 2, doubles: true }),
       ev(1, 'moved', '0', { from: 0, to: 2, path: [1, 2] }),
@@ -90,6 +109,7 @@ describe('animator queue', () => {
   test('queue depth cap: >6 pending events drain instantly except the last two', () => {
     const log = []; const clock = makeClock();
     const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([])); // Fix 3 warm-up
     const events = [];
     for (let s = 0; s < 8; s++) events.push(ev(s, 'moved', String(s % 2), { from: 0, to: 1, path: [1] }));
     a.onState(gWith(events));
@@ -102,6 +122,10 @@ describe('animator queue', () => {
   test('gap (front-trim) -> jump cursor, no animation for missing range', () => {
     const log = []; const clock = makeClock();
     const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    // No explicit warm-up needed: this is itself the animator's first-ever
+    // onState call, so (Fix 3) it absorbs silently — but the very next line
+    // clears the log unconditionally anyway, so the assertion below only ever
+    // observes the SECOND call's output either way.
     a.onState(gWith([ev(0, 'property_bought', '0', {})]));
     log.length = 0;
     // trimmed log: oldest seq jumped from 1 to 250
@@ -114,6 +138,11 @@ describe('animator queue', () => {
   test('reset clears queue and reveals: pending hop never fires after reset', () => {
     const log = []; const clock = makeClock();
     const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    // Fix 3 warm-up: without this, the single moved event below would be the
+    // animator's first-ever onState call and get silently absorbed as a
+    // first-sight join, so this test would no longer exercise an actual
+    // in-flight hop.
+    a.onState(gWith([]));
     a.onState(gWith([ev(0, 'moved', '0', { from: 0, to: 3, path: [1, 2, 3] })]));
     clock.tick(160); // one hop in
     a.reset();
@@ -126,6 +155,7 @@ describe('animator queue', () => {
   test('disabled -> everything completes synchronously, sounds still fire', () => {
     const log = []; const clock = makeClock();
     const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => true });
+    a.onState(gWith([])); // Fix 3 warm-up
     a.onState(gWith([
       ev(0, 'dice_rolled', '0', { d1: 4, d2: 2, total: 6, doubles: false }),
       ev(1, 'moved', '0', { from: 0, to: 2, path: [1, 2] }),
@@ -138,6 +168,7 @@ describe('animator queue', () => {
   test('moved without path on a loop board derives the walk', () => {
     const log = []; const clock = makeClock();
     const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => true, boardSize: () => 40 });
+    a.onState(gWith([])); // Fix 3 warm-up
     a.onState(gWith([ev(0, 'moved', '0', { from: 38, to: 1, passedGo: true })]));
     expect(log).toContain('hop:0@39(0/3)');
     expect(log).toContain('hop:0@1(2/3)');
@@ -146,6 +177,7 @@ describe('animator queue', () => {
   test('route-exhausted moved (routeExhausted:true) is skipped — its twin shared emit animates once', () => {
     const log = []; const clock = makeClock();
     const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => true });
+    a.onState(gWith([])); // Fix 3 warm-up
     a.onState(gWith([
       ev(0, 'moved', '0', { from: 0, to: 1, passedGo: false, routeExhausted: true, path: [1] }),
       ev(1, 'moved', '0', { from: 0, to: 1, passedGo: false, path: [1] }),
@@ -153,5 +185,102 @@ describe('animator queue', () => {
     const hops = log.filter(l => l.startsWith('hop:'));
     expect(hops).toEqual(['hop:0@1(0/1)']); // exactly ONE hop run, from the shared emit
     expect(log.filter(l => l.startsWith('done:'))).toHaveLength(1);
+  });
+
+  // ─── Fix 1: loadGame cursor seed off-by-one ───
+  test('loadGame cursor seed: reset(5) consumes seq 6 but not seq 5', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => true });
+    // Simulates App.js loadGame: a save whose eventSeq was 6 (post-increment,
+    // "next-to-assign") seeds the cursor at eventSeq-1 = 5, i.e. the seq of the
+    // LAST event actually baked into the save.
+    a.reset(5);
+    // The save's own last-baked event (seq 5) re-arrives on the first post-load
+    // render (it's still in G.events) — must NOT replay.
+    a.onState(gWith([ev(5, 'property_bought', '0', {})]));
+    expect(log).toEqual([]);
+    // The first genuinely NEW event after resume (seq 6) must fire.
+    a.onState(gWith([ev(5, 'property_bought', '0', {}), ev(6, 'rent_paid', '1', {})]));
+    expect(log).toEqual(['snd:rent_paid']);
+  });
+
+  // ─── Fix 2: enqueue-time ownership claim ───
+  test('enqueue-claim: isAnimating is true immediately on delivery, before any clock tick', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([])); // Fix 3 warm-up
+    a.onState(gWith([
+      ev(0, 'dice_rolled', '0', { d1: 2, d2: 3, total: 5, doubles: false }),
+      ev(1, 'moved', '0', { from: 0, to: 2, path: [1, 2] }),
+    ]));
+    // No clock.tick() at all — ownership must already be claimed synchronously.
+    expect(a.isAnimating('0')).toBe(true);
+  });
+
+  test('hopQueued(actor, from) fires at delivery time, holding the token at its origin', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([])); // Fix 3 warm-up
+    a.onState(gWith([ev(0, 'moved', '0', { from: 4, to: 6, path: [5, 6] })]));
+    expect(log).toContain('hopQueued:0@4');
+  });
+
+  test('two queued hops for the same actor: ownership persists until the second finishes', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => false });
+    a.onState(gWith([])); // Fix 3 warm-up
+    // Two turns' worth of moves batched into one delivery (e.g. an opponent's
+    // remote turn syncing after a lag spike) — both hop jobs queue for actor 0
+    // before either has a chance to play.
+    a.onState(gWith([
+      ev(0, 'moved', '0', { from: 0, to: 1, path: [1] }),
+      ev(1, 'moved', '0', { from: 1, to: 2, path: [2] }),
+    ]));
+    expect(a.isAnimating('0')).toBe(true);
+    clock.tick(160); // first hop job plays its single tile and finishes
+    expect(log.filter(l => l === 'done:0')).toHaveLength(1);
+    // The SECOND job is still queued for the same actor -> ownership must be
+    // retained, not released, or renderTokens would repaint the actor at the
+    // stale/final G position for the gap before the second job starts.
+    expect(a.isAnimating('0')).toBe(true);
+    clock.tick(160); // second hop job plays and finishes
+    expect(log.filter(l => l === 'done:0')).toHaveLength(2);
+    expect(a.isAnimating('0')).toBe(false); // both done -> released
+  });
+
+  // ─── Fix 3: first-sight lazy-init for the animator cursor ───
+  test('first-sight absorb: first onState with a populated log fires nothing; later new events fire', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => true });
+    // Simulates an online mid-match join: the log already has history on the
+    // very FIRST onState call this animator instance ever sees.
+    a.onState(gWith([ev(0, 'property_bought', '0', {}), ev(1, 'rent_paid', '1', {})]));
+    expect(log).toEqual([]); // absorbed silently, not replayed as a burst
+    a.onState(gWith([ev(0, 'property_bought', '0', {}), ev(1, 'rent_paid', '1', {}), ev(2, 'card_drawn', '0', {})]));
+    expect(log).toEqual(['snd:card_drawn']); // only the genuinely new event fires
+  });
+
+  test('bare reset() restores first-sight absorb for the next join/game', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => true });
+    a.onState(gWith([])); // warm-up: absorb empty
+    a.onState(gWith([ev(0, 'property_bought', '0', {})]));
+    expect(log).toEqual(['snd:property_bought']);
+    a.reset();
+    log.length = 0;
+    // A brand-new populated log delivered right after a bare reset (e.g.
+    // exit-to-menu then rejoining a different online match) must absorb
+    // silently again, not replay it.
+    a.onState(gWith([ev(5, 'property_bought', '0', {}), ev(6, 'rent_paid', '1', {})]));
+    expect(log).toEqual([]);
+  });
+
+  test('fresh-empty-log flow still animates the very first real event (seq-0 regression guard)', () => {
+    const log = []; const clock = makeClock();
+    const a = createAnimator({ stage: makeStage(log), sink: makeSink(log), now: clock.now, schedule: clock.schedule, isDisabled: () => true });
+    a.onState(gWith([])); // constructor-time first render: empty log -> absorb to -1
+    expect(log).toEqual([]);
+    a.onState(gWith([ev(0, 'property_bought', '0', {})])); // seq 0 > -1 -> fires
+    expect(log).toEqual(['snd:property_bought']);
   });
 });

@@ -95,6 +95,22 @@ test('dice overlay tumbles and token hops on roll, game stays interactive throug
   // round-trips before anim.js's dice_rolled-driven diceStart() fires) — poll
   // generously rather than asserting immediately.
   await expect(page.locator('#dice-overlay')).toBeVisible({ timeout: 8000 });
+
+  // Fix 2 regression guard (enqueue-claim ownership, src/anim.js + App.js's
+  // _makeAnimStage.hopQueued): while the dice overlay is visible — the whole
+  // ~1.1s tumble+hold window — the token must sit at its ORIGIN, not its
+  // destination. Before the fix, the hop job only claimed (and held) the token
+  // once IT started playing, i.e. AFTER the dice job finished; renderTokens has
+  // no ownership guard until that claim exists, so it painted the token at the
+  // final G-state destination for the entire dice window, then it visibly
+  // snapped back to path[0] to begin the walk. Capture now, assert against the
+  // settled position below. NOTE: asserting `duringOverlay === before` instead
+  // would be wrong — `before` carries renderTokens' peer-stacking offset (both
+  // players start clustered on GO, ±1.5%), while animation placements
+  // (hopQueued/hopTo's place()) use raw space centers, so the two legitimately
+  // differ by that offset even though both are "at GO".
+  const duringOverlay = await token.evaluate(el => ({ left: el.style.left, top: el.style.top }));
+
   // Overlay hides after tumble+hold (700+400ms per anim.js); poll generously.
   await expect(page.locator('#dice-overlay')).toBeHidden({ timeout: 8000 });
   // Token ended somewhere new (a roll off GO always moves) — the hop itself runs
@@ -104,6 +120,22 @@ test('dice overlay tumbles and token hops on roll, game stays interactive throug
     const after = await token.evaluate(el => ({ left: el.style.left, top: el.style.top }));
     return after.left !== before.left || after.top !== before.top;
   }, { timeout: 8000 }).toBe(true);
+
+  // Wait for the walk to fully settle: hopTo rewrites style.left/top every
+  // HOP_MS=160ms while walking, so two samples 250ms apart only match once the
+  // walk is over (max walk off GO = 12 tiles ≈ 1.9s; poll bound is generous).
+  await expect.poll(async () => {
+    const a = await token.evaluate(el => ({ left: el.style.left, top: el.style.top }));
+    await page.waitForTimeout(250);
+    const b = await token.evaluate(el => ({ left: el.style.left, top: el.style.top }));
+    return a.left === b.left && a.top === b.top;
+  }, { timeout: 8000 }).toBe(true);
+  // The reviewer-prescribed enqueue-claim assertion: the position held during
+  // the dice window must NOT be the final settled destination. If the claim
+  // regresses to hop-start time, renderTokens paints the destination during
+  // the overlay window, duringOverlay === settled, and this fails.
+  const settled = await token.evaluate(el => ({ left: el.style.left, top: el.style.top }));
+  expect(settled).not.toEqual(duringOverlay);
 
   // Invariant: the game stayed fully interactive throughout the whole tumble+hop
   // sequence — no animation-driven lock on the controls. Exactly one of these is

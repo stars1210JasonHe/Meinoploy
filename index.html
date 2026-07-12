@@ -145,6 +145,8 @@
     /* experience wave: token hop tween + centered dice-tumble overlay. The overlay reuses
        the existing .die/.die__cell/.pip pip-die markup (dieHtml()) at 2x size — no new
        glyph language. */
+    /* 0.12s tween must finish inside anim.js's HOP_MS=160ms per-tile cadence, or a fast
+       double-hop would visibly interrupt the CSS transition mid-slide. */
     .token--hop { transition: left 0.12s ease, top 0.12s ease; }
     #dice-overlay { position:absolute; inset:0; display:none; align-items:center; justify-content:center;
       gap:28px; pointer-events:none; z-index:40; }
