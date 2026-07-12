@@ -363,7 +363,9 @@ class MonopolyBoard {
           <button id="btn-ai-settings" class="pix-btn pix-btn--default">AI</button>
           <button id="btn-mute" class="pix-btn pix-btn--default">SND</button>
           <button id="btn-exit-game" class="pix-btn pix-btn--danger" style="display:none;">EXIT</button>
+          <button id="btn-fs-top" class="pix-btn pix-btn--default">FULL</button>
         </div>
+        <div id="topbar-hotzone"></div>
 
         <div class="app__frame">
           <div style="width:100%;">
@@ -378,7 +380,7 @@ class MonopolyBoard {
                 <div id="dice-overlay" style="display:none;"><span class="bigdie" data-die="1"></span><span class="bigdie" data-die="2"></span></div>
                 <div id="drawer-tabs"></div>
               </div>
-              <div class="game__actionbar"><div id="turnbox"></div></div>
+              <div class="game__actionbar"><div id="turnbox"></div><button id="btn-fs" class="pix-btn pix-btn--default">FULL</button></div>
             </div>
             <div id="drawer" class="drawer" hidden></div>
           </div>
@@ -429,7 +431,7 @@ class MonopolyBoard {
       const tile = e.target.closest('.tile[data-space]');
       if (!tile) return;
       const route = this._routeTargets[tile.dataset.space];
-      if (route) { this._routeTargets = null; this.client.moves.commitRoute(route); }
+      if (route) { this._routeTargets = null; this._syncRoutePickChrome(); this.client.moves.commitRoute(route); }
     });
     this.turnboxEl = document.getElementById('turnbox');
     this.manageEl = document.getElementById('manage');
@@ -492,6 +494,64 @@ class MonopolyBoard {
       this._setCrt(next);
       localStorage.setItem('meinopoly_crt', next ? 'on' : 'off');
     };
+
+    // Fullscreen-stage wave (Task 2): auto-hide topbar. A thin fixed hotzone at the
+    // very top edge reveals the topbar on hover; :focus-within (index.html) covers
+    // keyboard-tab reveal without JS. Wired once here — createLayout only ever runs
+    // once per app lifetime (constructor, before the first showModeSelect()) — so
+    // this survives every screen transition; only relevant under .app--game (the
+    // hotzone is CSS-gated, hidden otherwise, and the class check below short-
+    // circuits on every other screen).
+    //
+    // A plain mouseenter(hotzone)/mouseleave(topbar) pair (the naive version) gets
+    // STUCK OPEN in practice: revealing the topbar slides it down to fully occlude
+    // the (much shorter) hotzone underneath a STATIONARY cursor, and occluding an
+    // element that way — without the pointer actually moving — never fires a
+    // synthetic mouseenter/mouseleave (those only fire when the pointer crosses an
+    // element boundary via real movement). So the topbar's own mouseleave never
+    // arrives once the hotzone that opened it disappears under it, and it never
+    // closes again — measured live (real Chromium, 1400x900): hover the hotzone,
+    // move to the board, topbar stays revealed indefinitely. A single delegated
+    // `mousemove` recomputing "is the cursor over the hotzone OR the topbar's own
+    // (live, possibly-still-hidden) rect right now" sidesteps the whole enter/leave
+    // ordering question — it's a live poll, not an event-history dependency.
+    this.topbarEl = document.querySelector('.topbar');
+    this.topbarHotzoneEl = document.getElementById('topbar-hotzone');
+    document.addEventListener('mousemove', (e) => {
+      if (!this.appRootEl.classList.contains('app--game')) return;
+      const hz = this.topbarHotzoneEl.getBoundingClientRect();
+      const tb = this.topbarEl.getBoundingClientRect();
+      const inZone = (e.clientY >= hz.top && e.clientY <= hz.bottom)
+        || (e.clientX >= tb.left && e.clientX <= tb.right && e.clientY >= tb.top && e.clientY <= tb.bottom);
+      this.topbarEl.classList.toggle('topbar--show', inZone);
+    });
+
+    // Fullscreen API button (Task 2): a twin in the action bar (#btn-fs) and the
+    // topbar (#btn-fs-top) — one toggle, one `fullscreenchange` listener syncing both
+    // labels. Wired once (createLayout runs once). #btn-fs is a SIBLING of #turnbox
+    // in the DOM (see the .game__actionbar template above), not a child of it, so
+    // renderTurnbox's innerHTML rewrite every render never wipes it out. Hidden
+    // entirely when the API is unavailable rather than left as a dead click.
+    this.fsBtnEl = document.getElementById('btn-fs');
+    this.fsBtnTopEl = document.getElementById('btn-fs-top');
+    if (!document.documentElement.requestFullscreen) {
+      this.fsBtnEl.style.display = 'none';
+      this.fsBtnTopEl.style.display = 'none';
+    } else {
+      const paintFs = () => {
+        const label = document.fullscreenElement ? 'EXIT FS' : 'FULL';
+        this.fsBtnEl.textContent = label;
+        this.fsBtnTopEl.textContent = label;
+      };
+      const toggleFs = () => {
+        if (document.fullscreenElement) document.exitFullscreen();
+        else document.documentElement.requestFullscreen();
+      };
+      this.fsBtnEl.onclick = toggleFs;
+      this.fsBtnTopEl.onclick = toggleFs;
+      document.addEventListener('fullscreenchange', paintFs);
+      paintFs();
+    }
 
     // Modal close on scrim click
     this.stateModalEl.addEventListener('click', (e) => { if (e.target === this.stateModalEl) { /* state-driven; ignore */ } });
@@ -566,6 +626,11 @@ class MonopolyBoard {
     const inGame = name === 'game' || name === 'results';
     this.exitBtnEl.style.display = inGame ? '' : 'none';
     this.saveBtnEl.style.display = name === 'game' ? '' : 'none';
+    // Fullscreen-stage wave (Task 2): the full-bleed game stage + auto-hide topbar +
+    // floating chrome are all scoped under this one mode class — centralized here
+    // beside the #drawer close below, same "one seam, every path covered" reasoning
+    // (menu/lobby/select/results/exitToMenu/loadGame all route through _showScreen).
+    this.appRootEl.classList.toggle('app--game', name === 'game');
     // Task-2 fix-wave: #drawer is position:fixed, outside #game-area, so it doesn't get
     // hidden by the gameAreaEl.style.display flip above — it must be closed explicitly
     // whenever we're leaving the 'game' screen (gameover -> 'results', loadGame -> 'select',
@@ -949,7 +1014,30 @@ class MonopolyBoard {
     this.renderStateModal(G, ctx);
     this.wireActions(G, ctx);
     this._resolveAtlasRoute(G, ctx);
+    // After BOTH route resolvers have run for this render (flat: the line above;
+    // globe: _updateGlobeOverlay inside renderBoard, earlier in this update) — sync
+    // the route-pick chrome modality. See _syncRoutePickChrome.
+    this._syncRoutePickChrome();
     if (this.animator) { this.animator.onState(G); this.animator.afterRender(); }
+  }
+
+  // Fullscreen-stage wave (Task 2 regression fix, caught by gameplay.spec's Terra
+  // Circuit case): under .app--game the chip strip and action bar are fixed overlays
+  // ON TOP of the full-bleed board, so a route-target tile (flat atlas) or .gcity
+  // route label (globe) that happens to sit under them is unclickable — Playwright's
+  // actionability log showed `.game__actionbar intercepts pointer events` on a
+  // bottom-row tile, and the same applies to the top-center chip strip. While a
+  // route fork is awaiting a pick, the ONLY meaningful input is picking a route, so
+  // `game--routepick` (on #game-area) makes both chrome bars click-transparent and
+  // dims them (CSS, .app--game-scoped) — the pending "CHOOSE YOUR ROUTE" hint in the
+  // turnbox stays readable through the dim. Called every update() after both route
+  // resolvers, plus immediately from the two commit click-handlers so online play
+  // (where the post-commit render is a network round-trip away) re-enables chrome
+  // without waiting.
+  _syncRoutePickChrome() {
+    if (!this.gameAreaEl) return;
+    const on = !!(this._routeTargets || this._globeRouteTargets);
+    this.gameAreaEl.classList.toggle('game--routepick', on);
   }
 
   // Atlas route-picker: after rollOnly pauses the turn (G.awaitingRoute), either
@@ -1475,7 +1563,7 @@ class MonopolyBoard {
         const m = e.target.closest('.gcity[data-route]');
         if (!m || !this._globeRouteTargets) return;
         const route = this._globeRouteTargets[m.dataset.place];
-        if (route) { this._globeRouteTargets = null; this.client.moves.commitRoute(route); }
+        if (route) { this._globeRouteTargets = null; this._syncRoutePickChrome(); this.client.moves.commitRoute(route); }
       });
     }
     this._globeOverlay = ov;

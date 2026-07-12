@@ -180,6 +180,19 @@
     .topbar__label { font-family:var(--disp); font-size:7px; color:var(--ink-dim); }
     .topbar .pix-btn { padding:7px 9px; font-size:7px; box-shadow:var(--bevel), 2px 2px 0 rgba(0,0,0,.5); }
     .topbar select { padding:6px; font-size:7px; }
+    /* Fullscreen-stage wave (Task 2): auto-hide topbar, in-game only. #topbar-hotzone
+       is a thin fixed strip at the very top edge — invisible, pointer-events:auto —
+       that a document-level `mousemove` listener (App.js createLayout) polls against
+       (along with the topbar's own live rect) to toggle .topbar--show; see that
+       listener's comment for why a plain mouseenter/mouseleave pair gets stuck open
+       in practice. :focus-within keeps it revealed while tabbed into (no JS needed
+       for that path). Menu/select/lobby/results never gain .app--game, so the
+       topbar there is unaffected — always visible, exactly as it is today. */
+    #topbar-hotzone { display:none; }
+    .app--game #topbar-hotzone { display:block; position:fixed; top:0; left:0; right:0;
+      height:10px; z-index:59; }
+    .app--game .topbar { transform:translateY(-100%); transition:transform .15s ease; }
+    .app--game .topbar.topbar--show, .app--game .topbar:focus-within { transform:translateY(0); }
 
     .screen { width:100%; padding:26px; }
 
@@ -373,7 +386,7 @@
        Chrome 111+ for color-mix, so this is not a new support regression. */
     .game__center { display:flex; justify-content:center; align-items:center; position:relative; min-height:0; container-type:size; }
     .board { width:min(100cqmin, 1100px); aspect-ratio:1/1; position:relative; }
-    .game__actionbar { display:flex; justify-content:center; overflow-y:auto; min-height:0; }
+    .game__actionbar { display:flex; justify-content:center; align-items:center; gap:12px; overflow-y:auto; min-height:0; }
 
     /* drawer tab rail — vertical strip anchored to .game__center's right edge */
     #drawer-tabs { position:absolute; right:0; top:50%; transform:translateY(-50%);
@@ -404,6 +417,76 @@
     @media (max-width:700px) {
       .drawer { top:auto; height:60dvh; width:100vw; border-left:none; border-top:3px solid var(--line); }
     }
+
+    /* ============ FULL-BLEED GAME STAGE (Task 2) ============
+       .app--game is toggled on #app-root by _showScreen('game') (App.js) — set ONLY
+       for the 'game' screen, so menu/lobby/select/results are unaffected (no class,
+       no rule below applies). #game-area becomes the whole viewport, its own
+       stacking context. The chip strip and action bar go position:fixed, which per
+       the CSS Grid spec (out-of-flow boxes are not grid items) removes them from
+       grid-item consideration entirely — the single remaining in-flow item
+       (.game__center) would otherwise get auto-placed into the base template's
+       first "auto" (content-sized) row and be starved of height, so it's pinned to
+       a lone 1fr row instead. Board sizing: the design doc's REPLACE branch is
+       taken (see the .game__center/.board pair below) — the cqmin container-query
+       mechanism is dropped under .app--game and the board sized off the viewport
+       directly. The 1100px cap stays (keeps tile text from ballooning on very
+       wide/tall monitors); it only bites above a 1100px viewport-min, i.e. never
+       at the 1400x900 dev target (900px board).
+       width/height are set EXPLICITLY (not left to the inset:0 shorthand alone):
+       #game-area also carries the base .screen (width:100%) and .screen--game
+       (height:calc(100dvh - 74px), the OLD topbar-reservation figure) rules, which
+       set those two properties on their own cascade track — inset:0 only fills in
+       top/left/right/bottom, and per the CSS2.1 over-constrained-position rule,
+       an explicit height/width elsewhere WINS over what inset:0 would otherwise
+       imply (top+bottom get silently reconciled around it instead). Verified by
+       measurement: without this line #board rendered 826px (900 - 74), not ~900 —
+       the stale 74px topbar reservation leaking straight through. */
+    .app--game #game-area { position:fixed; inset:0; z-index:10; padding:0; gap:0;
+      width:100dvw; height:100dvh; grid-template-rows:1fr; }
+    /* Board sizing under .app--game: container-query OFF, viewport units ON (the
+       design doc's sanctioned REPLACE branch). NOT merely cosmetic simplification:
+       `container-type:size` implies layout containment, and layout containment makes
+       .game__center a STACKING CONTEXT — which traps #dice-overlay's z:50 and
+       #drawer-tabs' z inside it, where they can never paint above the chip strip /
+       action bar (z:45 SIBLINGS of .game__center in #game-area's context; a stacking
+       context participates as one atomic unit at its own z level, auto→0 here). The
+       Terra Circuit E2E interception failure (see .game--routepick below) is what
+       surfaced the chrome/board overlap for real. With container-type:normal,
+       .game__center (position:relative, z-auto) is NOT a stacking context, so dice
+       z:50 / tabs z:46 genuinely stack above the z:45 chrome. The base cqmin rule
+       (declared above) stays for the non-fullbleed fallback layout. Board measured
+       900x900 at 1400x900 after this change — identical to the cqmin figure. */
+    .app--game .game__center { container-type:normal; }
+    .app--game .board { width:min(100dvw, 100dvh, 1100px); }
+    /* Route-pick modality (regression fix — gameplay.spec "Terra Circuit renders and
+       is playable" caught it): the floating chrome overlays the full-bleed board, so
+       a route-target tile under the action bar (bottom row) or a .gcity route label
+       under the chip strip was UNCLICKABLE (Playwright actionability: ".game__actionbar
+       intercepts pointer events"). While a fork is awaiting a pick, #game-area gains
+       .game--routepick (App.js _syncRoutePickChrome): both bars go click-transparent
+       and dim — picking a route is the only meaningful input at that moment, and the
+       turnbox's "CHOOSE YOUR ROUTE" hint stays readable through the dim. */
+    .app--game #game-area.game--routepick .game__chips,
+    .app--game #game-area.game--routepick .game__actionbar { pointer-events:none; opacity:.45; }
+    .app--game .game__chips { position:fixed; top:8px; left:50%; transform:translateX(-50%);
+      z-index:45; max-width:calc(100vw - 24px); background:color-mix(in srgb, var(--bg2) 85%, transparent);
+      border:2px solid var(--line); box-shadow:var(--bevel); padding:6px 9px; }
+    /* Slim rest state: hide name + deed-count; keep face/money/TURN-OUT-JAIL badges/
+       active glow glanceable at rest (owner requirement — state must stay visible
+       without hovering). Pure CSS hover-expand: no JS, chipHtml's markup/class list
+       stay byte-identical, so the click-popover behavior is untouched for E2E. */
+    .app--game .pcard--chip .pcard__name, .app--game .pcard--chip .chip__deeds { display:none; }
+    .app--game .pcard--chip:hover .pcard__name, .app--game .pcard--chip:hover .chip__deeds { display:inline; }
+    .app--game .game__actionbar { position:fixed; bottom:8px; left:50%; transform:translateX(-50%);
+      z-index:45; max-width:calc(100vw - 24px); max-height:44vh;
+      background:color-mix(in srgb, var(--bg2) 85%, transparent);
+      border:2px solid var(--line); box-shadow:var(--bevel); padding:8px 10px; }
+    /* dice/tabs z only beat the z:45 chrome because .game__center is NOT a stacking
+       context under .app--game — see the container-type:normal rule + comment above. */
+    .app--game #dice-overlay { z-index:50; } /* above the floating chrome (45) — tumble never clipped */
+    .app--game #drawer-tabs { z-index:46; } /* above the chrome bars if they ever meet the right edge */
+    .app--game .drawer { z-index:55; } /* above the floating chrome (45) when open */
 
     /* chip popover (openUiModal(chipDetailHtml(d))) — full tall-card body */
     .chip-detail { padding:16px; display:flex; flex-direction:column; gap:9px; }
