@@ -2247,8 +2247,8 @@ class MonopolyBoard {
 
   // First-paragraph lore excerpt for the chip/token popover (spec §2.5b).
   // Every mod ships lore (activeMod.getLoreById); `lore.background` is the
-  // biography field common to every mod's lore data (dominion/terra-titans/
-  // ancient-empires/sanguo-excerpt all use the same shape — verified). Split
+  // biography field common to every shipped mod's lore data (verified across
+  // every registered mod's lore.js — same shape everywhere). Split
   // on the first blank line (paragraph break) rather than truncating by
   // length, so the excerpt never cuts mid-sentence. esc()'d BEFORE the
   // ** -> <strong> markdown pass (asterisks survive escaping unchanged), same
