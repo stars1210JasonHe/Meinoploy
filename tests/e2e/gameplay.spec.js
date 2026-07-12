@@ -214,11 +214,17 @@ test.describe('Game Board', () => {
   test('active player card shows portrait and passive', async ({ page }) => {
     const activeCard = page.locator('.pcard--active');
     await expect(activeCard).toHaveCount(1);
-    // In-game pcards use server-safe character data (no portrait PNG), so the
-    // portrait renders as the .portrait container with the character's initial
-    // (.portrait__empty) rather than an <img>. Assert the portrait element shows.
-    await expect(activeCard.locator('.portrait')).toBeVisible();
-    await expect(activeCard.locator('.pcard__passive')).toBeVisible();
+    // layout-rebuild retarget (Task 2 review, adjudicated): the compact top chip strip
+    // replaced the tall in-line pcard. .portrait no longer exists on the chip; .chip__face
+    // (img or letter fallback) is the chip's always-visible face element — no click needed,
+    // and it's a better regression guard than the old always-empty-letter portrait assert.
+    await expect(activeCard.locator('.chip__face')).toBeVisible();
+    // layout-rebuild retarget: full pcard body (passive/deeds/propchips) moved off the chip
+    // and into the click-to-open popover (chipDetailHtml). Open it, assert there, close it.
+    await activeCard.click();
+    await expect(page.locator('.chip-detail .pcard__passive')).toBeVisible();
+    // close via scrim click (Escape only closes the drawer, not this modal — see App.js)
+    await page.locator('#ui-modal').click({ position: { x: 5, y: 5 } });
   });
 });
 
@@ -275,10 +281,15 @@ test.describe('Basic Gameplay', () => {
         await buyBtn.click();
         await page.waitForTimeout(400);
 
-        // Active player now owns at least one deed
-        await expect(page.locator('.pcard--active .pcard__meta')).toContainText('1 DEEDS');
-        const chips = await page.locator('.pcard--active .propchip').count();
+        // Active player now owns at least one deed.
+        // layout-rebuild retarget (Task 2 review, adjudicated): DEEDS count + propchips
+        // moved off the compact chip and into the click-to-open popover (chipDetailHtml).
+        // Open the active chip's popover, assert there, then close it.
+        await page.locator('.pcard--active').click();
+        await expect(page.locator('.chip-detail .pcard__meta')).toContainText('1 DEEDS');
+        const chips = await page.locator('.chip-detail .propchip').count();
         expect(chips).toBeGreaterThanOrEqual(1);
+        await page.locator('#ui-modal').click({ position: { x: 5, y: 5 } });
 
         // Board shows ownership (house pips inside an owner badge)
         const houses = await page.locator('.tile__house').count();

@@ -691,7 +691,12 @@
 
     /* ============ RESPONSIVE ============ */
     @media (max-width:1180px) {
-      .board { width:min(92vw, 640px); margin:0 auto; }
+      /* Task-2 fix-wave: the old fixed .board width:min(92vw,640px) collided with the
+         base rule's height:min(100%,1100px) — with BOTH dimensions set explicitly,
+         aspect-ratio:1/1 is ignored and the board renders non-square. The base rule's
+         grid-native height + aspect-ratio sizing already handles narrow viewports
+         (max-width:100% on .board prevents horizontal overflow), so this override is
+         removed rather than patched. See task-2-report.md fix-wave section. */
       .select__grid { grid-template-columns:repeat(2,1fr); }
       .title__logo-line { font-size:44px; }
     }

@@ -12,8 +12,11 @@ function esc(text) {
 // Top chip strip — one per player. Carries the .pcard class family so existing
 // CSS + the 30-spec Playwright E2E contract (pcard--chip / pcard--active /
 // pcard--bankrupt / pcard__name / pcard__money / pcard__turn) keeps working.
-// `p.money` arrives PRE-FORMATTED (App's money() helper already handled the
-// Ophelia hideMoney case upstream) — hideMoney here only swaps the DISPLAY.
+// `p.money` arrives PRE-FORMATTED raw HTML (App's money() helper already handled the
+// Ophelia hideMoney case upstream — masked runs come through as the SAME dim/pixel-styled
+// '???' markup the popover uses, not a plain string) — always render it verbatim; chipHtml
+// does not re-derive a masked display from p.hideMoney (Task-2 fix-wave: the old
+// `p.hideMoney ? '???' : p.money` branch discarded the pre-masked html's styling).
 export function chipHtml(p) {
   const letter = esc((p.name || '')[0] || String(p.idx + 1));
   const face = p.portraitUrl
@@ -24,7 +27,7 @@ export function chipHtml(p) {
          style="--pc:${esc(p.color)}" data-chip="${p.idx}">
       ${face}
       <span class="pcard__name" style="color:${esc(p.color)}">${esc(p.name)}</span>
-      <span class="pcard__money">${p.hideMoney ? '???' : p.money}</span>
+      <span class="pcard__money">${p.money}</span>
       <span class="chip__deeds">${p.deeds}D</span>
       ${p.isCurrent ? '<span class="pcard__turn">TURN</span>' : ''}
       ${p.isBankrupt ? '<span class="pcard__bankrupt">OUT</span>' : ''}

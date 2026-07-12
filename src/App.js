@@ -540,6 +540,11 @@ class MonopolyBoard {
     const inGame = name === 'game' || name === 'results';
     this.exitBtnEl.style.display = inGame ? '' : 'none';
     this.saveBtnEl.style.display = name === 'game' ? '' : 'none';
+    // Task-2 fix-wave: #drawer is position:fixed, outside #game-area, so it doesn't get
+    // hidden by the gameAreaEl.style.display flip above — it must be closed explicitly
+    // whenever we're leaving the 'game' screen (gameover -> 'results', loadGame -> 'select',
+    // exitToMenu -> 'menu', etc.), not just on the one path exitToMenu happened to cover.
+    if (name !== 'game' && this._closeDrawer) this._closeDrawer();
   }
 
   // ─────────────────────────────────────────────────────────
@@ -2644,7 +2649,9 @@ class MonopolyBoard {
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
     this.closeUiModal();
-    this._closeDrawer(); // drawer is position:fixed outside #game-area — must not linger over the menu
+    // drawer close is now centralized in _showScreen(name !== 'game') below (via showModeSelect
+    // -> _showScreen('menu')), which also covers the gameover/loadGame paths this one-off missed
+    // (Task-2 fix-wave) — no longer needed as an explicit call here.
     this.stateModalEl.classList.remove('open');
     setVictoryConfig(null);
     this.setMap(this.availableMaps[0]); // active mod's default board (classic for Dominion)

@@ -29,6 +29,19 @@ describe('chipHtml', () => {
     expect(h).not.toContain('<script>');
     expect(h).toContain('&lt;script&gt;');
   });
+  // Task-2 fix-wave: masking now happens upstream (App's money() helper) — chipHtml
+  // has no '???' branch of its own and must render p.money verbatim, styled markup
+  // included, whether or not hideMoney is set.
+  test('hideMoney: p.money html is rendered verbatim, not replaced with plain "???"', () => {
+    const masked = { ...P, hideMoney: true, money: '<span class="money money--hidden">$?,???</span>' };
+    const h = chipHtml(masked);
+    expect(h).toContain('<span class="money money--hidden">$?,???</span>');
+    expect(h).not.toMatch(/pcard__money">\?\?\?</);
+  });
+  test('non-hidden money html still passes through unchanged', () => {
+    const h = chipHtml(P);
+    expect(h).toContain('pcard__money">$3,085</span>');
+  });
 });
 
 describe('tokenVisual', () => {
