@@ -188,6 +188,13 @@ Owner wants Chinese localization — EXPLICITLY not necessarily in wave 4; sched
 wave (Phase 9 already lists "Localization (English + Chinese)"). UI strings are scattered inline
 (templates in App.js/game-chrome/entry-ui) — needs a small string-table design first.
 
+## Near-term (owner 2026-07-12): mod balance simulator (standalone)
+Owner wants a tool to test NEW mods' balance. Today: `create-mod --balance` runs a 60/40 gate at
+creation time, but `src/sim/cli.js` is hardcoded to dominion characters + terra worlds (never
+calls setActiveMod). Wave: extend the sim to `--mod <id>` (resolve characters/world/rules from
+the registry), friendly per-character win-rate + fairness-gate report, `npm run sim-mod -- <id>`;
+re-runnable against any registered mod (e.g. sanguo) after tuning. Own wave, after wave 4.
+
 ## Near-term (owner 2026-07-12): per-place 简介 in create-mod
 Wave 4 ships a tile-info popover that displays an OPTIONAL `place.description`; no world carries
 it yet. Follow-up: the create-mod pipeline (extract-facts → smart-builder → emit) should generate
