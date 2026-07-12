@@ -489,7 +489,19 @@
     .tile--corner .tile__inner .glyph { font-size:18px; }
     .tile__owner { position:absolute; top:2px; right:2px; display:flex; gap:1px; }
     .tile__house { width:6px; height:6px; background:var(--ocol); border:1px solid #000; }
-    .tile__mort { position:absolute; top:2px; left:2px; font-family:var(--disp); font-size:6px; color:#fff; background:var(--bad); padding:0 2px; }
+    /* Ownership: colored border + a top-left portrait "flag" (Task 2). The mort badge
+       moves to bottom-right — the flag now owns top-left, and would otherwise sit right
+       on top of it (both were top:2px;left:2px). */
+    .tile--owned { border-color:var(--ocol); border-width:2.5px; }
+    .tile__flag {
+      position:absolute; top:1px; left:1px; width:14px; height:14px;
+      image-rendering:pixelated; border:1px solid var(--ocol);
+      border-bottom-width:2px; z-index:2; object-fit:cover;
+    }
+    .tile__flag--letter { display:flex; align-items:center; justify-content:center;
+      font-family:var(--disp); font-size:8px; background:var(--ocol); color:var(--bg); }
+    .tile--mortgaged .tile__flag { opacity:.45; }
+    .tile__mort { position:absolute; bottom:2px; right:2px; font-family:var(--disp); font-size:6px; color:#fff; background:var(--bad); padding:0 2px; }
     .tile__pot { position:absolute; bottom:2px; left:2px; font-family:var(--disp); font-size:6px; color:var(--good); }
     /* atlas real-city backgrounds: world map behind the board + a photo behind each city tile */
     .board__grid--world { background-size:cover; background-position:center; background-repeat:no-repeat; }

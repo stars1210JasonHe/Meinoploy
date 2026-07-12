@@ -1245,11 +1245,19 @@ class MonopolyBoard {
     const price = space.price > 0 ? `<span class="tile__price">$${space.price}</span>` : '';
 
     let owned = '';
+    let flag = '';
     if (hasOwner) {
       let pips = '';
       const count = Math.max(1, level);
       for (let i = 0; i < count; i++) pips += '<span class="tile__house"></span>';
       owned = `<div class="tile__owner" style="--ocol:${ownerColor}">${pips}</div>`;
+      // Ownership flag (spec 2026-07-12 §3): WHO owns, at a glance. Portraits
+      // resolve via the client bundle (G characters never carry .portrait).
+      const ownerPlayer = G.players[Number(owner)];
+      const cchar = ownerPlayer && ownerPlayer.character && this._clientChar(ownerPlayer.character);
+      flag = cchar && cchar.portrait
+        ? `<img class="tile__flag" src="${esc(cchar.portrait)}" alt="">`
+        : `<span class="tile__flag tile__flag--letter">${esc(ownerPlayer && ownerPlayer.character ? ownerPlayer.character.name[0] : String(Number(owner) + 1))}</span>`;
     }
     const mort = mortgaged ? '<div class="tile__mort">M</div>' : '';
 
@@ -1269,14 +1277,37 @@ class MonopolyBoard {
       ? `<div class="tile__photo" style="background-image:url('${cityImg}')"></div><div class="tile__scrim"></div>`
       : '';
 
-    const cls = `tile tile--${edge} ${isCorner ? 'tile--corner' : ''} ${mortgaged ? 'tile--mortgaged' : ''} ${opts.abs ? 'tile--abs' : ''} ${space.isHub ? 'tile--hub' : ''} ${cityImg ? 'tile--photo' : ''} tile--click`;
-    const style = opts.style ? ` style="${opts.style}"` : '';
-    return `<div class="${cls}" data-space="${spaceId}"${style}>${photo}${bar}<div class="tile__inner">${glyph}<span class="tile__name">${esc(space.name)}</span>${price}</div>${owned}${mort}${pot}</div>`;
+    const cls = `tile tile--${edge} ${isCorner ? 'tile--corner' : ''} ${mortgaged ? 'tile--mortgaged' : ''} ${opts.abs ? 'tile--abs' : ''} ${space.isHub ? 'tile--hub' : ''} ${cityImg ? 'tile--photo' : ''} ${hasOwner ? 'tile--owned' : ''} tile--click`;
+    // --ocol lives on the TILE itself (not just the .tile__owner pip strip) so both
+    // the tile--owned border AND the .tile__flag (child, inherits the custom prop)
+    // can read it. Appended onto opts.style rather than replacing it — opts.style
+    // already carries the tile's grid/absolute positioning.
+    const styleAttr = (opts.style || '') + (hasOwner ? `--ocol:${ownerColor};` : '');
+    const style = styleAttr ? ` style="${styleAttr}"` : '';
+    return `<div class="${cls}" data-space="${spaceId}"${style}>${photo}${bar}<div class="tile__inner">${glyph}<span class="tile__name">${esc(space.name)}</span>${price}</div>${owned}${flag}${mort}${pot}</div>`;
   }
 
   _playerColor(G, id) {
     const p = G.players[parseInt(id)];
     return p && p.character ? p.character.color : PLAYER_COLORS[parseInt(id)];
+  }
+
+  // Ownership color for a globe point (city). A "place" (atlas city) spans one or
+  // more board spaces (space.placeId) — e.g. terra-titans is 3 slots/city — so this
+  // rolls all of a city's slots up into one dot color: everything owned by the same
+  // player -> that player's color; owned by more than one player -> contested warm
+  // gray; nothing owned yet -> the neutral default (matches the pre-ownership red).
+  _placeOwnerColor(G, placeId) {
+    const owners = new Set();
+    for (let i = 0; i < this.boardSpaces.length; i++) {
+      const sp = this.boardSpaces[i];
+      if (!sp || sp.placeId !== placeId) continue;
+      const o = G.ownership[i];
+      if (o !== null && o !== undefined) owners.add(o);
+    }
+    if (owners.size === 0) return '#ff5c5c';
+    if (owners.size === 1) return this._playerColor(G, owners.values().next().value);
+    return '#9a8f7f'; // contested — this city's slots are split across owners
   }
 
   // Resolve the CLIENT (portrait-bearing) character for a G-sourced Tier-A character.
@@ -1310,6 +1341,10 @@ class MonopolyBoard {
   _teardownGlobe() {
     // Bump the epoch so any in-flight getGlobe() load resolves into a no-op.
     this._globeEpoch = (this._globeEpoch || 0) + 1;
+    // Drop the ownership-recolor cache so a freshly (re)created globe always gets
+    // its first pointColor assignment from _updateGlobeOverlay's delta-check,
+    // instead of comparing against a stale key from the torn-down instance.
+    this._lastOwnershipKey = null;
     if (!this._globe && !this._globeRaf && !this._globeResizeObs) return;
     if (this._globeRaf) { cancelAnimationFrame(this._globeRaf); this._globeRaf = null; }
     if (this._globeResizeObs) { this._globeResizeObs.disconnect(); this._globeResizeObs = null; }
@@ -1341,7 +1376,7 @@ class MonopolyBoard {
     const places = (this.mapData.atlasPlaces || []).filter(p => p.geo);
     const byId = {};
     places.forEach(p => { byId[p.id] = p; });
-    const points = places.map(p => ({ lat: p.geo.lat, lng: p.geo.lng, name: (p.realName || p.id).toUpperCase() }));
+    const points = places.map(p => ({ lat: p.geo.lat, lng: p.geo.lng, name: (p.realName || p.id).toUpperCase(), id: p.id }));
     const arcs = [];
     places.forEach(p => {
       if (!p.connectors) return;
@@ -1497,6 +1532,21 @@ class MonopolyBoard {
   // Rebuild/refresh overlay CONTENT (labels, route highlights, tokens) on each state
   // change. Positions are handled by _globeTick. Idempotent — reuses existing nodes.
   _updateGlobeOverlay(G, ctx) {
+    // Ownership-driven point recolor (Task 2). Re-assigning pointColor makes globe.gl
+    // re-evaluate the accessor for every point WITHOUT rebuilding pointsData/the globe,
+    // so gate it on an actual ownership change (cheap JSON key) rather than doing it
+    // unconditionally on every render (this runs on every G update). Placed before the
+    // `!ov` early-return below since it only needs this._globe, not the label/token
+    // overlay DOM — and it must still run on the very first call right after globe
+    // creation (see _renderGlobeBoard), which is when the neutral placeholder
+    // pointColor set at creation gets corrected to real ownership.
+    if (this._globe) {
+      const ownKey = JSON.stringify(G.ownership);
+      if (ownKey !== this._lastOwnershipKey) {
+        this._lastOwnershipKey = ownKey;
+        this._globe.pointColor(d => this._placeOwnerColor(G, d.id));
+      }
+    }
     const ov = this._globeOverlay;
     if (!ov) return;
     const places = (this.mapData.atlasPlaces || []).filter(p => p.geo);
@@ -1693,9 +1743,11 @@ class MonopolyBoard {
   }
 
   _renderAbsoluteBoard(G, ctx) {
-    this.boardEl.className = 'board';
-    this._ensureBoardChildren();
     const isAtlas = this.mapData.movementMode === 'atlas';
+    // board--atlas scopes any atlas-only CSS (e.g. font-size bumps for the bigger
+    // tiles below) without touching .tile--abs, which classic-absolute shares.
+    this.boardEl.className = isAtlas ? 'board board--atlas' : 'board';
+    this._ensureBoardChildren();
     let tiles = '';
     for (let i = 0; i < this.mapData.spaceCount; i++) {
       const pos = this.mapData.positions[i];
@@ -1706,7 +1758,11 @@ class MonopolyBoard {
       if ((this.mapData.cornerIds || []).includes(i)) edge = 'corner';
       else if (Math.abs(dy) >= Math.abs(dx)) edge = dy > 0 ? 'bottom' : 'top';
       else edge = dx > 0 ? 'right' : 'left';
-      const size = (this.mapData.cornerIds || []).includes(i) ? 9 : 7.5;
+      // Atlas boards (fewer, fuller-spread tiles) get bigger tiles than classic
+      // absolute layouts (circle/hex/custom, which are denser).
+      const size = (this.mapData.cornerIds || []).includes(i)
+        ? (isAtlas ? 11 : 9)
+        : (isAtlas ? 9.5 : 7.5);
       const style = `left:${pos.x}%;top:${pos.y}%;width:${size}%;height:${size}%;`;
       tiles += this._tileHtml(i, G, { edge, abs: true, style });
     }
