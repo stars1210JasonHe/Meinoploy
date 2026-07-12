@@ -600,14 +600,38 @@ class MonopolyBoard {
         this.fsBtnTopEl.textContent = label;
       };
       const toggleFs = () => {
-        if (document.fullscreenElement) document.exitFullscreen();
-        else document.documentElement.requestFullscreen();
+        // Final fix wave, Fix 2: requestFullscreen/exitFullscreen return promises
+        // that reject on denial (permissions-policy, iframe embed without the
+        // `allowfullscreen` attribute, etc). Unhandled, that's a console
+        // unhandled-rejection AND the button label goes stale (still says FULL/
+        // EXIT FS from the optimistic click even though the state never changed).
+        // .catch(paintFs) re-reads the real document.fullscreenElement after the
+        // rejection settles, so the label always reflects reality.
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => paintFs());
+        else document.documentElement.requestFullscreen().catch(() => paintFs());
       };
       this.fsBtnEl.onclick = toggleFs;
       this.fsBtnTopEl.onclick = toggleFs;
       document.addEventListener('fullscreenchange', paintFs);
       paintFs();
     }
+
+    // Final fix wave, Fix 1: the board sizes off dvw/dvh (index.html, `.app--game
+    // .board`), which recomputes INSTANTLY on any viewport resize — including a
+    // fullscreen toggle, which resizes the viewport itself. But --chrome-top/
+    // --chrome-bottom (the reserved bands _syncChromeBands writes) only get
+    // refreshed from the `update()` render loop, so between a resize and the next
+    // G-driven re-render the board has already snapped to its new size while the
+    // band vars are still stale from the old viewport — a transient board-under-
+    // chrome overlap, i.e. exactly the invariant this branch's chrome-band system
+    // exists to prevent. `resize` re-measures unconditionally; _syncChromeBands'
+    // own this._lastChromeTop/_lastChromeBottom guard makes repeat calls with an
+    // unchanged height a no-op (no extra reflow/write), so this is safe to fire
+    // on every resize tick without throttling. Verified live: Chromium fires a
+    // `resize` event on fullscreen ENTER and EXIT (viewport dimensions actually
+    // change), so a dedicated `fullscreenchange` hook is not needed — see
+    // task-4-report.md for the verification note.
+    window.addEventListener('resize', () => this._syncChromeBands());
 
     // Modal close on scrim click
     this.stateModalEl.addEventListener('click', (e) => { if (e.target === this.stateModalEl) { /* state-driven; ignore */ } });

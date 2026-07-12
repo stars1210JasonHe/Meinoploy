@@ -630,8 +630,21 @@
        geometry lookup: with tokens pointer-events:none, the browser's native hit-test
        falls straight through to the `.tile[data-space]` underneath, so the ALREADY-
        CORRECT tile/_routeTargets branch runs unchanged — target hits commit the
-       route, misses no-op, identical to a click that never had a token in the way. */
-    .app--game #game-area.game--routepick #token-layer .token { pointer-events:none; }
+       route, misses no-op, identical to a click that never had a token in the way.
+       Final fix wave, Fix 3: the flat-board token selector above already covers
+       `#token-layer .token`, but the globe renderer's `.gtoken` (same opt-back-in
+       pointer-events:auto pattern, see that rule below) was missed — a mid-fork
+       click on a `.gtoken` that isn't sitting on the fork's own route-target city
+       fell through to the player-detail popover instead of no-op'ing like every
+       other non-target click during a pending pick (Escape recovers; the commit
+       itself was never at risk since `.gcity--route` already wins ties via
+       z-index:2 regardless of DOM order — this is a parity/consistency fix, not
+       a route-commit-safety fix). Adding `.gtoken` here matches it to the flat
+       board's behavior: pointer-events:none for the duration of the pick, click
+       falls through to whatever's underneath (nothing interactive on the globe
+       overlay itself), so it's a no-op exactly like everywhere else. */
+    .app--game #game-area.game--routepick #token-layer .token,
+    .app--game #game-area.game--routepick .gtoken { pointer-events:none; }
     /* Combine the bob offset WITH the base translate(-50%,-50%) at every keyframe —
        an animation replaces (not merges with) the element's transform value, so a bare
        `transform:translateY(-2px)` at 50% would blow away the centering for that instant.
