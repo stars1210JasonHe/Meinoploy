@@ -318,7 +318,7 @@ describe('declutterPositions (flat-atlas overlap fix)', () => {
   });
 });
 
-describe('fitPositions (fit-to-canvas spread)', () => {
+describe('fitPositions (fit-to-canvas spread, rank-aware)', () => {
   test('fills the canvas: bounding box reaches [pad, 100-pad] on both axes', () => {
     const out = fitPositions(SANGUO_PLACES);
     const xs = Object.values(out).map(p => p.x);
@@ -333,7 +333,7 @@ describe('fitPositions (fit-to-canvas spread)', () => {
     expect(out.jianning.x).toBeLessThan(out.qingzhou.x);
     expect(out.jianning.y).toBeGreaterThan(out.youzhou.y);
   });
-  test('deterministic and input-order independent', () => {
+  test('deterministic and input-order independent (rank sort ties broken by id)', () => {
     expect(fitPositions(SANGUO_PLACES.slice().reverse())).toEqual(fitPositions(SANGUO_PLACES));
   });
   test('degenerate: single point centers at 50; flat-line axis centers that axis', () => {
@@ -343,6 +343,43 @@ describe('fitPositions (fit-to-canvas spread)', () => {
     ]);
     expect(line.a.y).toBe(50); expect(line.b.y).toBe(50);
     expect(line.a.x).toBeCloseTo(8, 0); expect(line.b.x).toBeCloseTo(92, 0);
+  });
+  test('empty input -> {} (no Infinity/NaN from Math.min/max on an empty array)', () => {
+    expect(fitPositions([])).toEqual({});
+  });
+  test('ties in a raw coordinate share one output coordinate (shipped default, no opts)', () => {
+    const ties = [
+      { id: 'a', pos: { x: 10, y: 5 } },
+      { id: 'b', pos: { x: 10, y: 50 } }, // same x as a
+      { id: 'c', pos: { x: 90, y: 95 } },
+    ];
+    const out = fitPositions(ties);
+    expect(out.a.x).toBe(out.b.x);
+    expect(out.a.x).toBeLessThan(out.c.x);
+  });
+  test('blend=0 reproduces the Task 1 affine-only fit exactly (min-max normalization)', () => {
+    const out = fitPositions(SANGUO_PLACES, { blend: 0 });
+    // Task 1's formula: lo + (v-min)/(max-min) * (hi-lo), pad=8
+    const xs = SANGUO_PLACES.map(p => p.pos.x), ys = SANGUO_PLACES.map(p => p.pos.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    const expected = 8 + (SANGUO_PLACES[0].pos.x - minX) / (maxX - minX) * 84;
+    expect(out[SANGUO_PLACES[0].id].x).toBeCloseTo(expected, 9);
+    const expectedY = 8 + (SANGUO_PLACES[0].pos.y - minY) / (maxY - minY) * 84;
+    expect(out[SANGUO_PLACES[0].id].y).toBeCloseTo(expectedY, 9);
+  });
+  test('outlier robustness: rank-aware fit gives the main cluster (excl. jianning outlier) '
+    + 'a y-span the old affine-only fit provably could not reach', () => {
+    // MEASURED (scratchpad/verify-rankfit.mjs, run against this exact fixture):
+    //   blend=0 (old affine-only, Task 1):    post-fit main-cluster y-span = 50.1, post-declutter = 56.7
+    //   blend=1 (shipped default, pure rank): post-fit main-cluster y-span = 79.3, post-declutter = 79.3
+    // Confirmed end-to-end in the real running app too (DOM position probe against
+    // the sanguo board, blend=1): rendered cluster span x:80.4 / y:79.3.
+    // Floor set well above the affine ceiling (~50-57) and with margin below the
+    // measured 79.3, so this fails loudly if the rank blend regresses toward affine.
+    const out = fitPositions(SANGUO_PLACES); // shipped default (blend=1)
+    const clusterYs = SANGUO_PLACES.filter(p => p.id !== 'jianning').map(p => out[p.id].y);
+    const ySpan = Math.max(...clusterYs) - Math.min(...clusterYs);
+    expect(ySpan).toBeGreaterThan(70);
   });
 });
 

@@ -434,24 +434,72 @@ export function validateWorld(world, archetypes) {
   return errors;
 }
 
-// Fit-to-canvas spread (spec 2026-07-12 §1): affine per-axis normalization of
-// the place-position bounding box to [pad, 100-pad]. The board is schematic —
-// filling the canvas beats strict geographic proportion (owner: sanguo's
-// cluster left half the board empty). Runs BEFORE declutterPositions.
+// Fit-to-canvas spread (spec 2026-07-12 §1, upgraded same day — atlas-fill-ownership
+// wave, "rank-aware fit"): per-axis blend of the original AFFINE (min-max) fit with a
+// RANK-based fit. Task 1's affine-only fit was proven structurally insufficient: a
+// single outlier (sanguo's jianning, y=88 vs the next-farthest cluster point ~57)
+// anchors the axis bounding box, so the main cluster's spread is capped by how much
+// range the outlier leaves behind (MEASURED: affine-only post-fit+declutter main
+// cluster span, excl. jianning, x:61.2/y:56.7 — see src/__tests__/world-loader.test.js
+// "outlier robustness" comment for the exact re-derivation).
+//
+// Rank-based per-axis placement instead spends a fixed 1/(n-1) slice of the
+// [pad,100-pad] range per place regardless of how far outliers sit in raw-value
+// space, so the main cluster fills the canvas even when an outlier anchors one end
+// (MEASURED: rank-only pre-declutter cluster span x:79.3/y:79.3, post-declutter
+// x:79.6/y:79.3 — outliers consume ~1/18th of the range by rank instead of by
+// magnitude). blend=0 reproduces the original Task 1 affine-only behavior exactly;
+// blend=1 is pure rank. Shipped default picked empirically by screenshot (see
+// FIT_BLEND_DEFAULT below and task-1-report.md "Extension: rank-aware fit").
+//
+// Ties in a raw coordinate value share ONE output coordinate: tied places are
+// grouped and assigned the AVERAGE rank-index of their group (not split across
+// consecutive ranks), so equal inputs stay equal after fitting.
+var FIT_BLEND_DEFAULT = 1;
+
 export function fitPositions(places, opts) {
+  if (!places.length) return {}; // empty-input guard (Task 1 review minor finding)
   var pad = (opts && opts.pad !== undefined) ? opts.pad : 8;
+  var blend = (opts && opts.blend !== undefined) ? opts.blend : FIT_BLEND_DEFAULT;
   var lo = pad, hi = 100 - pad;
-  var xs = places.map(function (p) { return p.pos.x; });
-  var ys = places.map(function (p) { return p.pos.y; });
-  var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
-  var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
-  function scale(v, min, max) {
-    if (max - min < 1) return 50; // degenerate axis: center it
-    return lo + (v - min) / (max - min) * (hi - lo);
+
+  function axisFit(key) {
+    var vals = places.map(function (p) { return p.pos[key]; });
+    var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
+    function affine(v) {
+      if (max - min < 1) return 50; // degenerate axis: center it
+      return lo + (v - min) / (max - min) * (hi - lo);
+    }
+    // Rank: sort by (raw value, id) for determinism (id breaks ties AND makes
+    // the sort itself input-order independent). Walk the sorted list in
+    // contiguous equal-value groups; every member of a group gets the group's
+    // AVERAGE rank-index mapped into [lo,hi], so ties land on one coordinate.
+    var sorted = places.slice().sort(function (a, b) {
+      var av = a.pos[key], bv = b.pos[key];
+      if (av !== bv) return av - bv;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+    var n = sorted.length;
+    var rank = {};
+    var i = 0;
+    while (i < n) {
+      var j = i;
+      while (j + 1 < n && sorted[j + 1].pos[key] === sorted[i].pos[key]) j++;
+      var rv = n > 1 ? lo + ((i + j) / 2) / (n - 1) * (hi - lo) : 50;
+      for (var k = i; k <= j; k++) rank[sorted[k].id] = rv;
+      i = j + 1;
+    }
+    var out = {};
+    places.forEach(function (p) {
+      out[p.id] = affine(p.pos[key]) * (1 - blend) + rank[p.id] * blend;
+    });
+    return out;
   }
+
+  var xOut = axisFit('x'), yOut = axisFit('y');
   var out = {};
   places.forEach(function (p) {
-    out[p.id] = { x: scale(p.pos.x, minX, maxX), y: scale(p.pos.y, minY, maxY) };
+    out[p.id] = { x: xOut[p.id], y: yOut[p.id] };
   });
   return out;
 }
