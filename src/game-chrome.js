@@ -68,7 +68,10 @@ export function chipDetailHtml(d) {
       ${d.inJail ? '<div class="pcard__jail">IN JAIL</div>' : ''}
       ${abilities.length ? `<div class="pcard__abilities">${abilities.map(esc).join(' · ')}</div>` : ''}
       ${d.propsHtml ? `<div class="pcard__props">${d.propsHtml}</div>` : ''}
-      ${d.loreHtml ? `<div class="chip-detail__lore">${d.loreHtml}</div>` : ''}
+      ${
+        // loreHtml: RAW pass-through — App escapes/truncates upstream (same contract as propsHtml/groupHtml).
+        d.loreHtml ? `<div class="chip-detail__lore">${d.loreHtml}</div>` : ''
+      }
     </div>`;
 }
 
