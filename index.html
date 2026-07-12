@@ -615,6 +615,23 @@
     #token-layer .token--face { font-size:0; }
     #token-layer .token--turn { box-shadow:0 0 0 2px var(--tcol), 0 0 10px var(--tcol);
       animation: token-bob 0.9s ease-in-out infinite; }
+    /* Fullscreen-stage review fix (mirrors the SAME bug class the globe renderer hit —
+       task-3-report.md Concern #3 — but NOT the same fix): #token-layer sits at z:5
+       above the tile grid and `#token-layer .token` opted back into pointer-events
+       above, so a token (own or an opponent's) that visually overlaps a pending
+       `.tile--route-target` wins the hit-test and the board's delegated click
+       handler's token branch (checked FIRST, App.js createLayout) opens the player
+       popover instead of ever reaching the `_routeTargets` commit branch below it.
+       Route-commit must have absolute priority over the popover. Chosen fix: extend
+       the EXISTING route-pick modality (`.game--routepick`, App.js _syncRoutePickChrome
+       — already makes the chip strip/action bar click-transparent for the same "the
+       only meaningful input right now is picking a route" reason, see that rule
+       above) to tokens too, rather than reordering the JS with a new elementsFromPoint
+       geometry lookup: with tokens pointer-events:none, the browser's native hit-test
+       falls straight through to the `.tile[data-space]` underneath, so the ALREADY-
+       CORRECT tile/_routeTargets branch runs unchanged — target hits commit the
+       route, misses no-op, identical to a click that never had a token in the way. */
+    .app--game #game-area.game--routepick #token-layer .token { pointer-events:none; }
     /* Combine the bob offset WITH the base translate(-50%,-50%) at every keyframe —
        an animation replaces (not merges with) the element's transform value, so a bare
        `transform:translateY(-2px)` at 50% would blow away the centering for that instant.

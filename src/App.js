@@ -432,6 +432,18 @@ class MonopolyBoard {
     //      grid, not a descendant, so `.closest('.tile[data-space]')` from a
     //      token never finds a tile ancestor — stopPropagation is belt-and-
     //      braces per spec §2.5b, not load-bearing here).
+    //
+    //      Route-commit priority fix (fullscreen-stage review): this branch
+    //      can ONLY fire when `e.target` actually resolves to a `.token` —
+    //      and while a route pick is pending (this._routeTargets set), the
+    //      CSS route-pick modality (index.html, `.game--routepick #token-layer
+    //      .token { pointer-events:none }`, toggled by _syncRoutePickChrome)
+    //      makes every token non-interactive, so a token that visually sits
+    //      on a `.tile--route-target` never wins the browser's hit-test —
+    //      the click falls straight through to the tile beneath and branch 2
+    //      below handles it, same as any other tile click. Route-commit keeps
+    //      ABSOLUTE priority over the token popover without this branch
+    //      needing to know anything about route-picking itself.
     //   2. Atlas route-picker: reads this._routeTargets {nodeId:route} at
     //      click time (set by _resolveAtlasRoute when a fork is awaiting a
     //      choice) and ABSOLUTELY takes over ANY tile click while a route
@@ -1564,6 +1576,11 @@ class MonopolyBoard {
       if (space.type === 'utility') {
         rentText = 'varies by dice'; // calculateRent's utility branch multiplies by diceTotal — a nominal total here would mislead
       } else {
+        // Intentional (per brief, task-3-report.md): rent is computed for the
+        // CURRENT PLAYER as the hypothetical visitor, not the tile's owner —
+        // charisma discounts are per-viewer, so the number shown here is "what
+        // it would cost YOU to land here right now," not a fixed property
+        // attribute. Not a bug to fix.
         const visitor = G.players[parseInt(ctx.currentPlayer, 10)];
         rentText = `$${calculateRent(G, space, 0, visitor)}`; // railroad/property branches ignore diceTotal — 0 is inert
       }
