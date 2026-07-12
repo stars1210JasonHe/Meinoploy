@@ -359,34 +359,20 @@
     .chip__deeds { font-family:var(--disp); font-size:7px; color:var(--ink-dim); }
 
     /* board */
-    /* Sized from .game__center's own (grid-computed) height, not a hand-tuned
-       "chrome height" constant. Two real-browser measurements at 1400x900 drove
-       this: (1) align-items defaults to stretch, which makes a flex item ignore
-       its own aspect-ratio for cross-axis sizing — silently turned the board
-       into a 690x505 non-square rectangle. (2) Fixing that with align-items:
-       center + a width formula keyed to a *guessed* chrome height (100dvh minus
-       a constant) overflowed the row instead — the grid's minmax(0,1fr) middle
-       track was 504.8px tall, not the guessed budget, so a 690x690 centered
-       board spilled up into the chip strip and down into the action bar.
-       Sizing from height:min(100%, 1100px) with width:auto + aspect-ratio lets
-       the actual grid-track height (already exactly "100dvh minus everything
-       else", computed by the browser, not guessed) govern the square — no
-       magic number, self-adjusts if the chip strip or action bar changes
-       height (e.g. Task 4's turnbox re-template). */
-    .game__center { display:flex; justify-content:center; align-items:center; position:relative; min-height:0; }
-    .board { height:min(100%, 1100px); width:auto; max-width:100%; aspect-ratio:1/1; position:relative; }
-    /* Portrait/narrow viewports: the landscape formula above (height-driven,
-       width:auto) hits aspect-ratio's TRANSFERRED MINIMUM SIZE when the
-       .game__center flex row is too narrow to fit a square of that height —
-       max-width:100% alone doesn't stop it (real-browser-measured: 500x900
-       rendered a 606x606 board inside a ~472px-wide container, overflowing
-       the viewport horizontally). Below a 1:1 aspect ratio, flip to a
-       WIDTH-driven formula instead so the square is capped by the actually
-       available inline space, height follows via aspect-ratio, same 1100px
-       safety cap as the landscape case. */
-    @media (max-aspect-ratio: 1/1) {
-      .board { width:min(100%, 1100px); height:auto; }
-    }
+    /* Container-query sizing (final fix). The two prior height-driven /
+       max-aspect-ratio-media-query branches each fixed one axis and broke
+       the other: height-driven overflowed near-square windows (895x900 ->
+       board 855px, top at y=-29, UNDER the topbar, overlapping the chip
+       strip/action bar by ~100px each); the width-driven media-query branch
+       only kicked in past 1:1, so it never covered 0.75-1.0 near-square
+       ratios (e.g. a half-snapped 1080p/1440p desktop window). Making
+       .game__center a size container and sizing .board off 100cqmin (the
+       smaller of the container's own computed width/height) subsumes both
+       branches in one rule — no aspect-ratio-conditional media query needed.
+       Requires Chrome 105+/Safari 16+; the stylesheet already requires
+       Chrome 111+ for color-mix, so this is not a new support regression. */
+    .game__center { display:flex; justify-content:center; align-items:center; position:relative; min-height:0; container-type:size; }
+    .board { width:min(100cqmin, 1100px); aspect-ratio:1/1; position:relative; }
     .game__actionbar { display:flex; justify-content:center; overflow-y:auto; min-height:0; }
 
     /* drawer tab rail — vertical strip anchored to .game__center's right edge */
