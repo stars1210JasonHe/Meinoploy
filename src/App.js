@@ -298,7 +298,8 @@ class MonopolyBoard {
         tick(); // populate synchronously — a setInterval-only tick would leave the overlay
         // empty (or showing the PREVIOUS roll's stale faces) for the first 80ms it's visible.
         this._diceTumbleTimer = setInterval(tick, 80);
-        setTimeout(() => {
+        this._diceSettleTimer && clearTimeout(this._diceSettleTimer);
+        this._diceSettleTimer = setTimeout(() => {
           clearInterval(this._diceTumbleTimer);
           ov.classList.remove('dice-overlay--tumbling');
           const dies = ov.querySelectorAll('.bigdie');
@@ -309,6 +310,7 @@ class MonopolyBoard {
       diceEnd: () => {
         const ov = overlay(); if (!ov) return;
         clearInterval(this._diceTumbleTimer);
+        clearTimeout(this._diceSettleTimer);
         ov.style.display = 'none';
       },
       hopTo: (pid, posId, i, n) => { this._animPlacement[pid] = posId; place(pid, posId); },
