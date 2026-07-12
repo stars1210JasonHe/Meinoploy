@@ -90,18 +90,24 @@ test.describe('Map-dominant layout (layout-rebuild)', () => {
     await expect(page.locator('.drawer-tabs__btn[data-tab="log"]')).toHaveClass(/drawer-tabs__btn--unread/);
 
     // (a) board dominance — #board occupies a majority-ish share of the viewport
-    // width. The 594px/0.42 figure this comment used to cite was WRONG — it
-    // encoded the Critical chip-column bug (final fix wave): #player-info was a
-    // plain block inside the flex .game__chips, so .pcard--chip elements stacked
-    // VERTICALLY, and even at 2 players that tall strip ate enough height that
-    // the "measured" board undershot what the layout actually delivers once
-    // chips render as a real horizontal strip (`#player-info { display:contents }`
-    // fix). Re-measured post-fix, real 1400x900 Chromium, 2 players: #board
-    // clientWidth = 642px (642/1400 = 0.459). Floor set to 0.44, just under the
-    // measured ratio.
+    // width. History: a 594px/0.42 figure (Critical chip-column bug,
+    // #player-info stacking vertically) was superseded by the
+    // `#player-info { display:contents }` fix (642px/0.459, floor 0.44).
+    // Task 4 (fullscreen-stage wave) recalibrates again: the full-bleed layout
+    // (task-2-report.md) plus the chrome-bands fix (task-2-report.md "Fix:
+    // chrome bands" — App.js `_syncChromeBands()` measures the REAL rendered
+    // height of `.game__chips`/`.game__actionbar` every render and writes
+    // `--chrome-top`/`--chrome-bottom` custom props that `.app--game .board`
+    // subtracts from `100dvh`) grows the board to **715x715 at 1400x900** in
+    // the pre-roll rest state this assertion runs in (chrome-top 76px,
+    // chrome-bottom 109px) — 715/1400 = 0.511. Floor set to 0.49: just under
+    // the measured 0.511 (~2pt headroom for cross-run font/scrollbar jitter)
+    // and still a real regression trip-wire — it would catch a collapse back
+    // toward the pre-Task-4 642px/0.459 baseline, unlike the old 0.44 floor
+    // which sat below both.
     const boardW = await page.locator('#board').evaluate(el => el.clientWidth);
     const vw = await page.evaluate(() => window.innerWidth);
-    expect(boardW / vw).toBeGreaterThan(0.44);
+    expect(boardW / vw).toBeGreaterThan(0.49);
 
     // (b) active chip is visible in the top strip and carries a face element
     // (portrait <img> or the .chip__face--letter fallback span — either way the
@@ -230,8 +236,183 @@ test.describe('Map-dominant layout (layout-rebuild)', () => {
 
     const boardW = await page.locator('#board').evaluate(el => el.clientWidth);
     const vw = await page.evaluate(() => window.innerWidth);
-    // Same 0.44 floor as the 2-player test (a) — proves the board doesn't
+    // Same 0.49 floor as the 2-player test (a) — proves the board doesn't
     // collapse as player count grows, which is exactly what the Critical did.
-    expect(boardW / vw).toBeGreaterThan(0.44);
+    // `--chrome-top` is constant across player counts (task-2-report.md: chips
+    // only vary by count via the display:contents single-row fix, not height),
+    // so the 715px/0.511 rest-state measurement applies here too.
+    expect(boardW / vw).toBeGreaterThan(0.49);
+  });
+});
+
+// ─── Task 4: full-bleed geometry, auto-hide topbar, slim chips, popovers ───
+//
+// Globe always-on route network (spec §2.6): NOT probed here. The flat-atlas
+// equivalent already has a pre-roll `.board__edges` assertion (gameplay.spec.js
+// "atlas map: Terra Circuit renders and is playable") — not duplicated. A
+// globe-side JS probe would need `this._globe.arcsData()` (globe.gl's live
+// arcs accessor), but App.js never exposes the MonopolyBoard instance (or
+// `this._globe`) on `window` — `new MonopolyBoard(appElement)` at the bottom
+// of App.js discards its return value — so there is no one-line
+// `page.evaluate` reach to it. Skipped per the brief's own fallback; verified
+// only manually (task-3-report.md: "arcs clearly visible pre-roll" screenshot).
+test.describe('Fullscreen stage (Task 4)', () => {
+  test('full-bleed geometry: zero board/chrome overlap, topbar auto-hide + reveal, chips slim, #btn-fs', async ({ page }) => {
+    test.setTimeout(30000);
+    const pageErrors = [];
+    page.on('pageerror', err => pageErrors.push(err.message));
+
+    await selectCharacters(page);
+
+    // ZERO-OVERLAP invariant — stronger than a pixel pin since the chrome
+    // bands are dynamic (_syncChromeBands() re-measures every render): the
+    // board must never sit underneath either floating bar. board top >= chips
+    // bottom, board bottom <= actionbar top (1px slop for sub-pixel rounding).
+    const chipsRect = await page.locator('.game__chips').evaluate(el => el.getBoundingClientRect());
+    const boardRect = await page.locator('#board').evaluate(el => el.getBoundingClientRect());
+    const actionbarRect = await page.locator('.game__actionbar').evaluate(el => el.getBoundingClientRect());
+    expect(boardRect.top).toBeGreaterThanOrEqual(chipsRect.bottom - 1);
+    expect(boardRect.bottom).toBeLessThanOrEqual(actionbarRect.top + 1);
+
+    // Topbar hidden at rest — rect fully off-viewport (translateY(-100%)).
+    // App.js createLayout wires a document-level `mousemove` listener that
+    // toggles .topbar--show (a live poll of cursor-vs-hotzone/topbar rects,
+    // NOT a mouseenter/mouseleave pair — see index.html's #topbar-hotzone
+    // comment for why that naive version gets stuck open). index.html gives
+    // the transform a 150ms transition, which starts the instant `.app--game`
+    // is added (character-select's last click races the game screen showing
+    // up) — measured live: reading the rect immediately after `#btn-roll`
+    // appears caught the topbar MID-transition (y+height ~30px, not ~0).
+    // Wait out the transition + a small buffer before asserting "at rest".
+    const topbar = page.locator('.topbar');
+    await page.waitForTimeout(250);
+    let tbRect = await topbar.boundingBox();
+    expect(tbRect.y + tbRect.height).toBeLessThanOrEqual(1);
+    await expect(topbar).not.toHaveClass(/topbar--show/);
+
+    // Revealed by a real mousemove into the 10px top hot-zone (#topbar-hotzone).
+    // The class toggles synchronously on the mousemove listener, but the
+    // geometry follows the same 150ms CSS transition as above — wait it out
+    // before reading the rect (measured live: reading immediately after the
+    // class-toggle assertion still returned y=-45.8, the fully-hidden value).
+    await page.mouse.move(700, 5);
+    await expect(topbar).toHaveClass(/topbar--show/);
+    await page.waitForTimeout(250);
+    tbRect = await topbar.boundingBox();
+    expect(tbRect.y).toBeGreaterThanOrEqual(-1);
+    expect(tbRect.y).toBeLessThanOrEqual(2);
+
+    // Moving away hides it again (a live poll has no event-history to get stuck on).
+    await page.mouse.move(700, 500);
+    await expect(topbar).not.toHaveClass(/topbar--show/);
+
+    // Chips slim at rest: .pcard__name hidden; chip :hover reveals it (pure
+    // CSS — index.html `.app--game .pcard--chip:hover .pcard__name`).
+    const activeName = page.locator('.game__chips .pcard--active .pcard__name');
+    await expect(activeName).toBeHidden();
+    await page.locator('.game__chips .pcard--active').hover();
+    await expect(activeName).toBeVisible();
+
+    // #btn-fs present in the floating action bar. True Fullscreen API can't
+    // be asserted headless (spec §4) — assert only that the click doesn't
+    // throw; the fullscreen promise itself may reject under a headless/
+    // no-window-manager sandbox (an environment property, not something this
+    // wave's code controls).
+    const fsBtn = page.locator('#btn-fs');
+    await expect(fsBtn).toBeVisible();
+    let threw = false;
+    try { await fsBtn.click(); } catch (e) { threw = true; }
+    expect(threw).toBe(false);
+
+    expect(pageErrors).toEqual([]);
+  });
+
+  test('tile popover: unowned shows name + price, Escape closes; bought tile shows owner', async ({ page }) => {
+    test.setTimeout(60000);
+    await selectCharacters(page);
+
+    // Unowned tile — classic space 1, "Mediterranean Ave" $60 (mods/dominion/
+    // board.js), clicked pre-roll so it is guaranteed unowned. No token sits
+    // here yet either (both players start at GO/space 0).
+    await page.locator('.tile[data-space="1"]').click();
+    await expect(page.locator('.tile-detail')).toBeVisible();
+    await expect(page.locator('.tile-detail__name')).toHaveText('Mediterranean Ave');
+    await expect(page.locator('.tile-detail__price')).toHaveText('$60');
+    await expect(page.locator('.tile-detail__owner--unowned')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#ui-modal')).not.toHaveClass(/open/);
+
+    // Buy a property (bounded loop, same pattern as the (c) chip-popover test
+    // above) — stops with the buyer still active, so the popover checks below
+    // have a real owned tile to inspect.
+    let bought = false;
+    for (let turn = 0; turn < 12 && !bought; turn++) {
+      const rollBtn = page.locator('#btn-roll');
+      if (await rollBtn.isVisible().catch(() => false)) {
+        await rollBtn.click();
+        await page.waitForTimeout(300);
+      }
+      const evAccept = page.locator('#ev-accept');
+      if (await evAccept.isVisible().catch(() => false)) {
+        await evAccept.click();
+        await page.waitForTimeout(300);
+      }
+      const buyBtn = page.locator('#btn-buy');
+      if (await buyBtn.isVisible().catch(() => false)) {
+        await buyBtn.click();
+        await page.waitForTimeout(400);
+        bought = true;
+        break;
+      }
+      const endBtn = page.locator('#btn-end');
+      if (await endBtn.isVisible().catch(() => false) && await endBtn.isEnabled().catch(() => false)) {
+        await endBtn.click();
+        await page.waitForTimeout(300);
+      }
+      const passAuctionBtn = page.locator('#btn-pass-auction');
+      for (let i = 0; i < 6; i++) {
+        if (await passAuctionBtn.isVisible().catch(() => false)) {
+          await passAuctionBtn.click();
+          await page.waitForTimeout(200);
+        } else break;
+      }
+    }
+    expect(bought).toBe(true);
+
+    // Click the now-owned tile (`.tile--owned`, App.js _tileHtml). Clicked
+    // near a corner, not dead-center: the buyer's OWN token (App.js
+    // renderTokens) sits exactly at the tile's computed center and is
+    // z-layered above the tile grid (#token-layer, z:5) — the board's
+    // delegated click handler gives `.token[data-player]` absolute priority
+    // (task-3-report.md Concern #3 / the flat-route-priority fix documents
+    // the same token-over-tile precedence for route targets), so a dead-
+    // center click here would open the PLAYER popover instead of the tile
+    // one. A corner click reaches the tile itself.
+    await page.locator('.tile--owned').first().click({ position: { x: 5, y: 5 } });
+    await expect(page.locator('.tile-detail')).toBeVisible();
+    await expect(page.locator('.tile-detail__owner-name')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#ui-modal')).not.toHaveClass(/open/);
+
+    // Token popover (spec §2.5b) — the buyer has now moved off GO, so their
+    // token no longer overlaps the other (still-at-GO) player's token.
+    // data-chip on the active chip and data-player on its token share the
+    // same player index (game-chrome.js chipHtml / App.js renderTokens).
+    // { force: true }: the CURRENT-TURN token carries `.token--turn`, which
+    // index.html gives an infinite `token-bob 0.9s ease-in-out infinite`
+    // animation (a deliberate always-on visual cue, index.html ~616-641) —
+    // measured live: a plain .click() hung for the full 60s timeout on
+    // Playwright's "element is not stable" actionability check, which by
+    // design never succeeds against a perpetually-animating element. force
+    // skips only the stability wait; nothing else covers this token here (no
+    // route-pick, no other player's token on this tile), so the click still
+    // lands on the real element.
+    const activeIdx = await page.locator('.game__chips .pcard--active').getAttribute('data-chip');
+    await page.locator(`.token[data-player="${activeIdx}"]`).click({ force: true });
+    await expect(page.locator('.chip-detail')).toBeVisible();
+    await expect(page.locator('.chip-detail .pcard__name')).toBeVisible();
+    await expect(page.locator('.chip-detail__lore')).toBeVisible(); // every mod ships lore
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#ui-modal')).not.toHaveClass(/open/);
   });
 });
