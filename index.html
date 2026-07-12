@@ -493,8 +493,53 @@
        that method's doc comment for the full reasoning and the CSS-var-only
        vs JS-sync tradeoff. */
     .app--game .game__center { container-type:normal;
-      padding-top:var(--chrome-top, 76px); padding-bottom:var(--chrome-bottom, 108px); }
-    .app--game .board { width:min(100dvw, calc(100dvh - var(--chrome-top, 76px) - var(--chrome-bottom, 108px)), 1100px); }
+      padding-top:var(--chrome-top, 76px); padding-bottom:var(--chrome-bottom, 170px); }
+    .app--game .board { width:min(100dvw, calc(100dvh - var(--chrome-top, 76px) - var(--chrome-bottom, 170px)), 1100px); }
+    /* ============ RECT CANVAS — Redesign A (atlas/globe full-bleed) ============
+       .board--rect is set in App.js (_renderAbsoluteBoard when movementMode===
+       'atlas'; _renderGlobeBoard unconditionally) ALONGSIDE .board — classic
+       grid/absolute boards (square/circle/hex/custom) never get this class, so
+       the base .board rule above (width:min(100cqmin,1100px); aspect-ratio:1/1)
+       and the .app--game .board rule (square, height-driven) are untouched for
+       them. For atlas/globe, .board--rect fills the available RECTANGLE
+       independently on each axis (no aspect-ratio) instead of being forced
+       square — this is the fix for the owner's "方块" (why is a wide-screen
+       board still a little square in the middle) complaint.
+       Same specificity as the two rules above (single-class / two-class) —
+       placed AFTER them in source order so it wins the aspect-ratio/width
+       fights on equal specificity (see App.js _syncChromeBands' doc comment
+       for the matching JS-side static-constant reasoning this shares).
+       container-type:size turns .board ITSELF (not .game__center — see the
+       .app--game .game__center container-type:normal rule + its doc comment
+       above: making the BOARD's own ancestor a size container is what
+       previously trapped #dice-overlay/#route-banner's z-index beneath the
+       chrome, because THEY live inside .game__center) into a query container
+       for its own descendants — _renderAbsoluteBoard's tile `abs` style now
+       sizes atlas tiles in cqmin (the board's own short axis) instead of %,
+       so tiles stay perfectly SQUARE even though the board they sit on is
+       not. Verified safe: #dice-overlay (z:50) / #route-banner (z:20) are
+       .game__center CHILDREN SIBLING to .board, not descendants of it, so
+       .board's containment never reaches them; tokens/#token-layer and the
+       edges <svg> live INSIDE .board, but their own positioning is %/cqmin-
+       based already (getSpaceCenter, edge x1/y1 percent), not itself
+       container-query-dependent on anything ABOVE .board — containment is a
+       non-issue for both. The edges <svg> already carries
+       preserveAspectRatio="none" (_renderAbsoluteBoard, pre-existing) — a
+       0-100 viewBox would otherwise letterbox INSIDE the svg on a non-square
+       board and desync the lines from the (correctly stretched) tile
+       positions; confirmed already in place, no change needed there.
+       Width/height mirror the two chrome-band states App.js now writes as
+       STATIC constants (narrow: the same --chrome-top/--chrome-bottom the
+       classic board's height formula reads, kept in lockstep by one shared
+       JS writer; gutter/rail mode: overridden below to subtract the two
+       fixed-width side rails instead). No 1100px cap here (unlike classic) —
+       the whole point of this redesign is filling the wide rect, not
+       stopping short of it. */
+    .board--rect { aspect-ratio:auto; container-type:size; }
+    .app--game .board--rect {
+      width: calc(100dvw - 24px);
+      height: calc(100dvh - var(--chrome-top, 76px) - var(--chrome-bottom, 170px));
+    }
     /* Route-pick modality (regression fix — gameplay.spec "Terra Circuit renders and
        is playable" caught it): the floating chrome overlays the full-bleed board, so
        a route-target tile under the action bar (bottom row) or a .gcity route label
@@ -560,15 +605,98 @@
        and _syncGutterMode auto-opens it (LOG tab) once per mode-ENTRY. */
     .app--game #game-area.game--gutters .game__chips {
       flex-direction:column; align-items:stretch;
-      top:8px; bottom:8px; left:8px; right:auto; transform:none;
+      /* bottom:186px (not 8px) — Redesign B docks the action bar into this SAME
+         left rail, below the chip column (see .game__actionbar override just
+         below); 186 = 8 (actionbar's own bottom offset) + 170 (its static
+         worst-case reserve, the SAME constant _syncChromeBands uses for the
+         narrow-mode bottom band — see that method's doc comment) + 8 (gap
+         between the two rail sections). A static reserve, not a measurement,
+         for the same reason the bottom chrome band went static: the chip
+         column's height must not visibly jostle every time the action bar's
+         real content changes turn to turn (roll -> buy prompt -> jail, etc). */
+      top:8px; bottom:186px; left:8px; right:auto; transform:none;
       width:calc(var(--gutter-w, 300px) - 16px); max-width:calc(var(--gutter-w, 300px) - 16px);
       overflow-y:auto; overflow-x:hidden;
     }
     .app--game #game-area.game--gutters .pcard--chip .pcard__name,
     .app--game #game-area.game--gutters .pcard--chip .chip__deeds { display:inline; }
-    .app--game #game-area.game--gutters .drawer {
+    /* Redesign B (owner-confirmed bug: board deformed 742->630px after a single
+       roll — root cause, MEASURED not guessed: the action bar was reserved by
+       measuring its REAL rendered height every update(), and that height
+       genuinely varies with turn state (96px at rest vs 152px in the jail
+       state) — see App.js _syncChromeBands' doc comment for the full
+       before/after probe). Fix, gutter-mode half: the action bar leaves the
+       bottom-center FLOATING position entirely and docks into the same left
+       rail as the chip column, below it (top:auto/bottom:8px here vs chips'
+       top:8px/bottom:186px above) — once neither bar floats over the board's
+       top or bottom edge, --chrome-top/--chrome-bottom collapse to the flat
+       8+4 margin every other "nothing floats here" edge already uses, and the
+       board's height stops depending on turn-state content at all. Own
+       max-height + overflow-y:auto (not a taller rail) absorbs the jail-state
+       worst case without growing past its reserved 170px band (kept in sync
+       with the chip column's bottom offset above and _syncChromeBands' narrow-
+       mode constant — three numbers, one source of truth, documented at each
+       use site since CSS custom properties can't share a JS constant directly). */
+    .app--game #game-area.game--gutters .game__actionbar {
+      /* column, not the base row (App.js createLayout: `.game__actionbar`
+         wraps TWO siblings, `#turnbox` and the standalone `#btn-fs` fullscreen
+         button — NOT just turnbox alone) — a row here would squeeze #turnbox's
+         own (also column, see the .turnbox--bar override below) content and
+         the FULL button side by side in a ~280px rail. Column stacks the FULL
+         button below the turnbox instead. */
+      flex-direction:column; align-items:stretch;
+      top:auto; bottom:8px; left:8px; right:auto; transform:none;
+      width:calc(var(--gutter-w, 300px) - 16px); max-width:calc(var(--gutter-w, 300px) - 16px);
+      max-height:170px; overflow-y:auto;
+    }
+    /* Rail turnbox variant: pure CSS descendant-selector override (turnbox's
+       own markup/#btn-* ids are byte-identical — renderTurnbox never learns
+       about gutter mode), specifically so a resize-only mode transition
+       (App.js's resize listener calls _syncGutterMode/_syncChromeBands but NOT
+       renderTurnbox) repaints correctly instantly — a JS-applied class here
+       would lag one render behind on a resize-only transition, since
+       renderTurnbox only runs from update() (G-state-driven), not from the
+       resize handler. flex-direction:column stacks who-chip/dice-or-atlas-
+       slot/roll-jail buttons/end-turn readably in the ~300px rail instead of
+       the horizontal bar's flex-wrap (which reads fine wide, cramped narrow). */
+    .app--game #game-area.game--gutters .game__actionbar .turnbox--bar {
+      flex-direction:column; align-items:stretch;
+    }
+    /* Pre-existing latent bug, SURFACED (not introduced) by this wave — found by
+       direct DOM inspection, not guessed: this rule used to read
+       `.app--game #game-area.game--gutters .drawer` (a DESCENDANT combinator),
+       but `#drawer` is a SIBLING of `#game-area` in the DOM (App.js
+       createLayout: both are direct children of the same `.app__frame` wrapper
+       div, `#drawer` immediately after `#game-area`) — the old selector could
+       never match it, so gutter mode's "persistent right-gutter drawer panel"
+       was always silently falling back to the base `.drawer` rule (fixed
+       340px width, flush to the viewport's right edge) the entire time. It
+       went unnoticed because the base drawer's fixed width happened to still
+       clear the OLD (narrower) gutter-mode board by ~37px of slack (measured:
+       old board ~783px wide at 1535x900 vs the base drawer's fixed left edge
+       at 1195px). Redesign B's board-growth in gutter mode (bottom band
+       12px instead of a real ~105px action-bar reservation) shrank that slack
+       to ­-9.5px — a real overlap (`tests/e2e/layout.spec.js`'s zero-overlap
+       assertion caught it) — which is what surfaced this. Fix: the general
+       sibling combinator (`~`), which matches a LATER sibling sharing the
+       same parent, correctly targets `#drawer` from `#game-area.game--gutters`
+       without requiring (false) descendant nesting. */
+    .app--game #game-area.game--gutters ~ #drawer {
       position:fixed; top:8px; bottom:8px; right:8px; left:auto;
       width:calc(var(--gutter-w, 300px) - 16px);
+    }
+    /* Redesign A, gutter-mode half: rect boards (atlas/globe) fill the full
+       remaining width between the two fixed-width rails (both --gutter-w,
+       see _syncGutterMode) independently of height — no symmetric-centering
+       assumption like the classic square board (.app--game .board, which just
+       centers within whatever .game__center leaves over; --gutter-w for THAT
+       case is derived FROM the centered board's own width, see
+       _syncGutterMode's non-rect branch). Height keeps using the shared
+       --chrome-top/--chrome-bottom vars from the base .app--game .board--rect
+       rule above (12px/12px in gutter mode — see _syncChromeBands), so this
+       override only needs to touch width. */
+    .app--game #game-area.game--gutters .board--rect {
+      width: calc(100dvw - (var(--gutter-w, 300px) * 2) - 24px);
     }
 
     /* chip popover (openUiModal(chipDetailHtml(d))) — full tall-card body */

@@ -49,6 +49,31 @@ const STAT_KEYS = [
   { key: 'stamina', label: 'STA' },
 ];
 
+// Redesign B (owner-confirmed bug: board bounding box shrank 742px -> 630px
+// after a single roll). INSTRUMENTED root cause, not guessed: _syncChromeBands
+// used to call `actionBarEl.getBoundingClientRect().height` on every update()
+// tick, and the turnbox's real height genuinely varies with turn state — 96px
+// at rest vs 152px in the jail state (ROLL FOR DOUBLES + PAY FINE + disabled
+// END TURN) — so the board's height formula (index.html, `.app--game .board`/
+// `.board--rect`: `100dvh - chrome-top - chrome-bottom`) walked through a
+// SEQUENCE of different sizes within a single turn as the turnbox's content
+// changed shape. Fix: both bands are now fixed constants for the life of the
+// game screen — reserving the WORST case once (bottom) rather than measuring
+// the current case every render. NARROW_* is the floating-chrome (non-gutter)
+// state (see _syncChromeBands); GUTTER_MARGIN is what both bands collapse to
+// in wide-screen rail mode (see _syncGutterMode / index.html's
+// `.game--gutters .game__actionbar` rule), since neither bar floats over the
+// board's top/bottom edge there anymore — the action bar docks into the same
+// left rail as the chip column instead of staying bottom-center.
+const CHROME_NARROW_TOP = 76;     // chip-strip content (64px, player-count-invariant) + 8 offset + 4 gap
+const CHROME_NARROW_BOTTOM = 170; // jail-state turnbox worst case (152px, measured) + 8 offset + 4 gap + 6 safety
+const CHROME_GUTTER_MARGIN = 12;  // 8 fixed offset + 4 gap — no floating bar to reserve for in gutter mode
+// Fixed rail column width for BOTH the chip/action-bar rail (left) and the
+// drawer (right) when a rect board (atlas/globe) is active — see
+// _syncGutterMode's doc comment for why this can't reuse the classic square
+// board's analytic (centered-leftover) derivation.
+const GUTTER_RAIL_W = 300;
+
 // ─────────────────────────────────────────────────────────────
 // Pixel UI primitives (vanilla DOM → HTML strings)
 // ─────────────────────────────────────────────────────────────
@@ -476,9 +501,12 @@ class MonopolyBoard {
     });
     this.turnboxEl = document.getElementById('turnbox');
     // Chrome-band sizing (Task 2 review fix — see _syncChromeBands below and
-    // the CSS comment above `.app--game .board` in index.html): live refs to
-    // the two floating bars whose ACTUAL rendered height gets reserved so the
-    // full-bleed board never renders underneath either of them.
+    // the CSS comment above `.app--game .board` in index.html). Redesign B:
+    // both bands are now STATIC constants (_syncChromeBands no longer reads
+    // either bar's real height), so `chipsBarEl` is unused there now — kept
+    // (harmless) since `actionBarEl` is still read by _syncGutterMode's
+    // classic-board on/off probe (`getBoundingClientRect().width` on
+    // `boardEl`, gated behind an `actionBarEl` truthiness guard).
     this.chipsBarEl = document.querySelector('.game__chips');
     this.actionBarEl = document.querySelector('.game__actionbar');
     this.manageEl = document.getElementById('manage');
@@ -1111,44 +1139,37 @@ class MonopolyBoard {
     if (this.animator) { this.animator.onState(G); this.animator.afterRender(); }
   }
 
-  // Chrome-band sizing (Task 2 review fix). `.app--game .board` (index.html)
-  // sizes off `calc(100dvh - var(--chrome-top) - var(--chrome-bottom))`
-  // instead of the raw viewport, so the full-bleed board never renders
-  // underneath the floating chip strip (top) or action bar (bottom) — at
-  // rest those two bars measured 64px and 96px tall respectively at
-  // 1400x900, and a plain `min(100dvw,100dvh,1100px)` board (the pre-fix
-  // rule) is exactly 100dvh on any landscape viewport, i.e. zero letterbox
-  // to absorb them.
-  // A STATIC CSS default sized for the worst case would have to cover the
-  // jail turnbox state (ROLL FOR DOUBLES + PAY FINE + disabled END TURN) —
-  // measured 152px tall, 58% taller than the 96px rest state — and pinning
-  // the reserved band there permanently shrinks the board (658px vs the
-  // achievable ~900px at 1400x900) even during the ~95% of turns when the
-  // bar is only 84-96px. Measuring the REAL heights here instead keeps the
-  // board as large as the chrome actually on screen allows, and only
-  // shrinks it while a genuinely taller state (e.g. jail) is really
-  // rendered. this._lastChromeTop/_lastChromeBottom throttle the
-  // `style.setProperty` writes (and the reflow each one triggers) to only
-  // fire when a height genuinely changed — most renders don't change either
-  // bar's content.
+  // Chrome-band sizing (Task 2 review fix; STATIC constants as of Redesign B).
+  // `.app--game .board`/`.board--rect` (index.html) size off
+  // `calc(100dvh - var(--chrome-top) - var(--chrome-bottom))` instead of the
+  // raw viewport, so the full-bleed board never renders underneath the
+  // floating chip strip (top) or action bar (bottom).
+  // Redesign B root cause (INSTRUMENTED, not guessed — this is the exact
+  // 742px -> 630px owner-reported deformation): this method used to call
+  // `actionBarEl.getBoundingClientRect().height` on every update() tick, and
+  // the turnbox's real height genuinely changes with turn state within a
+  // single turn — 96px at rest, 152px in the jail state (ROLL FOR DOUBLES +
+  // PAY FINE + disabled END TURN) — so a ROLL that revealed a taller/shorter
+  // turnbox visibly resized the board out from under the player mid-turn.
+  // Fix: stop measuring. Both bands are fixed constants (CHROME_NARROW_TOP/
+  // BOTTOM, CHROME_GUTTER_MARGIN — module scope, top of file) for the entire
+  // life of the game screen, reserving the WORST case up front instead of
+  // whatever the current state happens to need. This does cost some board
+  // size during the ~95% of turns when the bar is shorter than the jail-state
+  // worst case (vs the old best-effort-measured size) — an explicit trade of
+  // a few px of board for a board that never visibly deforms mid-turn, which
+  // is the whole point of this redesign; the resize listener (constructor)
+  // still calls this on viewport resize, since a resize genuinely reshapes
+  // the available space and IS allowed to resize the board — only
+  // STATE-driven (per-turn) resizing was the bug. this._lastChromeTop/
+  // _lastChromeBottom still throttle the `style.setProperty` writes (now
+  // they only ever fire on a narrow<->gutter mode flip or a resize, not on
+  // ordinary gameplay).
   _syncChromeBands() {
-    if (!this.gameAreaEl || !this.chipsBarEl || !this.actionBarEl) return;
-    // Owner acceptance fix wave, Fix 3 (wide-screen gutter mode): under
-    // `.game--gutters` the chip strip moves into the LEFT gutter (CSS,
-    // `.game--gutters .game__chips`) and stops floating over the TOP of the
-    // board entirely — see _syncGutterMode. The top band then only needs the
-    // same fixed offset/buffer every band reserves, NOT the chip strip's real
-    // height: in column layout that height is now tall (up to the full
-    // viewport), and reserving it would crush the board back down instead of
-    // growing it, defeating the whole point of the gutter-mode wave.
+    if (!this.gameAreaEl) return;
     const gutters = this.gameAreaEl.classList.contains('game--gutters');
-    // +8 = the bar's own fixed top/bottom offset (index.html: top:8px /
-    // bottom:8px); +4 = a small breathing-room gap so the board's edge
-    // never sits pixel-adjacent to the bar. Same formula for both bars.
-    const top = gutters
-      ? (8 + 4)
-      : (Math.ceil(this.chipsBarEl.getBoundingClientRect().height) + 8 + 4);
-    const bottom = Math.ceil(this.actionBarEl.getBoundingClientRect().height) + 8 + 4;
+    const top = gutters ? CHROME_GUTTER_MARGIN : CHROME_NARROW_TOP;
+    const bottom = gutters ? CHROME_GUTTER_MARGIN : CHROME_NARROW_BOTTOM;
     if (top !== this._lastChromeTop) {
       this._lastChromeTop = top;
       this.gameAreaEl.style.setProperty('--chrome-top', `${top}px`);
@@ -1184,10 +1205,30 @@ class MonopolyBoard {
   // the chip column off that stale, oversized gutter overlaps the board that
   // grows into the gap immediately after. Computing the POST-shrink board
   // width analytically instead — mirroring `.app--game .board`'s CSS formula
-  // (index.html) exactly, with top hardcoded to the same 8+4 gutter-mode
+  // (index.html) exactly, with top hardcoded to the same gutter-mode margin
   // constant _syncChromeBands uses — sidesteps the ordering dependency
   // entirely and is correct from the very first gutter-mode render, no
   // convergence lag.
+  //
+  // Redesign A extension (rect boards — atlas/globe, `.board--rect`): the
+  // classic square board's analytic derivation above fundamentally does not
+  // apply — that formula measures how much LEFTOVER space a height-driven
+  // SQUARE board leaves beside it, but a rect board fills the available
+  // width BY DESIGN (no leftover to measure without a circular dependency:
+  // the rect board's own width IS "whatever gutter mode decides to leave
+  // it"). Two separate concerns, handled separately for a rect board:
+  //   1. ON/OFF threshold — probe with the SAME square-equivalent width the
+  //      classic board would have at this viewport (purely a "would two
+  //      300px rails still leave reasonable room" affordability test, not a
+  //      real measurement of the rect board, which never actually renders
+  //      that width) — keeps one shared, already-vetted 300px-per-side
+  //      threshold for both board types instead of inventing a second
+  //      unrelated constant.
+  //   2. Rail width once ON — a FIXED constant (GUTTER_RAIL_W, module scope),
+  //      not derived: unlike the classic board there is no "centered
+  //      leftover" to split in half, so the CSS (`.game--gutters
+  //      .board--rect`, index.html) just subtracts two rails of this exact
+  //      width from 100dvw directly.
   //
   // Auto-opens the LOG tab exactly once per mode-ENTRY (the `on && !wasOn` edge
   // below, not every render): a user who deliberately closes the drawer while
@@ -1197,25 +1238,51 @@ class MonopolyBoard {
   // needed.
   _syncGutterMode() {
     if (!this.gameAreaEl || !this.boardEl || !this.actionBarEl) return;
-    // Decide on/off from the board's CURRENTLY rendered width — a simple,
-    // non-circular "is there already a wide void" read (whatever this
-    // render's chrome-top happens to be doesn't change the ON/OFF verdict by
-    // more than a render's worth of chip-strip height, nowhere near the
-    // 300px threshold's margin in practice).
-    const boardWNow = this.boardEl.getBoundingClientRect().width;
-    const gutterNow = (window.innerWidth - boardWNow) / 2;
+    const isRect = this.boardEl.classList.contains('board--rect');
+    let gutterNow;
+    if (isRect) {
+      const squareEquivW = Math.min(window.innerWidth,
+        window.innerHeight - CHROME_NARROW_TOP - CHROME_NARROW_BOTTOM, 1100);
+      gutterNow = (window.innerWidth - squareEquivW) / 2;
+    } else {
+      // Decide on/off from the board's CURRENTLY rendered width — a simple,
+      // non-circular "is there already a wide void" read (whatever this
+      // render's chrome-top happens to be doesn't change the ON/OFF verdict
+      // by more than a render's worth of chip-strip height, nowhere near the
+      // 300px threshold's margin in practice).
+      const boardWNow = this.boardEl.getBoundingClientRect().width;
+      gutterNow = (window.innerWidth - boardWNow) / 2;
+    }
     const on = gutterNow >= 300;
     const wasOn = this.gameAreaEl.classList.contains('game--gutters');
     this.gameAreaEl.classList.toggle('game--gutters', on);
     if (on) {
-      // Analytic post-shrink board width — see doc comment above. Must match
-      // `.app--game .board`'s CSS formula and _syncChromeBands' gutter-mode
-      // top constant exactly, or the two drift apart again.
-      const bottom = Math.ceil(this.actionBarEl.getBoundingClientRect().height) + 8 + 4;
-      const top = 8 + 4;
-      const boardWFinal = Math.min(window.innerWidth, window.innerHeight - top - bottom, 1100);
-      const gutterFinal = (window.innerWidth - boardWFinal) / 2;
-      this.gameAreaEl.style.setProperty('--gutter-w', `${Math.floor(gutterFinal)}px`);
+      // Written on document.documentElement (:root), NOT this.gameAreaEl —
+      // latent bug found by instrumentation while fixing the drawer overlap
+      // just below (see index.html's `.game--gutters ~ #drawer` doc comment
+      // for the full root-cause writeup): CSS custom properties only inherit
+      // to DESCENDANTS of the element they're set on, but `#drawer` is a
+      // SIBLING of `#game-area` in the DOM (App.js createLayout), not a
+      // descendant — a --gutter-w written on gameAreaEl was invisible to
+      // #drawer's `var(--gutter-w, 300px)` reference, which silently fell
+      // back to the 300px default instead of the real computed value. :root
+      // is a shared ancestor of both, so both the rail (inside #game-area)
+      // and the drawer (its sibling) see the same real value.
+      if (isRect) {
+        document.documentElement.style.setProperty('--gutter-w', `${GUTTER_RAIL_W}px`);
+      } else {
+        // Analytic post-shrink board width — see doc comment above. Must match
+        // `.app--game .board`'s CSS formula exactly, or the two drift apart
+        // again. top/bottom are both CHROME_GUTTER_MARGIN now (Redesign B:
+        // the action bar leaves the bottom-center floating position entirely
+        // in gutter mode — see index.html's `.game--gutters .game__actionbar`
+        // rule — so there is no longer a real bar height to measure here
+        // either).
+        const boardWFinal = Math.min(window.innerWidth,
+          window.innerHeight - CHROME_GUTTER_MARGIN - CHROME_GUTTER_MARGIN, 1100);
+        const gutterFinal = (window.innerWidth - boardWFinal) / 2;
+        document.documentElement.style.setProperty('--gutter-w', `${Math.floor(gutterFinal)}px`);
+      }
     }
     if (on && !wasOn) this._openDrawer('log');
   }
@@ -1813,7 +1880,13 @@ class MonopolyBoard {
   // city points + great-circle route arcs. Created ONCE (renderBoard runs every state
   // change) then updated. Interactive tiles/tokens/camera/mini-map are Stage 3.
   _renderGlobeBoard(G, ctx) {
-    this.boardEl.className = 'board board--globe';
+    // board--rect (Redesign A): the globe always renders on the rect
+    // full-bleed canvas — it has no tile grid of its own (container-type:size
+    // is a no-op for it, harmless), just a container the ResizeObserver
+    // already feeds independent W/H into (_ensureGlobeResizeObserver above),
+    // so it naturally fills a wide rect (sphere centered, more sky) with no
+    // further change needed here beyond the class.
+    this.boardEl.className = 'board board--globe board--rect';
     this._ensureBoardChildren();
 
     const places = (this.mapData.atlasPlaces || []).filter(p => p.geo);
@@ -2211,7 +2284,13 @@ class MonopolyBoard {
     const isAtlas = this.mapData.movementMode === 'atlas';
     // board--atlas scopes any atlas-only CSS (e.g. font-size bumps for the bigger
     // tiles below) without touching .tile--abs, which classic-absolute shares.
-    this.boardEl.className = isAtlas ? 'board board--atlas' : 'board';
+    // board--rect (Redesign A): atlas boards render on the rect full-bleed
+    // canvas (index.html `.board--rect`) instead of the classic square
+    // (aspect-ratio:1/1) constraint. Classic-absolute (circle/hex/custom,
+    // movementMode !== 'atlas') is NOT given this class — it keeps the
+    // traditional square board untouched, per the redesign brief.
+    const isRect = isAtlas;
+    this.boardEl.className = isAtlas ? 'board board--atlas board--rect' : 'board';
     this._ensureBoardChildren();
     let tiles = '';
     for (let i = 0; i < this.mapData.spaceCount; i++) {
@@ -2228,7 +2307,15 @@ class MonopolyBoard {
       const size = (this.mapData.cornerIds || []).includes(i)
         ? (isAtlas ? 11 : 9)
         : (isAtlas ? 9.5 : 7.5);
-      const style = `left:${pos.x}%;top:${pos.y}%;width:${size}%;height:${size}%;`;
+      // Redesign A: tile SIZE (not position — left/top stay % of the board's
+      // independent W/H, that still positions correctly on a non-square
+      // board) uses cqmin (the board's own short axis, via container-type:
+      // size on .board--rect — index.html) instead of % on rect boards, so
+      // tiles stay perfectly square even though the board itself is not. A
+      // square board (classic-absolute) doesn't need this — % of W == % of H
+      // there already, so it keeps the simpler unit.
+      const sizeUnit = isRect ? 'cqmin' : '%';
+      const style = `left:${pos.x}%;top:${pos.y}%;width:${size}${sizeUnit};height:${size}${sizeUnit};`;
       tiles += this._tileHtml(i, G, { edge, abs: true, style });
     }
     // Atlas frees the center (the dice/buy/pass HUD moves to the side panel —

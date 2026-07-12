@@ -467,12 +467,22 @@ test.describe('Wide-screen gutter mode (Fix 3)', () => {
     const chipsRect = await page.locator('.game__chips').evaluate(el => el.getBoundingClientRect());
     const boardRect = await page.locator('#board').evaluate(el => el.getBoundingClientRect());
     const drawerRect = await page.locator('#drawer').evaluate(el => el.getBoundingClientRect());
+    // Redesign B: the action bar leaves the bottom-center floating position
+    // and docks into the SAME left rail as the chip column, below it —
+    // extend the zero-overlap invariant to cover it too (this is the
+    // regression surface for a rail mis-position: an action bar that
+    // overlapped the board here would previously have been invisible to
+    // this test, since it only ever checked chips/drawer).
+    const actionbarRect = await page.locator('.game__actionbar').evaluate(el => el.getBoundingClientRect());
 
     // Zero-overlap invariant, gutter-mode flavor (must hold in BOTH modes,
     // per the brief): the chip column sits fully left of the board, the
     // drawer panel fully right of it — neither ever renders under the board.
     expect(chipsRect.right).toBeLessThanOrEqual(boardRect.left + 1);
     expect(drawerRect.left).toBeGreaterThanOrEqual(boardRect.right - 1);
+    expect(actionbarRect.right).toBeLessThanOrEqual(boardRect.left + 1);
+    // ...and sits BELOW the chip column within that same rail, not overlapping it.
+    expect(actionbarRect.top).toBeGreaterThanOrEqual(chipsRect.bottom - 1);
 
     // Full chip info visible WITHOUT hover — the narrow-mode hover-reveal
     // mechanic (tested at 1180x900 above) is overridden in gutter mode.
@@ -609,5 +619,202 @@ test.describe('Route-pick visibility + line tidiness (Fix 1 + Fix 2)', () => {
     }
 
     expect(forkSeen).toBe(true);
+  });
+});
+
+// ─── Redesign wave: rectangular atlas/globe canvas + locked board size ───
+//
+// Redesign A: atlas (flat, `renderMode` unset/'flat') and globe (`renderMode:
+// 'globe'`) boards render on a RECTANGULAR canvas (`.board--rect`, index.html)
+// that fills the available width AND height independently, instead of the
+// classic square (`aspect-ratio:1/1`) board every other test in this file
+// exercises — classic boards (grid/circle/hex/custom) are UNTOUCHED by this
+// redesign and keep the existing square/board-dominance assertions above.
+// Pinned to the same 1535x900 wide viewport as the gutter-mode describe block
+// above: at that aspect ratio a height-driven SQUARE board tops out at
+// 900px wide (900/1535 = 58.6%), so a rect board genuinely reclaiming the
+// horizontal void is the regression this width is chosen to expose — the
+// owner's "方块" ("why is it still basically square in the middle") complaint
+// would NOT show at a narrower/near-square viewport.
+test.describe('Rectangular atlas/globe canvas (Redesign A)', () => {
+  test.use({ viewport: { width: 1535, height: 900 } });
+
+  // Duplicated from the "Route-pick visibility" describe block's
+  // selectCharactersAtlas above (this file's own established per-describe-block
+  // setup-helper convention — see the file header comment), generalized to take
+  // the map/world display name so it covers both the flat atlas world (Terra
+  // Circuit) and the globe world (Terra Globe), which are both registered under
+  // the same "Dominion" mod (mods/dominion/bundle.data.js `worlds:`).
+  async function selectCharactersWorld(page, mapName) {
+    await page.goto('/');
+    await page.waitForSelector('#btn-mode-local', { timeout: 10000 });
+    await page.click('#btn-mode-local');
+    await selectMod(page, 'Dominion');
+    await page.waitForSelector('.map-card[data-map-idx]', { timeout: 10000 });
+    await page.locator('.map-card[data-map-idx]', { hasText: mapName }).click();
+    await page.waitForSelector('.count-btn[data-count="2"]', { timeout: 10000 });
+    await page.click('.count-btn[data-count="2"]');
+    await page.waitForSelector('#btn-vic-start', { timeout: 10000 });
+    await page.click('#btn-vic-start');
+    await page.waitForSelector('.charcard', { timeout: 10000 });
+    await pickAndConfirm(page);
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.select__p');
+      return el && /PLAYER 2/.test(el.textContent);
+    }, { timeout: 10000 });
+    await pickAndConfirm(page);
+    await page.waitForSelector('#btn-roll', { timeout: 10000 });
+  }
+
+  // Measures the AVAILABLE rect .board--rect's own CSS formula (index.html)
+  // targets — NOT the raw viewport. At 1535x900, gutter mode legitimately
+  // activates for rect boards too (the same >=300px-per-side affordability
+  // probe classic boards use — see App.js _syncGutterMode's isRect branch),
+  // which reserves two fixed-width rails for the chip/action-bar column and
+  // the drawer; "fills the rect" (the brief's own phrasing) means fills what
+  // is actually left over after those rails, not 95% of the full viewport —
+  // a board that also swallowed the rails would overlap the chip column/
+  // drawer, which the OTHER zero-overlap tests in this file already forbid.
+  // Reads the real CSS custom properties App.js writes (not a re-derived
+  // hardcoded constant) so this can't silently drift from the mechanism.
+  async function availableRect(page) {
+    const vw = await page.evaluate(() => window.innerWidth);
+    const vh = await page.evaluate(() => window.innerHeight);
+    const gutters = await page.locator('#game-area').evaluate(el => el.classList.contains('game--gutters'));
+    const gutterW = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gutter-w')) || 0);
+    const chromeTop = await page.locator('#game-area').evaluate(el => parseFloat(getComputedStyle(el).getPropertyValue('--chrome-top')) || 0);
+    const chromeBottom = await page.locator('#game-area').evaluate(el => parseFloat(getComputedStyle(el).getPropertyValue('--chrome-bottom')) || 0);
+    const width = gutters ? (vw - gutterW * 2 - 24) : (vw - 24);
+    const height = vh - chromeTop - chromeBottom;
+    return { width, height, gutters, vw, vh };
+  }
+
+  test('flat atlas (Terra Circuit): board fills the available rect on both axes, tiles stay square', async ({ page }) => {
+    test.setTimeout(30000);
+    const pageErrors = [];
+    page.on('pageerror', err => pageErrors.push(err.message));
+
+    await selectCharactersWorld(page, 'Terra Circuit');
+
+    await expect(page.locator('#board')).toHaveClass(/board--rect/);
+    const boardRect = await page.locator('#board').evaluate(el => el.getBoundingClientRect());
+    const avail = await availableRect(page);
+    console.log(`[rect-canvas atlas] board px @${avail.vw}x${avail.vh} (gutters=${avail.gutters}): `
+      + `${boardRect.width}x${boardRect.height}, avail ${avail.width}x${avail.height}`);
+    expect(boardRect.width / avail.width).toBeGreaterThan(0.95);
+    expect(boardRect.height / avail.height).toBeGreaterThan(0.95);
+
+    // Tiles stay SQUARE (cqmin-sized off the board's own short axis — see
+    // _renderAbsoluteBoard/index.html .board--rect) even though the board
+    // itself is not — sample one rendered tile box.
+    const tileBox = await page.locator('.tile[data-space]').first().evaluate(el => el.getBoundingClientRect());
+    expect(Math.abs(tileBox.width - tileBox.height)).toBeLessThan(2);
+
+    expect(pageErrors).toEqual([]);
+  });
+
+  test('globe (Terra Globe): board container fills the available rect on both axes', async ({ page }) => {
+    test.setTimeout(30000);
+    const pageErrors = [];
+    page.on('pageerror', err => pageErrors.push(err.message));
+
+    await selectCharactersWorld(page, 'Terra Globe');
+
+    await expect(page.locator('#board')).toHaveClass(/board--rect/);
+    await expect(page.locator('#board')).toHaveClass(/board--globe/);
+    const boardRect = await page.locator('#board').evaluate(el => el.getBoundingClientRect());
+    const avail = await availableRect(page);
+    console.log(`[rect-canvas globe] board px @${avail.vw}x${avail.vh} (gutters=${avail.gutters}): `
+      + `${boardRect.width}x${boardRect.height}, avail ${avail.width}x${avail.height}`);
+    // Same measurement as the flat-atlas test above — the globe's WebGL
+    // canvas is resized off the SAME #board container
+    // (_ensureGlobeResizeObserver), so the container filling the available
+    // rect is the load-bearing assertion; the sphere itself just ends up
+    // centered with more visible sky, per the brief.
+    expect(boardRect.width / avail.width).toBeGreaterThan(0.95);
+    expect(boardRect.height / avail.height).toBeGreaterThan(0.95);
+
+    expect(pageErrors).toEqual([]);
+  });
+});
+
+// ─── Redesign wave: locked board size (Redesign B) ───
+//
+// Owner-confirmed bug: the board's bounding box deformed (742px -> 630px)
+// after a single roll, because the old _syncChromeBands measured the action
+// bar's REAL rendered height every update() tick, and that height genuinely
+// varies with turn state (rest vs. jail vs. a pending card, etc — see
+// src/App.js's CHROME_NARROW_TOP/BOTTOM doc comment for the full measured
+// root cause). This is the regression test for exactly that bug: the board's
+// bounding box must be BIT-IDENTICAL across a roll, a buy/pass resolution,
+// and an end-turn — not just "close" or "still mostly square". Pinned to
+// 1180x900 (narrow/floating-chrome mode, the same viewport the pre-existing
+// "big board" tests above use) — this is where the bars float OVER the board
+// and originally caused the deformation; wide-screen gutter mode was verified
+// manually in the browser instead of duplicated here (per the task brief's
+// own browser-verification step), since the rail's action bar has its own
+// fixed max-height there (index.html `.game--gutters .game__actionbar`) and
+// the same STATIC-constant mechanism applies either way.
+test.describe('Locked board size (Redesign B)', () => {
+  test('board bounding box is identical across roll, buy/pass, and end-turn', async ({ page }) => {
+    test.setTimeout(60000);
+    await page.setViewportSize({ width: 1180, height: 900 });
+    const pageErrors = [];
+    page.on('pageerror', err => pageErrors.push(err.message));
+
+    await selectCharacters(page);
+
+    const boardBox = () => page.locator('#board').evaluate(el => {
+      const r = el.getBoundingClientRect();
+      return { width: Math.round(r.width), height: Math.round(r.height) };
+    });
+
+    const before = await boardBox();
+    console.log(`[lock] board px before roll: ${before.width}x${before.height}`);
+
+    // Roll — the exact step that revealed the original deformation (a
+    // taller/shorter turnbox state, e.g. a buy prompt appearing, changing the
+    // action bar's real content height, which used to feed straight into the
+    // board's height formula).
+    await page.click('#btn-roll');
+    await page.waitForTimeout(1100);
+    const afterRoll = await boardBox();
+    console.log(`[lock] board px after roll: ${afterRoll.width}x${afterRoll.height}`);
+    expect(afterRoll).toEqual(before);
+
+    // If a buy prompt appeared, resolve it (buy or pass) — same invariant.
+    const buyBtn = page.locator('#btn-buy');
+    const passBtn = page.locator('#btn-pass');
+    if (await buyBtn.isVisible().catch(() => false)) {
+      await buyBtn.click();
+    } else if (await passBtn.isVisible().catch(() => false)) {
+      await passBtn.click();
+    }
+    await page.waitForTimeout(400);
+    const passAuctionBtn = page.locator('#btn-pass-auction');
+    for (let i = 0; i < 6; i++) {
+      if (await passAuctionBtn.isVisible().catch(() => false)) { await passAuctionBtn.click(); await page.waitForTimeout(200); }
+      else break;
+    }
+    const afterBuy = await boardBox();
+    console.log(`[lock] board px after buy/pass: ${afterBuy.width}x${afterBuy.height}`);
+    expect(afterBuy).toEqual(before);
+
+    // End turn (bounded resolve loop first, in case a card/auction is pending).
+    for (let i = 0; i < 6; i++) {
+      const evAccept = page.locator('#ev-accept');
+      if (await evAccept.isVisible().catch(() => false)) { await evAccept.click(); await page.waitForTimeout(200); continue; }
+      break;
+    }
+    const endBtn = page.locator('#btn-end');
+    if (await endBtn.isVisible().catch(() => false) && await endBtn.isEnabled().catch(() => false)) {
+      await endBtn.click();
+      await page.waitForTimeout(300);
+    }
+    const afterEnd = await boardBox();
+    console.log(`[lock] board px after end-turn: ${afterEnd.width}x${afterEnd.height}`);
+    expect(afterEnd).toEqual(before);
+
+    expect(pageErrors).toEqual([]);
   });
 });
