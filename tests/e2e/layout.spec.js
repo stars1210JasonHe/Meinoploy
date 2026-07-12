@@ -32,15 +32,20 @@ async function selectMod(page, modName) {
   }
 }
 
-async function gotoCharSelect(page) {
+// `count` defaults to 2 (the original single-test flow); the gate-recalibration
+// discriminating test below (final fix wave) drives this at count=6 to prove
+// the chip strip stays a single row at a count high enough to force
+// overflow-x, not just at 2 players where a vertical-stack bug would have
+// been subtle (96px tall strip) instead of board-collapsing (480px at 10).
+async function gotoCharSelect(page, count = 2) {
   await page.goto('/');
   await page.waitForSelector('#btn-mode-local', { timeout: 10000 });
   await page.click('#btn-mode-local');
   await selectMod(page, 'Dominion');
   await page.waitForSelector('.map-card[data-map-idx="0"]', { timeout: 10000 });
   await page.click('.map-card[data-map-idx="0"]');
-  await page.waitForSelector('.count-btn[data-count="2"]', { timeout: 10000 });
-  await page.click('.count-btn[data-count="2"]');
+  await page.waitForSelector(`.count-btn[data-count="${count}"]`, { timeout: 10000 });
+  await page.click(`.count-btn[data-count="${count}"]`);
   await page.waitForSelector('#btn-vic-start', { timeout: 10000 });
   await page.click('#btn-vic-start');
   await page.waitForSelector('.charcard', { timeout: 10000 });
@@ -54,14 +59,18 @@ async function pickAndConfirm(page) {
   await confirm.click();
 }
 
-async function selectCharacters(page) {
-  await gotoCharSelect(page);
-  await pickAndConfirm(page);
-  await page.waitForFunction(() => {
-    const el = document.querySelector('.select__p');
-    return el && /PLAYER 2/.test(el.textContent);
-  }, { timeout: 10000 });
-  await pickAndConfirm(page);
+async function selectCharacters(page, count = 2) {
+  await gotoCharSelect(page, count);
+  for (let i = 0; i < count; i++) {
+    await pickAndConfirm(page);
+    if (i < count - 1) {
+      const next = i + 2;
+      await page.waitForFunction((n) => {
+        const el = document.querySelector('.select__p');
+        return el && new RegExp(`PLAYER ${n}`).test(el.textContent);
+      }, next, { timeout: 10000 });
+    }
+  }
   await page.waitForSelector('#btn-roll', { timeout: 10000 });
 }
 
@@ -74,14 +83,18 @@ test.describe('Map-dominant layout (layout-rebuild)', () => {
     await selectCharacters(page);
 
     // (a) board dominance — #board occupies a majority-ish share of the viewport
-    // width. Task 4 measured 594px @1400x900 (594/1400 = 0.42) after dropping
-    // pix-btn--full off #btn-roll/#btn-jail/#btn-reroll freed height back to
-    // .game__center via the existing grid-template-rows. Use 0.4 as the floor —
-    // the design doc's original 0.5 guess (docs/superpowers/specs/
-    // 2026-07-12-layout-rebuild-design.md §8) predates this real measurement.
+    // width. The 594px/0.42 figure this comment used to cite was WRONG — it
+    // encoded the Critical chip-column bug (final fix wave): #player-info was a
+    // plain block inside the flex .game__chips, so .pcard--chip elements stacked
+    // VERTICALLY, and even at 2 players that tall strip ate enough height that
+    // the "measured" board undershot what the layout actually delivers once
+    // chips render as a real horizontal strip (`#player-info { display:contents }`
+    // fix). Re-measured post-fix, real 1400x900 Chromium, 2 players: #board
+    // clientWidth = 642px (642/1400 = 0.459). Floor set to 0.44, just under the
+    // measured ratio.
     const boardW = await page.locator('#board').evaluate(el => el.clientWidth);
     const vw = await page.evaluate(() => window.innerWidth);
-    expect(boardW / vw).toBeGreaterThan(0.4);
+    expect(boardW / vw).toBeGreaterThan(0.44);
 
     // (b) active chip is visible in the top strip and carries a face element
     // (portrait <img> or the .chip__face--letter fallback span — either way the
@@ -186,5 +199,29 @@ test.describe('Map-dominant layout (layout-rebuild)', () => {
     ).first()).toBeEnabled({ timeout: 8000 });
 
     expect(pageErrors).toEqual([]);
+  });
+
+  // Gate recalibration (final fix wave): this is the assertion that would have
+  // caught the Critical. At 2 players the chip-column bug was subtle (a 96px
+  // vertical strip barely dented the board); it only became board-collapsing
+  // at high player counts (480px tall at 10). Drive 6 players — enough to
+  // force horizontal overflow in the chip strip at 1400px — and assert every
+  // .pcard--chip shares one offsetTop (a real single-row horizontal strip, not
+  // a column) AND the board-dominance floor still holds at that count.
+  test('6-player chip strip stays a single row and board dominance holds', async ({ page }) => {
+    test.setTimeout(60000);
+    await selectCharacters(page, 6);
+
+    const chips = page.locator('.game__chips .pcard--chip');
+    await expect(chips).toHaveCount(6);
+    const tops = await chips.evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().top)));
+    const uniqueTops = [...new Set(tops)];
+    expect(uniqueTops.length).toBe(1); // single row, not a stacked column
+
+    const boardW = await page.locator('#board').evaluate(el => el.clientWidth);
+    const vw = await page.evaluate(() => window.innerWidth);
+    // Same 0.44 floor as the 2-player test (a) — proves the board doesn't
+    // collapse as player count grows, which is exactly what the Critical did.
+    expect(boardW / vw).toBeGreaterThan(0.44);
   });
 });

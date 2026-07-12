@@ -315,6 +315,21 @@
     .screen--game { display:grid; grid-template-rows:auto minmax(0,1fr) auto; gap:10px;
       height:calc(100dvh - 74px); padding:20px; }
     .game__chips { display:flex; gap:8px; overflow-x:auto; align-items:stretch; }
+    /* #player-info is a plain <div> wrapper App.js writes renderPlayerInfo's
+       chips into (see App.js#playerInfoEl); as a normal block it made every
+       .pcard--chip a block-level child of THAT div, stacking them VERTICALLY
+       inside .game__chips's flex row instead of becoming flex items of the
+       row themselves — invisible at 2 players (96px tall strip) but at 10
+       players a 480px-tall column crushed the board to ~210px square (whole-
+       branch review, reproduced in a real headless Chromium run against this
+       stylesheet). display:contents removes the wrapper's own box so its
+       children (the chips) become direct flex items of .game__chips, while
+       the element stays in the DOM/event tree — the delegated click listener
+       App.js attaches to #player-info (createLayout ~418, chip -> popover)
+       keeps working because click bubbling follows the DOM tree, not the box
+       tree. Verified empirically post-fix at 1400x900: 2p and 6p chips share
+       one offsetTop (single row); see task report for the measurement table. */
+    #player-info { display:contents; }
     .pcard { background:var(--bg2); border:3px solid var(--line); box-shadow:var(--bevel), var(--drop); padding:11px;
       display:flex; flex-direction:column; gap:8px; }
     .pcard--active { border-color:var(--pc); box-shadow:0 0 0 2px var(--pc), var(--bevel), 0 0 16px color-mix(in srgb,var(--pc) 45%, transparent); }
@@ -360,6 +375,18 @@
        height (e.g. Task 4's turnbox re-template). */
     .game__center { display:flex; justify-content:center; align-items:center; position:relative; min-height:0; }
     .board { height:min(100%, 1100px); width:auto; max-width:100%; aspect-ratio:1/1; position:relative; }
+    /* Portrait/narrow viewports: the landscape formula above (height-driven,
+       width:auto) hits aspect-ratio's TRANSFERRED MINIMUM SIZE when the
+       .game__center flex row is too narrow to fit a square of that height —
+       max-width:100% alone doesn't stop it (real-browser-measured: 500x900
+       rendered a 606x606 board inside a ~472px-wide container, overflowing
+       the viewport horizontally). Below a 1:1 aspect ratio, flip to a
+       WIDTH-driven formula instead so the square is capped by the actually
+       available inline space, height follows via aspect-ratio, same 1100px
+       safety cap as the landscape case. */
+    @media (max-aspect-ratio: 1/1) {
+      .board { width:min(100%, 1100px); height:auto; }
+    }
     .game__actionbar { display:flex; justify-content:center; overflow-y:auto; min-height:0; }
 
     /* drawer tab rail — vertical strip anchored to .game__center's right edge */
