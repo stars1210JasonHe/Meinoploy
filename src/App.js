@@ -1845,6 +1845,7 @@ class MonopolyBoard {
     G.players.forEach((player, i) => {
       const isCurrent = ctx.currentPlayer === String(i);
       const char = player.character;
+      const cchar = this._clientChar(char); // portrait-bearing client character (see _clientChar doc comment)
       const color = this._playerColor(G, i);
       const name = char ? char.name : `Player ${i + 1}`;
 
@@ -1868,7 +1869,7 @@ class MonopolyBoard {
 
       html += chipHtml({
         idx: i, name, color,
-        portraitUrl: char ? char.portrait : null,
+        portraitUrl: cchar ? cchar.portrait : null,
         money: moneyHtml, hideMoney,
         isCurrent, isBankrupt: !!player.bankrupt,
         deeds: player.properties.length,
@@ -1876,7 +1877,7 @@ class MonopolyBoard {
 
       this._chipDetail[i] = {
         name, title: char ? char.title : '', color,
-        portraitUrl: char ? char.portrait : null,
+        portraitUrl: cchar ? cchar.portrait : null,
         moneyHtml, deeds: player.properties.length,
         passiveName: char ? char.passive.name : '',
         passiveDesc: char ? char.passive.description : '',
