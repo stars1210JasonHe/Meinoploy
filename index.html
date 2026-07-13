@@ -32,8 +32,11 @@
       --disp:'Press Start 2P', monospace;
       --body:'VT323', monospace;
       --ui-scale:1;
-      --bevel: inset 2px 2px 0 rgba(255,255,255,.10), inset -2px -2px 0 rgba(0,0,0,.5);
-      --drop: 5px 5px 0 rgba(0,0,0,.45);
+      /* R3: GB bevel retired — B2 war-room material (thin bright top edge +
+         hard drop, no light/dark bevel corners). Same var names, all 33/7
+         consumers convert wholesale. */
+      --bevel: inset 0 2px 0 rgba(255,255,255,.06), inset 0 0 0 1px rgba(0,0,0,.4);
+      --drop: 0 6px 0 rgba(0,0,0,.4);
     }
 
     /* ---- RESET ---- */
@@ -76,30 +79,43 @@
     select { font-family:var(--disp); font-size:9px; padding:8px; }
 
     /* ============ PIXEL PRIMITIVES ============ */
-    .pix-panel { position:relative; background:var(--bg2); border:3px solid var(--line);
-      box-shadow:var(--bevel), var(--drop); }
-    .pix-panel--inset { background:var(--bg3); box-shadow:inset 2px 2px 0 rgba(0,0,0,.55), inset -2px -2px 0 rgba(255,255,255,.05); }
-    .pix-panel__accent { position:absolute; left:0; top:0; bottom:0; width:6px; }
+    /* R3: the shared panel/button primitives retire the GB look and speak the
+       B2 war-room language everywhere (entry screens included). Class names
+       survive — only the material changes. */
+    .pix-panel { position:relative;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.05) 0px, rgba(255,255,255,.05) 1px, transparent 1px, transparent 3px),
+        linear-gradient(152deg, var(--wr-panel-1) 0% 30%, var(--wr-panel-2) 30% 62%, var(--wr-panel-3) 62% 84%, var(--wr-panel-4) 84% 100%);
+      border:2px solid rgba(110,190,230,.32);
+      box-shadow:var(--drop), var(--bevel); }
+    .pix-panel--inset { background:var(--bg3); box-shadow:inset 0 0 0 1px rgba(0,0,0,.5), inset 0 2px 6px rgba(0,0,0,.45); }
+    .pix-panel__accent { position:absolute; left:0; top:0; bottom:0; width:4px; box-shadow:0 0 8px var(--accent); }
     .pix-panel__titlebar { display:flex; justify-content:space-between; align-items:center;
-      background:var(--bg3); border-bottom:3px solid var(--line); padding:7px 10px; }
+      background:linear-gradient(90deg, rgba(79,227,255,.08), transparent 70%);
+      border-bottom:2px solid var(--wr-hair); padding:7px 10px; }
     .pix-panel__title { font-family:var(--disp); font-size:9px; letter-spacing:1px; color:var(--accent); }
     .pix-panel__right { font-family:var(--disp); font-size:8px; color:var(--ink-dim); }
     .pix-panel__body { padding:12px; }
 
     .pix-btn { font-family:var(--disp); text-transform:uppercase; letter-spacing:1px;
-      color:var(--ink); background:var(--bg3); border:3px solid var(--line);
-      box-shadow:var(--bevel), 4px 4px 0 rgba(0,0,0,.5); padding:11px 14px; font-size:10px;
+      color:var(--ink); background:var(--wr-panel-3); border:2px solid var(--wr-steel-lt);
+      box-shadow:0 4px 0 rgba(0,0,0,.4); padding:11px 14px; font-size:10px;
       transition:transform .04s, filter .1s; line-height:1.4; }
     .pix-btn:hover:not(:disabled) { filter:brightness(1.18); }
-    .pix-btn:active:not(:disabled) { transform:translate(3px,3px); box-shadow:var(--bevel), 1px 1px 0 rgba(0,0,0,.5); }
+    .pix-btn:active:not(:disabled) { transform:translate(0,3px); box-shadow:0 1px 0 rgba(0,0,0,.4); }
     .pix-btn:disabled { opacity:.4; cursor:not-allowed; }
-    .pix-btn--primary { background:var(--accent); color:#161009; border-color:#000; }
-    .pix-btn--default { background:var(--bg2); }
-    .pix-btn--success { background:var(--good); color:#0a1a10; border-color:#000; }
-    .pix-btn--danger { background:var(--bad); color:#1a0707; border-color:#000; }
-    .pix-btn--ghost { background:transparent; color:var(--ink-dim); }
+    /* primary = the CTA (amber banded, mockup .btn-end; in-game adds the pulse) */
+    .pix-btn--primary { color:#1a1206; border-color:rgba(255,213,120,.55);
+      background:linear-gradient(120deg, var(--wr-amber-soft) 0% 35%, var(--accent2) 35% 70%, #ff9d3d 70% 100%);
+      box-shadow:0 4px 0 rgba(180,100,20,.4); }
+    .pix-btn--default { color:var(--wr-cyan-soft); background:rgba(79,227,255,.1); border-color:rgba(79,227,255,.45); }
+    .pix-btn--success { color:#06180e; border-color:rgba(125,255,196,.5);
+      background:linear-gradient(180deg, #7dffc4 0% 45%, var(--good) 45% 100%);
+      box-shadow:0 4px 0 rgba(10,80,45,.5); }
+    .pix-btn--danger { color:#ffb3bd; background:rgba(255,84,104,.12); border-color:rgba(255,84,104,.5); }
+    .pix-btn--ghost { background:rgba(255,255,255,.04); color:var(--ink-dim); border-color:rgba(120,190,230,.3); }
     .pix-btn--full { width:100%; }
-    .pix-btn--sm { font-size:8px; padding:8px 10px; box-shadow:var(--bevel), 3px 3px 0 rgba(0,0,0,.5); }
+    .pix-btn--sm { font-size:8px; padding:8px 10px; box-shadow:0 3px 0 rgba(0,0,0,.4); }
     .pix-btn--lg { font-size:13px; padding:15px 22px; }
 
     /* stat bars */
@@ -1107,7 +1123,14 @@
     .modal__scrim { position:fixed; inset:0; background:rgba(4,5,10,.78); display:none; place-items:center;
       z-index:9500; padding:24px; backdrop-filter:blur(1px); overflow:auto; }
     .modal__scrim.open { display:grid; }
-    .modal { background:var(--bg2); border:4px solid var(--line); box-shadow:var(--bevel), 8px 8px 0 rgba(0,0,0,.6);
+    /* R3: modals speak the wr material EVERYWHERE (the .app--game copy that
+       carried this since R1b is retired below — one definition now). */
+    .modal {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.05) 0px, rgba(255,255,255,.05) 1px, transparent 1px, transparent 3px),
+        linear-gradient(152deg, var(--wr-panel-1) 0% 30%, var(--wr-panel-2) 30% 62%, var(--wr-panel-3) 62% 84%, var(--wr-panel-4) 84% 100%);
+      border:2px solid rgba(79,227,255,.4);
+      box-shadow:0 14px 0 rgba(0,0,0,.4), 0 0 26px rgba(79,227,255,.2);
       max-width:460px; width:100%; max-height:90vh; overflow:auto; }
     .modal--wide { max-width:760px; }
 
@@ -1409,38 +1432,13 @@
       box-shadow:0 6px 0 rgba(0,0,0,.35), 0 0 18px rgba(79,227,255,.15);
     }
 
-    /* In-game button mapping onto the existing .pix-btn class family. Game-scoped
-       override only — the shared primitives keep the GB look on entry screens
-       until R3. Variant rules follow the base rule (equal specificity, source
-       order wins), mirroring the original .pix-btn block's structure. */
-    .app--game .pix-btn {
-      border:2px solid var(--wr-steel-lt); background:var(--wr-panel-3);
-      box-shadow:0 4px 0 rgba(0,0,0,.4);
-    }
-    .app--game .pix-btn:active:not(:disabled) { transform:translate(0,3px); box-shadow:0 1px 0 rgba(0,0,0,.4); }
-    /* primary = THE turn CTA (mockup .btn-end): banded amber, stepped glow pulse */
+    /* R3: the .pix-btn primitives now carry the B2 material globally — the
+       R1b game-scoped copies retired; only the in-game CTA pulse remains. */
     .app--game .pix-btn--primary {
-      color:#1a1206; border-color:rgba(255,213,120,.55);
-      background:linear-gradient(120deg, var(--wr-amber-soft) 0% 35%, var(--accent2) 35% 70%, #ff9d3d 70% 100%);
       box-shadow:0 4px 0 rgba(180,100,20,.4), 0 0 18px rgba(255,182,72,.35);
       animation:wrCtaGlow 1.4s steps(6) infinite;
     }
     .app--game .pix-btn--primary:disabled { animation:none; }
-    .app--game .pix-btn--default {
-      color:var(--wr-cyan-soft); background:rgba(79,227,255,.1);
-      border-color:rgba(79,227,255,.45);
-    }
-    .app--game .pix-btn--success {
-      color:#06180e; background:linear-gradient(180deg, #7dffc4 0% 45%, var(--good) 45% 100%);
-      border-color:rgba(125,255,196,.5);
-      box-shadow:0 4px 0 rgba(10,80,45,.5);
-    }
-    .app--game .pix-btn--danger {
-      color:#ffb3bd; background:rgba(255,84,104,.12); border-color:rgba(255,84,104,.5);
-    }
-    .app--game .pix-btn--ghost {
-      color:var(--wr-ink-faint); background:rgba(255,255,255,.04); border-color:rgba(120,190,230,.3);
-    }
     @keyframes wrCtaGlow {
       0%,100% { box-shadow:0 4px 0 rgba(180,100,20,.4), 0 0 18px rgba(255,182,72,.35); }
       50% { box-shadow:0 4px 0 rgba(180,100,20,.4), 0 0 30px rgba(255,182,72,.55); }
@@ -1479,19 +1477,9 @@
       box-shadow:0 4px 0 rgba(180,100,20,.4), 0 0 24px rgba(255,182,72,.4);
     }
 
-    /* ── R1b: popover cards (chip-detail / tile-detail via the shared in-game
-       ui-modal .modal box — trade/saves/AI settings inherit the same material;
-       entry-screen modals keep GB until R3). Mockup .popover: wr material +
-       cyan ring, amber prices, dashed hair dividers, amber build pips. ── */
-    .app--game .modal {
-      background:
-        linear-gradient(180deg, rgba(255,255,255,.05) 0px, rgba(255,255,255,.05) 1px, transparent 1px, transparent 3px),
-        linear-gradient(152deg, var(--wr-panel-1) 0% 30%, var(--wr-panel-2) 30% 62%, var(--wr-panel-3) 62% 84%, var(--wr-panel-4) 84% 100%);
-      border:2px solid rgba(79,227,255,.4);
-      box-shadow:0 14px 0 rgba(0,0,0,.4), 0 0 26px rgba(79,227,255,.2);
-    }
-    /* Head band: entity-tinted gradient strip (mockup .pop-head) — the head
-       rows already exist in both card families; tint from the hair line. */
+    /* ── R1b popover polish (container material now lives on base .modal, R3).
+       Head band: entity-tinted gradient strip (mockup .pop-head) — the head
+       rows already exist in both card families; tint from the hair line. ── */
     .app--game .chip-detail__head, .app--game .tile-detail__head {
       border-bottom:2px solid var(--wr-hair); padding-bottom:9px;
     }
