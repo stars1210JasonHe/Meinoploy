@@ -1344,6 +1344,39 @@
       0%,100% { box-shadow:0 4px 0 rgba(180,100,20,.4), 0 0 18px rgba(255,182,72,.35); }
       50% { box-shadow:0 4px 0 rgba(180,100,20,.4), 0 0 30px rgba(255,182,72,.55); }
     }
+
+    /* ── R1b: topbar strip, drawer, tabs, route banner ── */
+    /* Topbar: banded navy strip with hair bottom edge (mockup .topbar) behind
+       the existing buttons; the auto-hide slide mechanism is untouched. */
+    .app--game .topbar {
+      background:linear-gradient(180deg, var(--wr-panel-3) 0% 60%, var(--wr-panel-4) 60% 100%);
+      border-bottom:2px solid var(--wr-hair);
+    }
+    /* Drawer: deep panel band + hair edge (mockup .drawer). */
+    .app--game .drawer {
+      background:linear-gradient(180deg, var(--wr-panel-3) 0% 50%, var(--wr-panel-4) 50% 100%);
+      border-left:2px solid var(--wr-hair);
+    }
+    /* Tab rail: dim ink at rest; active tab = cyan text + glowing left bar
+       (mockup .drawer-tab.hot). Unread keeps the amber accent. */
+    .app--game .drawer-tabs__btn {
+      color:var(--ink-dim); background:var(--wr-panel-3);
+      border:2px solid var(--wr-steel-lt); box-shadow:0 3px 0 rgba(0,0,0,.4);
+    }
+    .app--game .drawer-tabs__btn--active {
+      color:var(--wr-cyan-soft); background:linear-gradient(90deg, rgba(79,227,255,.14), var(--wr-panel-3) 70%);
+      border-color:rgba(79,227,255,.45);
+      box-shadow:inset 3px 0 0 var(--accent), 0 0 10px rgba(79,227,255,.25), 0 3px 0 rgba(0,0,0,.4);
+    }
+    .app--game .drawer-tabs__btn--unread { border-color:var(--accent2); }
+    /* Route banner: amber CTA band (was --good green) — the pick-a-route call
+       to action reads in the same CTA language as END TURN now. Same pulse;
+       E2E gates only on display, not colour. */
+    .app--game #route-banner {
+      color:#1a1206; background:linear-gradient(120deg, var(--wr-amber-soft) 0% 40%, var(--accent2) 40% 100%);
+      border:2px solid rgba(255,213,120,.55);
+      box-shadow:0 4px 0 rgba(180,100,20,.4), 0 0 24px rgba(255,182,72,.4);
+    }
   </style>
 </head>
 <body>
