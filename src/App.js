@@ -2406,7 +2406,7 @@ class MonopolyBoard {
         + `<marker id="atlas-arrow" markerWidth="4" markerHeight="4" refX="3" refY="2" orient="auto">`
         + `<path d="M0,0 L4,2 L0,4 Z" fill="var(--ink-dim)"></path></marker>`
         + `<marker id="atlas-arrow-hot" markerWidth="4" markerHeight="4" refX="3" refY="2" orient="auto">`
-        + `<path d="M0,0 L4,2 L0,4 Z" fill="var(--good)"></path></marker>`
+        + `<path d="M0,0 L4,2 L0,4 Z" fill="var(--accent)"></path></marker>`
         + `</defs>`
         + lines + `</svg>`;
     }

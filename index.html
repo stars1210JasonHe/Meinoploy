@@ -780,7 +780,10 @@
       stroke-width: 1;
       vector-effect: non-scaling-stroke;
       opacity: 0.18;
-      stroke-linecap: round;
+      /* R1c: pixel-dashed square caps (mockup .route-line) — opacity values
+         above/below are E2E-gated (layout.spec route-pick case), unchanged. */
+      stroke-linecap: square;
+      stroke-dasharray: 7 5;
       transition: opacity .15s ease, stroke .15s ease, stroke-width .15s ease;
     }
     /* Route-pick modality: dim the base network to near-invisible and let ONLY
@@ -794,7 +797,7 @@
        edges. See task report for the write-up. */
     .app--game #game-area.game--routepick .board__edges line { opacity:0.06; }
     .app--game #game-area.game--routepick .board__edges line.edge--hot {
-      opacity:1; stroke:var(--good); stroke-width:2.2;
+      opacity:1; stroke:var(--accent); stroke-width:2.2;
     }
     /* R1c: dither-bloom node halos — sibling layer under the tiles (the tile
        clips overflow, so halos can't be children). Sprite comes from wr-bloom
@@ -816,11 +819,12 @@
        transform-based pulse here would fight any token sharing the tile.
        z-index raised so the glow isn't clipped by an adjacent tile's box in
        the grid/absolute layouts. */
-    .tile--route-target { outline:3px solid var(--good); outline-offset:2px; cursor:pointer;
+    /* R1c: targets speak the amber CTA language (route banner / END TURN). */
+    .tile--route-target { outline:3px solid var(--accent2); outline-offset:2px; cursor:pointer;
       z-index:3; animation: routePulse 0.9s ease-in-out infinite; }
     @keyframes routePulse {
-      0%,100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--good) 70%, transparent); }
-      50% { box-shadow:0 0 18px 7px color-mix(in srgb, var(--good) 70%, transparent); }
+      0%,100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent2) 70%, transparent); }
+      50% { box-shadow:0 0 18px 7px color-mix(in srgb, var(--accent2) 70%, transparent); }
     }
     /* persistent token overlay — survives grid rebuilds, repositioned each tick */
     #token-layer { position:absolute; inset:0; pointer-events:none; z-index:5; }
