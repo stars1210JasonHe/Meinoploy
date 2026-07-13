@@ -1,4 +1,4 @@
-import { chipHtml, chipDetailHtml, drawerShellHtml, tokenVisual, tileDetailHtml, nodeGlow, NODE_GLOW_COLORS } from '../game-chrome';
+import { chipHtml, chipDetailHtml, drawerShellHtml, tokenVisual, tileDetailHtml, nodeGlow, NODE_GLOW_COLORS, legendHtml } from '../game-chrome';
 
 const P = { idx: 0, name: 'Hammurabi', title: 'The Lawgiver', color: '#e8a33d',
   money: '$3,085', portraitUrl: '/portraits/h.png', isCurrent: true, isBankrupt: false,
@@ -253,5 +253,29 @@ describe('nodeGlow', () => {
   });
   test('owner neon wins even on a hub (context stays hub-wide)', () => {
     expect(nodeGlow({ type: 'property', isHub: true }, '#a97bff')).toEqual({ color: '#a97bff', context: 'hub' });
+  });
+});
+
+// R1d: legend cartouche — live rows (mockup .legend).
+describe('legendHtml', () => {
+  const ROWS = [
+    { color: '#4fe3ff', label: '中立 NEUTRAL', kind: 'neutral' },
+    { color: '#ff3b5c', label: '领地 · 董卓', kind: 'player' },
+    { color: '#ff8a3d', label: '税赋 TAX', kind: 'tax' },
+    { color: '#a97bff', label: '机变 CHANCE', kind: 'chance' },
+  ];
+  test('renders a dot-colored row per entry with escaped labels', () => {
+    const h = legendHtml(ROWS);
+    expect(h).toContain('legend__row');
+    expect((h.match(/legend__dot/g) || []).length).toBe(4);
+    expect(h).toContain('--dot:#ff3b5c');
+    expect(h).toContain('领地 · 董卓');
+    expect(legendHtml([{ color: '#fff', label: '<img>', kind: 'player' }])).not.toContain('<img>');
+  });
+  test('carries the cartouche title and kind modifiers', () => {
+    const h = legendHtml(ROWS);
+    expect(h).toContain('legend__title');
+    expect(h).toContain('legend__row--player');
+    expect(h).toContain('legend__row--neutral');
   });
 });

@@ -218,6 +218,17 @@ export const NODE_GLOW_COLORS = Object.freeze({
   dim: '#5c7690', // jail / parking / other non-play specials
 });
 
+// R1d: legend cartouche rows (mockup .legend) — bottom-left board overlay.
+// rows: [{ color, label, kind: 'neutral'|'player'|'tax'|'chance' }] — the
+// App builds them LIVE (one player row per non-bankrupt seat), never static copy.
+export function legendHtml(rows) {
+  const body = (rows || []).map(r =>
+    `<div class="legend__row legend__row--${esc(r.kind)}" style="--dot:${esc(r.color)}">
+       <span class="legend__dot"></span><span class="legend__label">${esc(r.label)}</span>
+     </div>`).join('');
+  return `<div class="legend__title">LEGEND · 图例</div>${body}`;
+}
+
 export function nodeGlow(space, ownerColor) {
   const context = space.isHub ? 'hub' : (space.type === 'go' ? 'start' : (ownerColor ? 'nodeOwned' : 'node'));
   if (ownerColor) return { color: ownerColor, context };

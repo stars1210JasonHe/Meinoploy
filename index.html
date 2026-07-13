@@ -554,6 +554,20 @@
     @keyframes routeBannerPulse { 0%,100% { filter:brightness(1); } 50% { filter:brightness(1.25); } }
     @media (max-width:680px) { #route-banner { white-space:normal; max-width:88vw; font-size:9px; top:8px; } }
     .app--game #game-area.game--routepick #route-banner { display:block; }
+    /* R1d: legend cartouche (mockup .legend) — bottom-left board overlay,
+       display-only (pointer-events:none; zero click-path/geometry impact,
+       route-banner precedent). wr-panel/notch classes carry the material. */
+    #board-legend { position:absolute; left:8px; bottom:8px; z-index:20; pointer-events:none;
+      display:flex; flex-direction:column; gap:4px; padding:8px 11px; max-width:200px; opacity:.92; }
+    .legend__title { font-family:var(--disp); font-size:6px; letter-spacing:2px;
+      color:var(--wr-ink-faint); text-transform:uppercase; margin-bottom:2px; }
+    .legend__row { display:flex; align-items:center; gap:6px; font-family:var(--body);
+      font-size:13px; line-height:1.1; color:var(--ink-dim); }
+    .legend__row--player .legend__label { color:var(--ink); }
+    .legend__dot { width:7px; height:7px; flex:none; background:var(--dot);
+      box-shadow:0 0 0 1px rgba(0,0,0,.5), 0 0 6px var(--dot); }
+    .legend__label { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    @media (max-width:900px) { #board-legend { display:none; } }
     .app--game .game__chips { position:fixed; top:8px; left:50%; transform:translateX(-50%);
       z-index:45; max-width:calc(100vw - 24px); background:color-mix(in srgb, var(--bg2) 85%, transparent);
       border:2px solid var(--line); box-shadow:var(--bevel); padding:6px 9px; }

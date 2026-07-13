@@ -15,7 +15,7 @@ import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
 import { isDuelCooldownBlocked } from './events';
 import { createAnimator, DICE_TUMBLE_MS } from './anim';
 import { createAudio } from './audio';
-import { chipHtml, chipDetailHtml, tileDetailHtml, drawerShellHtml, tokenVisual, nodeGlow } from './game-chrome';
+import { chipHtml, chipDetailHtml, tileDetailHtml, drawerShellHtml, tokenVisual, nodeGlow, legendHtml, NODE_GLOW_COLORS } from './game-chrome';
 import { resolveBoardBg, starfieldDataUri } from './board-bg';
 import { bloomSprite } from './wr-bloom';
 
@@ -1089,6 +1089,7 @@ class MonopolyBoard {
     this._showScreen('game');
     this.detectAndTriggerAI(G, ctx);
     this.renderBoard(G, ctx);
+    this._renderLegend(G, ctx);
     this.renderTokens(G, ctx);
     this.renderPlayerInfo(G, ctx);
     this.renderTurnbox(G, ctx);
@@ -1835,6 +1836,23 @@ class MonopolyBoard {
     return this.activeMod.characters.find(c => c.id === gChar.id) || gChar;
   }
 
+  // R1d: legend cartouche — LIVE rows (neutral + one per non-bankrupt player
+  // + tax + chance), colors from the same tables the board glows use. Rebuilt
+  // every update like the rest of the HUD; pure builder lives in game-chrome.
+  _renderLegend(G, ctx) {
+    const el = document.getElementById('board-legend');
+    if (!el) return;
+    const rows = [{ color: NODE_GLOW_COLORS.neutral, label: '中立 NEUTRAL', kind: 'neutral' }];
+    G.players.forEach((p, i) => {
+      if (p.bankrupt) return;
+      const name = p.character ? p.character.name : `PLAYER ${i + 1}`;
+      rows.push({ color: this._playerColor(G, i), label: `领地 · ${name}`, kind: 'player' });
+    });
+    rows.push({ color: NODE_GLOW_COLORS.tax, label: '税赋 TAX', kind: 'tax' });
+    rows.push({ color: NODE_GLOW_COLORS.chance, label: '机变 CHANCE', kind: 'chance' });
+    el.innerHTML = legendHtml(rows);
+  }
+
   renderBoard(G, ctx) {
     const mode = this.mapData.renderMode;
     // Tear down the globe when we leave globe mode (frees the WebGL context + RAF loop).
@@ -2251,7 +2269,10 @@ class MonopolyBoard {
   _ensureBoardChildren() {
     if (!this._gridWrap || this._gridWrap.parentElement !== this.boardEl
         || !this._tokenLayer || this._tokenLayer.parentElement !== this.boardEl) {
-      this.boardEl.innerHTML = '<div class="board__bg"></div><div class="board__grid-wrap"></div><div id="token-layer"></div>';
+      // #board-legend anchors to the BOARD's bottom-left (R1d) — in the
+      // full-bleed layout .game__center spans the viewport under the fixed
+      // rails, so anchoring there put the cartouche beneath the actionbar.
+      this.boardEl.innerHTML = '<div class="board__bg"></div><div class="board__grid-wrap"></div><div id="token-layer"></div><div id="board-legend" class="wr-panel wr-notch--sm"></div>';
       this._boardBgEl = this.boardEl.querySelector('.board__bg');
       this._gridWrap = this.boardEl.querySelector('.board__grid-wrap');
       this._tokenLayer = this.boardEl.querySelector('#token-layer');
