@@ -1136,7 +1136,11 @@ class MonopolyBoard {
       // synchronous notify chain fires, so by the time it reaches
       // this._botDriver.onUpdate(), `scheduled` is already false.
       dispatch: (name, ...args) => {
-        setTimeout(() => { if (this.client) this.client.moves[name](...args); }, 0);
+        // Identity capture (T2 review Important): a stale 0ms timer armed just
+        // before loadGame() swaps clients must NOT fire into the NEW game — a
+        // truthiness check would (this.client is truthy again post-load).
+        const c = this.client;
+        setTimeout(() => { if (this.client === c) c.moves[name](...args); }, 0);
       },
       // decide/decideRoute close over policyForSeat(seat) themselves — bot-driver.js
       // never calls resolvePolicy (task-1-report.md's documented convention for the
