@@ -1194,6 +1194,95 @@
       .lore { grid-template-columns:1fr; }
       .title__logo-line { font-size:30px; }
     }
+
+    /* ============================================================
+       B2 WAR-ROOM COMPONENT FAMILY (reskin R1a)
+       Mirrors mockup-b2-pixel-nightlights.html: .panel / .pxnotch /
+       .btn-* / .chip-portrait. Scoped under .app--game — entry screens
+       keep the .pix-* look until R3 (spec §3 hard scoping rule). Placed
+       LAST in the stylesheet so equal-specificity .app--game chrome
+       rules above (chips/actionbar) lose to these on the same props.
+       ============================================================ */
+
+    /* Opaque banded-gradient panel — quantized shading, NO blur/glass.
+       (mockup .panel) */
+    .app--game .wr-panel {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.05) 0px, rgba(255,255,255,.05) 1px, transparent 1px, transparent 3px),
+        linear-gradient(152deg, var(--wr-panel-1) 0% 30%, var(--wr-panel-2) 30% 62%, var(--wr-panel-3) 62% 84%, var(--wr-panel-4) 84% 100%);
+      border:2px solid rgba(110,190,230,.32);
+      box-shadow:
+        0 6px 0 rgba(0,0,0,.35),
+        inset 0 0 0 1px rgba(0,0,0,.4),
+        inset 0 2px 0 rgba(255,255,255,.06);
+    }
+
+    /* Staircase pixel-notch corners, size-independent (mockup .pxnotch family).
+       clip-path clips the drop shadow — same trade the approved mockup makes. */
+    .app--game .wr-notch {
+      clip-path:polygon(
+        9px 0, 100% 0, 100% calc(100% - 9px),
+        calc(100% - 3px) calc(100% - 9px), calc(100% - 3px) calc(100% - 6px),
+        calc(100% - 6px) calc(100% - 6px), calc(100% - 6px) calc(100% - 3px),
+        calc(100% - 9px) calc(100% - 3px), calc(100% - 9px) 100%,
+        0 100%, 0 9px,
+        3px 9px, 3px 6px, 6px 6px, 6px 3px, 9px 3px);
+    }
+    .app--game .wr-notch--lg {
+      clip-path:polygon(
+        12px 0, 100% 0, 100% calc(100% - 12px),
+        calc(100% - 4px) calc(100% - 12px), calc(100% - 4px) calc(100% - 8px),
+        calc(100% - 8px) calc(100% - 8px), calc(100% - 8px) calc(100% - 4px),
+        calc(100% - 12px) calc(100% - 4px), calc(100% - 12px) 100%,
+        0 100%, 0 12px,
+        4px 12px, 4px 8px, 8px 8px, 8px 4px, 12px 4px);
+    }
+    .app--game .wr-notch--sm {
+      clip-path:polygon(
+        6px 0, 100% 0, 100% calc(100% - 6px),
+        calc(100% - 2px) calc(100% - 6px), calc(100% - 2px) calc(100% - 4px),
+        calc(100% - 4px) calc(100% - 4px), calc(100% - 4px) calc(100% - 2px),
+        calc(100% - 6px) calc(100% - 2px), calc(100% - 6px) 100%,
+        0 100%, 0 6px,
+        2px 6px, 2px 4px, 4px 4px, 4px 2px, 6px 2px);
+    }
+
+    /* Button family (mockup .btn-end / .btn-trade / .btn-full) — defined here,
+       consumed by R1b's HUD/turnbox restyle. */
+    .app--game .wr-btn {
+      font-family:var(--disp); letter-spacing:2px; text-transform:uppercase;
+      display:inline-flex; align-items:center; justify-content:center; gap:8px;
+      cursor:pointer; border:none; transition:filter .15s;
+    }
+    .app--game .wr-btn--primary {
+      color:#1a1206; font-weight:700;
+      background:linear-gradient(180deg, var(--wr-amber-soft) 0% 45%, var(--accent2) 45% 100%);
+      box-shadow:0 4px 0 rgba(0,0,0,.4);
+    }
+    .app--game .wr-btn--ghost {
+      color:var(--wr-cyan-soft);
+      background:rgba(79,227,255,.1); border:2px solid rgba(79,227,255,.45);
+    }
+    .app--game .wr-btn--dim {
+      color:var(--ink-dim);
+      background:rgba(255,255,255,.04); border:2px solid rgba(120,190,230,.3);
+    }
+    .app--game .wr-btn:hover { filter:brightness(1.15); }
+
+    /* Portrait badge ring — dark seat ring + per-player neon glow (--pc),
+       (mockup .chip-portrait). */
+    .app--game .wr-badge {
+      box-shadow:0 0 0 2px rgba(4,7,14,.85), 0 0 10px 1px var(--pc, var(--accent));
+    }
+
+    /* Proof-set application (R1a): each player chip is its own war-room panel
+       (mockup: chips sit bare on the stage) — so the strip CONTAINER's box
+       chrome retires; the wr-panel chips carry the visual weight now. */
+    .app--game .game__chips { background:transparent; border:none; box-shadow:none; padding:0; }
+    .app--game .pcard--chip.wr-panel { padding:5px 9px; }
+    .app--game .pcard--chip .chip__face { box-shadow:0 0 0 2px rgba(4,7,14,.85), 0 0 10px 1px var(--pc, var(--accent)); }
+    /* Active player: neon edge + amber ACTIVE tag stays readable on the banded fill */
+    .app--game .pcard--chip.pcard--active.wr-panel { border-color:var(--pc, var(--accent)); }
   </style>
 </head>
 <body>

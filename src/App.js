@@ -399,7 +399,7 @@ class MonopolyBoard {
                 <div id="dice-overlay" style="display:none;"><span class="bigdie" data-die="1"></span><span class="bigdie" data-die="2"></span></div>
                 <div id="drawer-tabs"></div>
               </div>
-              <div class="game__actionbar"><div id="turnbox"></div><button id="btn-fs" class="pix-btn pix-btn--default">FULL</button></div>
+              <div class="game__actionbar wr-panel wr-notch"><div id="turnbox"></div><button id="btn-fs" class="pix-btn pix-btn--default">FULL</button></div>
             </div>
             <div id="drawer" class="drawer" hidden></div>
           </div>

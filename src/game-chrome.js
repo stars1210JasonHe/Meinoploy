@@ -23,7 +23,7 @@ export function chipHtml(p) {
     ? `<img class="chip__face" src="${esc(p.portraitUrl)}" alt="">`
     : `<span class="chip__face chip__face--letter" style="--tcol:${esc(p.color)}">${letter}</span>`;
   return `
-    <div class="pcard pcard--chip ${p.isCurrent ? 'pcard--active' : ''} ${p.isBankrupt ? 'pcard--bankrupt' : ''}"
+    <div class="pcard pcard--chip wr-panel wr-notch ${p.isCurrent ? 'pcard--active' : ''} ${p.isBankrupt ? 'pcard--bankrupt' : ''}"
          style="--pc:${esc(p.color)}" data-chip="${p.idx}">
       ${face}
       <span class="pcard__name" style="color:${esc(p.color)}">${esc(p.name)}</span>

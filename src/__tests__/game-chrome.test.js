@@ -18,6 +18,11 @@ describe('chipHtml', () => {
     expect(chipHtml({ ...P, isCurrent: false })).not.toContain('pcard--active');
     expect(chipHtml({ ...P, isCurrent: false, isBankrupt: true })).toContain('pcard--bankrupt');
   });
+  test('chip carries the B2 war-room panel classes (reskin R1a, additive)', () => {
+    const h = chipHtml(P);
+    expect(h).toContain('wr-panel');
+    expect(h).toContain('wr-notch');
+  });
   test('inJail renders the pcard__jail badge; absent when false', () => {
     expect(chipHtml({ ...P, inJail: true })).toContain('pcard__jail');
     expect(chipHtml({ ...P, inJail: true })).toContain('JAIL');
