@@ -18,6 +18,14 @@ import { createAudio } from './audio';
 import { chipHtml, chipDetailHtml, tileDetailHtml, drawerShellHtml, tokenVisual, nodeGlow, legendHtml, NODE_GLOW_COLORS } from './game-chrome';
 import { resolveBoardBg, starfieldDataUri } from './board-bg';
 import { bloomSprite } from './wr-bloom';
+// Local computer players (Task 2 wiring): bot-driver.js is the engine-decoupled
+// paced stepper (Task 1 — see .superpowers/sdd/task-1-report.md); this module's
+// own `decide`/`decideRoute` deps close over sim/bot.js's PURE decision logic
+// (Atlas Balance Sim's greedy-developer bot), bound per-seat via policyForSeat —
+// exactly the convention task-1-report.md documents the wiring layer as expected
+// to follow (its own decide() never calls resolvePolicy itself).
+import { createBotDriver, deriveActingSeat, policyForSeat } from './bot-driver';
+import { decideMoves, decideRoute as decideBotRoute } from './sim/bot';
 
 // Client-side mod registry — static bundle imports (Parcel v1 forces all imports static, so
 // every registered mod is bundled at build; only WHICH is active is chosen at runtime). This
@@ -204,6 +212,17 @@ class MonopolyBoard {
     this.mode = null; // 'local' or 'online'
     this.onlinePlayerID = null;
     this._pendingCharId = null; // local character-select preview
+    // Local computer players (bots): botSeats is the LIVE set of bot-controlled seat
+    // ids (String(i), matching Game.js's own id convention) for the CURRENT client
+    // only — always rebuilt fresh by startGameWithPlayers/loadGame, and cleared by
+    // _stopClient() alongside the driver so a stale set from a prior local game can
+    // never mislabel an online seat as a bot. pendingBots is the SETUP SCREEN's
+    // in-progress selection (0..count-1), independent of botSeats until the game
+    // actually starts. _botDriver is null whenever no client owns a live driver
+    // (before first game start, or between _stopClient() and the next build).
+    this.botSeats = new Set();
+    this.pendingBots = 0;
+    this._botDriver = null;
     // Active mod (default Dominion). All mod CONTENT reads route through this.activeMod;
     // selectMod() swaps it + the engine RULES singleton. availableMaps = the active mod's
     // boards (maps + atlas worlds), the same set the old module-level AVAILABLE_MAPS held.
@@ -928,6 +947,7 @@ class MonopolyBoard {
         groupsToWin: (mv.params && mv.params.groupsToWin) || RULES.victory.groupsToWin || 3,
         mapId: mapId,
       };
+      this.pendingBots = 0; // fresh setup entry (new map, or first visit) -> BOTS row default
     } else if (playerCount) {
       this._setupSel.playerCount = playerCount;
     }
@@ -940,6 +960,15 @@ class MonopolyBoard {
     let counts = '';
     for (let n = 2; n <= 10; n++) {
       counts += `<button class="pix-btn ${s.playerCount === n ? 'pix-btn--primary' : 'pix-btn--default'} count-btn" data-count="${n}">${n}</button>`;
+    }
+    // BOTS row (local-bots wiring): 0..playerCount-1 — at least one human seat
+    // (the LAST seats are handed to bots at game start, see startGameWithPlayers)
+    // must always remain, so the max selectable bot count is one less than the
+    // TOTAL player count chosen above (.count-btn semantics are unchanged — total
+    // players — per the E2E contract).
+    let botBtns = '';
+    for (let n = 0; n <= s.playerCount - 1; n++) {
+      botBtns += `<button class="pix-btn ${this.pendingBots === n ? 'pix-btn--primary' : 'pix-btn--default'} bot-btn" data-bots="${n}">${n}</button>`;
     }
     const MODES = [
       { id: 'survival', label: 'LAST STANDING', desc: 'Last player not bankrupt wins. Classic elimination.' },
@@ -968,6 +997,7 @@ class MonopolyBoard {
       ${this._breadcrumb('setup')}
       <div><div class="menu__heading">GAME SETUP</div><div class="menu__sub">Players &amp; victory condition</div></div>
       <div class="setup__count"><span class="aiset__label">PLAYERS</span><div class="count-grid">${counts}</div></div>
+      <div class="setup__count" id="setup-bots-row"><span class="aiset__label">BOTS</span><div class="count-grid">${botBtns}</div></div>
       <div class="vic-grid">${cards}</div>
       <div class="vic-paramrow">${param}</div>
       <div class="vic-actions">
@@ -977,7 +1007,16 @@ class MonopolyBoard {
     `;
 
     this.menuEl.querySelectorAll('.count-btn').forEach(btn => {
-      btn.onclick = () => { this._setupSel.playerCount = parseInt(btn.dataset.count); this._renderSetup(); };
+      btn.onclick = () => {
+        this._setupSel.playerCount = parseInt(btn.dataset.count);
+        // Count change clamps bots: total players just shrank (or grew), so
+        // pendingBots can never sit at/above the new total (>=1 human seat rule).
+        this.pendingBots = Math.min(this.pendingBots, this._setupSel.playerCount - 1);
+        this._renderSetup();
+      };
+    });
+    this.menuEl.querySelectorAll('.bot-btn').forEach(btn => {
+      btn.onclick = () => { this.pendingBots = parseInt(btn.dataset.bots); this._renderSetup(); };
     });
     this.menuEl.querySelectorAll('.vic-card').forEach(card => {
       card.onclick = () => { this._setupSel.primary = card.dataset.mode; this._renderSetup(); };
@@ -1020,6 +1059,13 @@ class MonopolyBoard {
 
   startOnlineGame(serverUrl, matchID, playerID, credentials, numPlayers) {
     this.onlinePlayerID = playerID;
+    // Bots are a local-only concept (Task 1's driver dispatches with no seat
+    // argument, relying on hot-seat's enforceSeats:false — see task-1-report.md
+    // Design Decision 6 — which is NOT true online). Clear any stale set left
+    // over from a prior local game so an online seat is never mislabeled BOT in
+    // the chip strip; _botDriver itself is left null (never built here), and
+    // _stopClient() already nulls it on the way out of any prior local game.
+    this.botSeats = new Set();
     this.client = Client({
       game: Monopoly,
       numPlayers: numPlayers,
@@ -1035,10 +1081,73 @@ class MonopolyBoard {
   }
 
   startGameWithPlayers(numPlayers) {
+    // Bot seats = the LAST M seat ids (String(i), Game.js's own convention —
+    // createPlayer, Game.js:1165), where M = this.pendingBots (SETUP screen's
+    // BOTS row selection), clamped to numPlayers-1 so at least one human seat
+    // always remains even if a stale pendingBots value somehow exceeded it.
+    const botCount = Math.max(0, Math.min(this.pendingBots || 0, numPlayers - 1));
+    this.botSeats = new Set();
+    for (let i = numPlayers - botCount; i < numPlayers; i++) this.botSeats.add(String(i));
     this.client = Client({ game: Monopoly, numPlayers: numPlayers, debug: false });
     this.client.start();
+    // Driver is built AFTER client.start() (needs a live this.client for its
+    // getState/dispatch deps) and BEFORE subscribe() (so the very first state
+    // delivery — characterSelect phase, if any bot seats exist — can already
+    // drive bot auto-pick).
+    this._buildBotDriver();
     this.client.subscribe(state => this.update(state));
     this._bumpClients(1);
+  }
+
+  // seat -> is this seat bot-controlled in the CURRENT client. String-coerced
+  // (Game.js seat ids are always String(i); deriveActingSeat/ctx.currentPlayer
+  // sometimes arrive as numbers depending on caller) so lookups never miss on
+  // a type mismatch.
+  _isBotSeat(seat) {
+    return !!(this.botSeats && this.botSeats.has(String(seat)));
+  }
+
+  // Constructs the paced bot-turn stepper (src/bot-driver.js, Task 1) bound to
+  // THIS client. Called once per client (startGameWithPlayers / loadGame,
+  // always AFTER client.start()); _stopClient() stops + nulls the driver on
+  // every teardown path (exitToMenu, loadGame's own pre-rebuild stop,
+  // _softExitTo), so a stray driver from a previous game can never survive
+  // into a new one — see the botSeats doc comment on the constructor fields.
+  _buildBotDriver() {
+    if (this._botDriver) this._botDriver.stop();
+    this._botDriver = createBotDriver({
+      getState: () => this.client.getState(),
+      // Deferred to a fresh macrotask — INSTRUMENTED, not guessed (browser E2E
+      // run: a 3p/2-bot game stalled forever after exactly one bot action,
+      // reproduced live before this fix, see task-2-report.md). Root cause:
+      // boardgame.io's local Client notifies subscribers SYNCHRONOUSLY inside
+      // client.moves[name](...) (verified in node_modules/boardgame.io/dist/cjs/
+      // client-cadd28ea.js — notifySubscribers() is a plain forEach, no
+      // microtask/RAF deferral). A synchronous call here would re-enter
+      // App.update() -> this._botDriver.onUpdate() WHILE this exact dispatch is
+      // still running as the terminal hop of bot-driver.js's own guardedStep —
+      // whose single-flight `scheduled` flag is only released by finish() AFTER
+      // this call returns. That reentrant onUpdate() call sees scheduled===true
+      // and silently no-ops (single-flight working as designed), and — because
+      // dispatching is this stepper's only externally-visible effect — nothing
+      // else ever calls onUpdate() again on its own, permanently stalling the
+      // NEXT seat's turn. Deferring the real move call lets this dispatch()
+      // return (and the driver's own finish() run) BEFORE boardgame.io's
+      // synchronous notify chain fires, so by the time it reaches
+      // this._botDriver.onUpdate(), `scheduled` is already false.
+      dispatch: (name, ...args) => {
+        setTimeout(() => { if (this.client) this.client.moves[name](...args); }, 0);
+      },
+      // decide/decideRoute close over policyForSeat(seat) themselves — bot-driver.js
+      // never calls resolvePolicy (task-1-report.md's documented convention for the
+      // wiring layer); sim/bot.js's decideMoves/decideRoute each do their own
+      // resolvePolicy(policy) as their first step.
+      decide: (G, ctx, seat) => decideMoves(G, ctx, seat, policyForSeat(seat)),
+      decideRoute: (G, ctx, seat) => decideBotRoute(G, ctx, policyForSeat(seat)),
+      isBot: (seat) => this._isBotSeat(seat),
+      animBusy: () => !!(this.animator && this.animator.isBusy()),
+      getCharacterIds: () => this.activeMod.characters.map(c => c.id),
+    });
   }
 
   // ─────────────────────────────────────────────────────────
@@ -1075,6 +1184,9 @@ class MonopolyBoard {
     if (G.phase === 'characterSelect') {
       this._showScreen('select');
       this.renderCharacterSelect(G, ctx);
+      // Bot auto-pick must run during character select too, not just the game
+      // phase's tail below — this phase branch returns before ever reaching it.
+      if (this._botDriver) this._botDriver.onUpdate();
       return;
     }
 
@@ -1115,6 +1227,10 @@ class MonopolyBoard {
     // CSS worst-case default.
     this._syncChromeBands();
     if (this.animator) { this.animator.onState(G); this.animator.afterRender(); }
+    // Paced bot-turn stepper (local-bots wiring): single-flight internally, so
+    // calling this every render is cheap (no-op unless the current acting seat
+    // per deriveActingSeat is bot-controlled and no step is already in flight).
+    if (this._botDriver) this._botDriver.onUpdate();
   }
 
   // Chrome-band sizing (Task 2 review fix; STATIC constants as of Redesign B).
@@ -1372,6 +1488,11 @@ class MonopolyBoard {
   renderCharacterSelect(G, ctx) {
     this.charSelectEl.className = 'screen screen--select';
     const playerNo = parseInt(ctx.currentPlayer) + 1;
+    // Bot seats occupy the LAST seats (startGameWithPlayers) and pick in seat
+    // order, so a bot never selects before every lower-numbered human seat has —
+    // the "PLAYER N" text E2E waits on for human flows (gameplay.spec.js's
+    // selectCharacters helper, /PLAYER 2/) is untouched for any all-human game.
+    const actingIsBot = this._isBotSeat(ctx.currentPlayer);
     const takenIds = G.players.filter(p => p.character).map(p => p.character.id);
     const remaining = G.players.filter(p => !p.character).length;
     const isLast = remaining <= 1;
@@ -1414,7 +1535,7 @@ class MonopolyBoard {
       ${this._breadcrumb('character')}
       <div class="select__head">
         <div class="select__heading">
-          <span class="select__p">PLAYER ${playerNo}</span>
+          <span class="select__p">${actingIsBot ? 'BOT 选择中…' : 'PLAYER ' + playerNo}</span>
           <span class="select__h">CHOOSE YOUR CHARACTER</span>
         </div>
         <div class="select__sub">Each councillor carries unique stats and a passive edge.</div>
@@ -2603,6 +2724,7 @@ class MonopolyBoard {
         isCurrent, isBankrupt: !!player.bankrupt,
         deeds: player.properties.length,
         inJail: !!player.inJail,
+        isBot: this._isBotSeat(i),
       });
 
       this._chipDetail[i] = {
@@ -2656,6 +2778,20 @@ class MonopolyBoard {
     // renders unconditionally for every client (see _renderSquareBoard).
     const isAtlas = this.mapData.movementMode === 'atlas';
     const isDuelResponse = G.turnPhase === 'duel' && G.duel && G.duel.phase === 'response';
+
+    // Bot pacing hint (local-bots wiring): whichever seat deriveActingSeat resolves
+    // to next — own turn, or a cross-seat blocking state (auction bidder / duel-
+    // response owner / pending-trade target) — takes priority over BOTH the atlas
+    // duel-response detour just below and the plain isMyTurn gate further down,
+    // since a bot never needs an actionable prompt of any kind. Checked before
+    // either so no button row (jail/roll/card/duel/trade/end-turn) can ever render
+    // for a bot seat; humans' turns are completely unaffected by this branch.
+    if (this._isBotSeat(deriveActingSeat(G, ctx))) {
+      html += `<div class="turnbox__waiting">BOT 思考中…</div></div>`;
+      this.turnboxEl.innerHTML = html;
+      return;
+    }
+
     if (isAtlas && isDuelResponse) {
       html += `<div class="turnbox__slot">${this._centerSlotHtml(G, ctx)}</div></div>`;
       this.turnboxEl.innerHTML = html;
@@ -3412,6 +3548,13 @@ class MonopolyBoard {
     if (typeof window !== 'undefined') window.__MP_LIVE_CLIENTS = Math.max(0, (window.__MP_LIVE_CLIENTS || 0) + n);
   }
   _stopClient() {
+    // Driver's lifetime always mirrors the client's — stop (epoch bump, cancel
+    // any pending timer) AND null the reference here, the ONE spot every
+    // teardown path funnels through (exitToMenu, loadGame's pre-rebuild stop,
+    // _softExitTo), so a stray driver from a prior local game can never survive
+    // into whatever comes next (a fresh local game rebuilds it; an online game
+    // never builds one at all).
+    if (this._botDriver) { this._botDriver.stop(); this._botDriver = null; }
     if (this.client) { this.client.stop(); this.client = null; this._bumpClients(-1); }
   }
 
@@ -3428,6 +3571,8 @@ class MonopolyBoard {
     this.onlinePlayerID = null;
     this._pendingCharId = null;
     this._setupSel = null; // FULL reset: the merged SETUP screen returns to fresh defaults next entry
+    this.botSeats = new Set(); // no bot badges/hints should ever leak into the next menu visit
+    this.pendingBots = 0;
     this.aiResponses = [];
     this.chatHistories = {};
     this.activeChatCharId = null;
@@ -3456,7 +3601,7 @@ class MonopolyBoard {
       }
       return;
     }
-    const saveData = { G: G, currentPlayer: ctx.currentPlayer, numPlayers: G.players.length, modId: this.activeMod.id, mapId: this.mapData.id, timestamp: Date.now() };
+    const saveData = { G: G, currentPlayer: ctx.currentPlayer, numPlayers: G.players.length, modId: this.activeMod.id, mapId: this.mapData.id, timestamp: Date.now(), botSeats: [...this.botSeats] };
     const saveName = `meinopoly_save_${new Date().toLocaleString().replace(/[/:]/g, '-')}`;
     const saves = JSON.parse(localStorage.getItem('meinopoly_saves') || '{}');
     saves[saveName] = saveData;
@@ -3504,6 +3649,12 @@ class MonopolyBoard {
     const LoadedGame = { ...Monopoly, setup: () => ({ ...savedG, events: savedG.events || [], eventSeq: savedG.eventSeq || 0, enforceSeats: savedG.enforceSeats || false, _resumeLoad: true }) };
     this.client = Client({ game: LoadedGame, numPlayers: saveData.numPlayers, debug: false });
     this.client.start();
+    // Restore bot seats (absent field -> empty set, e.g. pre-bots saves) and rebuild
+    // the driver against THIS client — same build-after-start ordering as
+    // startGameWithPlayers. _stopClient() a few lines up already stopped + nulled
+    // whatever driver belonged to the PRIOR client (if any was active).
+    this.botSeats = new Set(saveData.botSeats || []);
+    this._buildBotDriver();
     // Clear any in-flight dice/hop from the PRIOR client before it's replaced, AND seed the
     // cursor to the save's own LAST-BAKED seq (matching the `eventSeq: savedG.eventSeq || 0`
     // fallback two lines up) rather than resetting to -1. A plain reset() would make every event

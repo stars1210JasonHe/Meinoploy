@@ -244,6 +244,12 @@
     .setup__count { display:flex; flex-direction:column; align-items:center; gap:8px; }
     .setup__count .count-grid { max-width:560px; }
     .setup__count .count-btn { min-width:44px; }
+    /* BOTS row (local-bots wiring): mirrors .count-btn's own rules exactly —
+       kept as a separate class (not shared with count-btn) so the PLAYERS row's
+       click handler (queries .count-btn only) can never accidentally bind to a
+       bot button and read an undefined data-count. */
+    .bot-btn { min-width:120px; }
+    .setup__count .bot-btn { min-width:44px; }
 
     /* victory selector */
     .vic-grid { display:grid; grid-template-columns:repeat(3, minmax(0,260px)); gap:14px;
@@ -366,6 +372,11 @@
     .pcard__meta span { display:flex; align-items:center; gap:5px; }
     .pcard__passive { color:var(--accent2); }
     .pcard__jail { font-family:var(--disp); font-size:7px; color:var(--bad); }
+    /* local-bots wiring: small steel-cyan tag, same structure as .pcard__turn
+       (font/size/padding) but with a fixed steel-cyan palette instead of the
+       per-player --pc color, since it marks a SEAT KIND, not the active turn. */
+    .pcard__bot { font-family:var(--disp); font-size:7px; color:var(--wr-cyan-soft);
+      background:var(--wr-steel-lt); border:1px solid var(--wr-cyan-dim); padding:3px 5px; }
     .pcard__abilities { font-family:var(--disp); font-size:7px; color:var(--accent2); line-height:1.5; }
     .pcard__props { display:flex; flex-wrap:wrap; gap:3px; }
     .propchip { font-family:var(--body); font-size:13px; color:var(--ink); background:var(--bg3);

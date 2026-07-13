@@ -200,6 +200,12 @@ export function createAnimator(opts) {
       cursor = latestSeq;
     },
     isAnimating(playerId) { return inFlight.has(String(playerId)); },
+    // Additive, presentation-only: "is ANYTHING animating right now" (no playerId
+    // filter), for consumers that just need a generic idle predicate — e.g. the
+    // local-bots paced stepper (src/bot-driver.js's `animBusy` dep) holds its next
+    // dispatch while a dice/hop job is playing OR queued, same as isAnimating(id)
+    // but seat-agnostic. Does not change any existing behavior/export.
+    isBusy() { return playing !== null || queue.length > 0; },
     _cursor() { return cursor; },
   };
 }

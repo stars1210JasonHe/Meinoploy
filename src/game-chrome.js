@@ -32,6 +32,7 @@ export function chipHtml(p) {
       ${p.isCurrent ? '<span class="pcard__turn">TURN</span>' : ''}
       ${p.isBankrupt ? '<span class="pcard__bankrupt">OUT</span>' : ''}
       ${p.inJail ? '<span class="pcard__jail">JAIL</span>' : ''}
+      ${p.isBot ? '<span class="pcard__bot">BOT</span>' : ''}
     </div>`;
 }
 

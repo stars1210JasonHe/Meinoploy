@@ -52,6 +52,12 @@ describe('chipHtml', () => {
     const h = chipHtml(P);
     expect(h).toContain('pcard__money">$3,085</span>');
   });
+  // local-bots wiring (Task 2): additive isBot badge, absent by default.
+  test('isBot renders the pcard__bot BOT badge; absent when false/omitted', () => {
+    expect(chipHtml({ ...P, isBot: true })).toContain('<span class="pcard__bot">BOT</span>');
+    expect(chipHtml({ ...P, isBot: false })).not.toContain('pcard__bot');
+    expect(chipHtml(P)).not.toContain('pcard__bot');
+  });
 });
 
 describe('tokenVisual', () => {
