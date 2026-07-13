@@ -16,6 +16,7 @@ import { isDuelCooldownBlocked } from './events';
 import { createAnimator, DICE_TUMBLE_MS } from './anim';
 import { createAudio } from './audio';
 import { chipHtml, chipDetailHtml, tileDetailHtml, drawerShellHtml, tokenVisual } from './game-chrome';
+import { resolveBoardBg, starfieldDataUri } from './board-bg';
 
 // Client-side mod registry — static bundle imports (Parcel v1 forces all imports static, so
 // every registered mod is bundled at build; only WHICH is active is chosen at runtime). This
@@ -240,6 +241,9 @@ class MonopolyBoard {
     // Attach client-only real-city imagery (world bg + per-place photos) if this atlas
     // world has a bundled asset set. Null for classic / asset-less maps → color fallback.
     this.mapData.atlasAssets = (mapJson && this.activeMod.atlasAssets[mapJson.id]) || null;
+    // Classic-map art (reskin R2): optional per-map assets keyed by map id —
+    // the classic-board twin of atlasAssets. Feeds the .board__bg layer only.
+    this.mapData.mapAssets = (mapJson && this.activeMod.mapAssets && this.activeMod.mapAssets[mapJson.id]) || null;
     // Globe renderer: carry the render mode + the raw places (geo lat/lng + connectors)
     // so the globe can plot city points and great-circle route arcs. Display-only.
     this.mapData.renderMode = (mapJson && mapJson.renderMode) || null;
@@ -1837,6 +1841,9 @@ class MonopolyBoard {
     if (mode === 'globe') this._renderGlobeBoard(G, ctx);
     else if (this.mapData.layoutType === 'square') this._renderSquareBoard(G, ctx);
     else this._renderAbsoluteBoard(G, ctx);
+    // Flat boards paint the per-mod background layer (globe owns its own canvas —
+    // _ensureBoardChildren never ran for it, so _syncBoardBg no-ops there).
+    if (mode !== 'globe') this._syncBoardBg();
   }
 
   // Stop the globe RAF loop, resize observer, and WebGL context, and drop overlay
@@ -2243,10 +2250,31 @@ class MonopolyBoard {
   _ensureBoardChildren() {
     if (!this._gridWrap || this._gridWrap.parentElement !== this.boardEl
         || !this._tokenLayer || this._tokenLayer.parentElement !== this.boardEl) {
-      this.boardEl.innerHTML = '<div class="board__grid-wrap"></div><div id="token-layer"></div>';
+      this.boardEl.innerHTML = '<div class="board__bg"></div><div class="board__grid-wrap"></div><div id="token-layer"></div>';
+      this._boardBgEl = this.boardEl.querySelector('.board__bg');
       this._gridWrap = this.boardEl.querySelector('.board__grid-wrap');
       this._tokenLayer = this.boardEl.querySelector('#token-layer');
     }
+  }
+
+  // Reskin R2: paint the persistent .board__bg layer — per-mod art when the mod
+  // ships it (atlas worldBg / classic mapAssets.boardBg), engine starfield
+  // otherwise. Replaces the old inline background-image on the absolute grid
+  // (one mechanism only, spec §2). Presentation-only.
+  _syncBoardBg() {
+    if (!this._boardBgEl) return;
+    const { url } = resolveBoardBg({
+      isAtlas: this.mapData.movementMode === 'atlas',
+      atlasAssets: this.mapData.atlasAssets,
+      mapAssets: this.mapData.mapAssets,
+      mapId: this.mapData.id,
+    });
+    const finalUrl = url || starfieldDataUri();
+    if (this._boardBgUrl !== finalUrl) {
+      this._boardBgUrl = finalUrl;
+      this._boardBgEl.style.backgroundImage = `url('${finalUrl}')`;
+    }
+    this.boardEl.classList.toggle('board--hasbg', !!url);
   }
 
   _renderSquareBoard(G, ctx) {
@@ -2368,13 +2396,9 @@ class MonopolyBoard {
         + `</defs>`
         + lines + `</svg>`;
     }
-    // Real-city world map behind the board (atlas worlds with a bundled asset set).
-    const worldBg = (isAtlas && this.mapData.atlasAssets) ? this.mapData.atlasAssets.worldBg : null;
-    const gridCls = `board__grid board__grid--absolute${worldBg ? ' board__grid--world' : ''}`;
-    const gridStyle = worldBg
-      ? ` style="background-image:linear-gradient(rgba(8,12,28,.45),rgba(8,12,28,.45)),url('${worldBg}')"`
-      : '';
-    this._gridWrap.innerHTML = `<div class="${gridCls}"${gridStyle}>${edgesSvg}${tiles}${labels || ''}${center}</div>`;
+    // World art now renders via the persistent .board__bg layer (_syncBoardBg,
+    // reskin R2) — the old inline background-image on this grid is retired.
+    this._gridWrap.innerHTML = `<div class="board__grid board__grid--absolute">${edgesSvg}${tiles}${labels || ''}${center}</div>`;
   }
 
   // Returns {x, y} as PERCENT of the board element, for positioning overlay tokens.

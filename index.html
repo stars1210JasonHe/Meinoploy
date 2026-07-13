@@ -745,9 +745,19 @@
     .tile-detail__group { display:flex; flex-wrap:wrap; gap:3px; }
 
     .board__grid-wrap { display:contents; }
+    /* Reskin R2: the persistent per-mod art layer under the grid. Absolute +
+       pointer-events:none so board geometry (E2E-locked) is untouched; the
+       ::after scrim keeps tiles legible over any art (was baked into the old
+       inline gradient). Cover + pixelated = hi-bit chunky upscale. */
+    .board__bg { position:absolute; inset:0; z-index:0; pointer-events:none;
+      background-size:cover; background-position:center; background-repeat:no-repeat;
+      image-rendering:pixelated; }
+    .board__bg::after { content:''; position:absolute; inset:0; background:rgba(8,12,28,.45); }
+    /* GB-green board shell retired (R2): translucent void so .board__bg shows
+       through the grid gaps and center; steel edge in the B2 language. */
     .board__grid { display:grid; width:100%; height:100%; position:relative;
-      background:#0c1f12; border:4px solid #07140a;
-      box-shadow:var(--bevel), 6px 6px 0 rgba(0,0,0,.5); padding:3px; gap:2px; }
+      background:color-mix(in srgb, var(--wr-void) 45%, transparent); border:2px solid var(--wr-steel-lt);
+      box-shadow:0 6px 0 rgba(0,0,0,.4); padding:3px; gap:2px; }
     .board__grid--absolute { display:block; }
     .board__edges {
       position: absolute;
@@ -903,7 +913,6 @@
     .tile__mort { position:absolute; bottom:2px; right:2px; font-family:var(--disp); font-size:6px; color:#fff; background:var(--bad); padding:0 2px; }
     .tile__pot { position:absolute; bottom:2px; left:2px; font-family:var(--disp); font-size:6px; color:var(--good); }
     /* atlas real-city backgrounds: world map behind the board + a photo behind each city tile */
-    .board__grid--world { background-size:cover; background-position:center; background-repeat:no-repeat; }
     .tile__photo, .tile__scrim { position:absolute; inset:0; z-index:0; pointer-events:none; }
     .tile__photo { background-size:cover; background-position:center; }
     .tile__scrim { background:linear-gradient(to top, rgba(5,8,18,.86) 0%, rgba(5,8,18,.42) 70%, rgba(5,8,18,.30) 100%); }
@@ -952,8 +961,9 @@
       pointer-events:auto; cursor:pointer; }
     .gtoken--face { font-size:0; }
 
+    /* R2: center goes translucent navy band — the board__bg art reads through */
     .board__center { display:flex; flex-direction:column; align-items:center; justify-content:space-between;
-      padding:14px; gap:8px; background:repeating-linear-gradient(135deg, #0c1f12 0 8px, #0e2415 8px 16px); }
+      padding:14px; gap:8px; background:color-mix(in srgb, var(--wr-panel-4) 35%, transparent); }
     .board__center--abs { position:absolute; left:18%; top:18%; right:18%; bottom:18%; z-index:3; }
     /* atlas: small logo badge top-center (center freed; HUD lives in side panel) */
     .board__logo--badge { position:absolute; left:50%; top:6%; transform:translateX(-50%);
