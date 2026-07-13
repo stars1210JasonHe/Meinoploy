@@ -9,25 +9,24 @@
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet" />
   <style>
     /* ============================================================
-       MEINOPOLY — Game Boy Color / 16-bit pixel UI
+       MEINOPOLY — Hi-bit pixel war room (B2)
+       Canonical reference: docs/superpowers/design/mockup-b2-pixel-nightlights.html
        ============================================================ */
 
-    /* ---- TOKENS / PALETTES ---- */
-    :root,
-    [data-theme="council"] {
-      --bg:#0e1120; --bg2:#1b2034; --bg3:#0a0c17;
-      --ink:#f2e9cf; --ink-dim:#9298b6; --accent:#e9b23c; --accent2:#6f7cd6;
-      --line:#39406a; --good:#5ad98a; --bad:#e2574f;
-    }
-    [data-theme="verdant"] {
-      --bg:#0c2410; --bg2:#16401c; --bg3:#081a0b;
-      --ink:#c4e86a; --ink-dim:#6f9a3f; --accent:#a9d637; --accent2:#5fae54;
-      --line:#2f5e2c; --good:#bdee5a; --bad:#e0b24a;
-    }
-    [data-theme="arcade"] {
-      --bg:#0a0a16; --bg2:#16162e; --bg3:#06060f;
-      --ink:#eaeaff; --ink-dim:#8a8ac0; --accent:#ff4d8d; --accent2:#36d6e7;
-      --line:#34346a; --good:#48e89a; --bad:#ff5470;
+    /* ---- TOKENS (single B2 palette; GB themes retired R1a) ----
+       Semantic mapping GB -> B2: --bg navy base, --bg2 navy-mid (raised),
+       --bg3 void (wells), --accent cyan glow (was amber), --accent2 amber
+       (secondary glow), --line steel edge, ink cool-white/dim-steel. */
+    :root {
+      --bg:#081327; --bg2:#0c1c34; --bg3:#03050b;
+      --ink:#e4f0f8; --ink-dim:#94add4; --accent:#4fe3ff; --accent2:#ffb648;
+      --line:#1d3454; --good:#3ee89a; --bad:#ff5468;
+      /* B2-only tokens (war-room family) */
+      --wr-void:#010205; --wr-steel:#152641; --wr-steel-lt:#1d3454;
+      --wr-cyan-soft:#8ff0ff; --wr-cyan-dim:#2f7f96; --wr-amber-soft:#ffd48a;
+      --wr-tax:#ff8a3d; --wr-chance:#a97bff;
+      --wr-ink-faint:#5c7690; --wr-hair:rgba(120,180,220,.16);
+      --wr-panel-1:#132542; --wr-panel-2:#0f1e38; --wr-panel-3:#0b1830; --wr-panel-4:#081428;
     }
     :root {
       --disp:'Press Start 2P', monospace;
@@ -52,26 +51,18 @@
     ::-webkit-scrollbar-track { background:var(--bg3); }
     ::-webkit-scrollbar-thumb { background:var(--line); border:2px solid var(--bg3); }
 
-    /* ---- APP FRAME + CRT ---- */
+    /* ---- APP FRAME ---- */
     #app { position:fixed; inset:0; }
     .app {
       position:fixed; inset:0; overflow:auto;
+      /* B2 glow discipline: hard-banded radial (quantized), never a smooth wash */
       background:
-        repeating-linear-gradient(0deg, rgba(0,0,0,.22) 0 2px, transparent 2px 4px),
-        radial-gradient(120% 120% at 50% 0%, var(--bg2) 0%, var(--bg) 60%);
+        radial-gradient(120% 120% at 50% 0%,
+          var(--bg2) 0%, var(--bg2) 28%, var(--bg) 28%, var(--bg) 62%, var(--wr-void) 62%);
     }
     .app__frame {
       min-height:100%; display:flex; align-items:stretch; justify-content:center;
       transform:scale(var(--ui-scale)); transform-origin:top center;
-    }
-    .app--scan::after {
-      content:''; position:fixed; inset:0; pointer-events:none; z-index:9000;
-      background:repeating-linear-gradient(0deg, rgba(0,0,0,.30) 0 1px, transparent 1px 3px);
-      mix-blend-mode:multiply; opacity:.55;
-    }
-    .app--crt::before {
-      content:''; position:fixed; inset:0; pointer-events:none; z-index:8999;
-      background:radial-gradient(130% 120% at 50% 50%, transparent 55%, rgba(0,0,0,.55) 100%);
     }
 
     /* ---- GLOBAL PIXEL FORM CONTROLS ---- */
@@ -176,10 +167,7 @@
     /* ============ TOP CONTROL BAR ============ */
     .topbar { position:fixed; top:0; right:0; z-index:9200; display:flex; gap:6px; align-items:center;
       padding:8px 10px; }
-    .topbar__theme { display:flex; align-items:center; gap:4px; }
-    .topbar__label { font-family:var(--disp); font-size:7px; color:var(--ink-dim); }
     .topbar .pix-btn { padding:7px 9px; font-size:7px; box-shadow:var(--bevel), 2px 2px 0 rgba(0,0,0,.5); }
-    .topbar select { padding:6px; font-size:7px; }
     /* Fullscreen-stage wave (Task 2): auto-hide topbar, in-game only. #topbar-hotzone
        is a thin fixed strip at the very top edge — invisible, pointer-events:auto —
        that a document-level `mousemove` listener (App.js createLayout) polls against
@@ -1208,7 +1196,7 @@
     }
   </style>
 </head>
-<body data-theme="council">
+<body>
   <div id="app"></div>
   <script src="./src/App.js"></script>
 </body>

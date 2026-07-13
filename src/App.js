@@ -374,15 +374,8 @@ class MonopolyBoard {
   // ─────────────────────────────────────────────────────────
   createLayout() {
     this.rootElement.innerHTML = `
-      <div class="app app--scan app--crt" id="app-root">
+      <div class="app" id="app-root">
         <div class="topbar">
-          <span class="topbar__label">THEME</span>
-          <select id="theme-select">
-            <option value="council">COUNCIL</option>
-            <option value="verdant">VERDANT</option>
-            <option value="arcade">ARCADE</option>
-          </select>
-          <button id="btn-crt" class="pix-btn pix-btn--default">CRT</button>
           <button id="btn-save" class="pix-btn pix-btn--default" style="display:none;">SAVE</button>
           <button id="btn-load-menu" class="pix-btn pix-btn--default">LOAD</button>
           <button id="btn-ai-settings" class="pix-btn pix-btn--default">AI</button>
@@ -561,24 +554,8 @@ class MonopolyBoard {
     muteBtn.onclick = () => { this.audio.setMuted(!this.audio.isMuted()); paintMute(); };
     paintMute();
 
-    // Theme switcher
-    const savedTheme = localStorage.getItem('meinopoly_theme') || 'council';
-    document.body.setAttribute('data-theme', savedTheme);
-    const themeSel = document.getElementById('theme-select');
-    themeSel.value = savedTheme;
-    themeSel.onchange = () => {
-      document.body.setAttribute('data-theme', themeSel.value);
-      localStorage.setItem('meinopoly_theme', themeSel.value);
-    };
-
-    // CRT toggle
-    const crtOn = (localStorage.getItem('meinopoly_crt') || 'on') === 'on';
-    this._setCrt(crtOn);
-    document.getElementById('btn-crt').onclick = () => {
-      const next = !this.appRootEl.classList.contains('app--crt');
-      this._setCrt(next);
-      localStorage.setItem('meinopoly_crt', next ? 'on' : 'off');
-    };
+    // GB themes + CRT retired in the B2 reskin (R1a): one :root palette in
+    // index.html; stale meinopoly_theme/meinopoly_crt localStorage keys are inert.
 
     // Fullscreen-stage wave (Task 2): auto-hide topbar. A thin fixed hotzone at the
     // very top edge reveals the topbar on hover; :focus-within (index.html) covers
@@ -716,11 +693,6 @@ class MonopolyBoard {
     btn.classList.toggle('drawer-tabs__btn--unread', unread);
     const dot = btn.querySelector('.drawer-tabs__dot');
     if (dot) dot.hidden = !unread;
-  }
-
-  _setCrt(on) {
-    this.appRootEl.classList.toggle('app--crt', on);
-    this.appRootEl.classList.toggle('app--scan', on);
   }
 
   _showScreen(name) {
