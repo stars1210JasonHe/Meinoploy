@@ -1299,6 +1299,54 @@
     /* Active player: neon edge + amber ACTIVE tag stays readable on the banded fill */
     .app--game .pcard--chip.pcard--active.wr-panel { border-color:var(--pc, var(--accent)); }
 
+    /* ── R1c: atlas node-cards — war-room material + type-distinct shapes
+       (mockup .node family). Scoped .board--atlas; classic boards keep their
+       tile look until R1d. Shapes are clip-path ONLY (bounding box unchanged —
+       zero-overlap E2E measures boxes; rotation would visually spill). ── */
+    .board--atlas .tile {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.04) 0px, rgba(255,255,255,.04) 1px, transparent 1px, transparent 3px),
+        linear-gradient(152deg, var(--wr-panel-1) 0% 30%, var(--wr-panel-2) 30% 62%, var(--wr-panel-3) 62% 84%, var(--wr-panel-4) 84% 100%);
+      border:2px solid rgba(120,195,225,.34);
+    }
+    .board--atlas .tile__name { color:var(--ink); }
+    .board--atlas .tile__price { color:var(--wr-cyan-soft); }
+    .board--atlas .place-label { color:var(--wr-cyan-soft); text-shadow:1px 1px 0 #000, 0 0 8px rgba(79,227,255,.4); }
+    /* chance/community: hexagon (mockup .node--chance) + violet edge. The
+       mockup's special shapes carry ONLY a centered icon + small name — the
+       place spine bar and left-flex layout read as accidental clipping inside
+       a hexagon, so specials center their inner and drop the bar. */
+    .board--atlas .tile--t-chance, .board--atlas .tile--t-community {
+      clip-path:polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+      border-color:rgba(180,140,255,.45);
+    }
+    .board--atlas .tile--t-chance .glyph, .board--atlas .tile--t-community .glyph {
+      color:var(--wr-chance); text-shadow:0 0 8px rgba(169,123,255,.75);
+    }
+    /* tax: diamond (mockup .node--tax rotated square, clip-not-rotate) + orange edge */
+    .board--atlas .tile--t-tax {
+      clip-path:polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+      border-color:rgba(255,158,97,.45);
+    }
+    .board--atlas .tile--t-tax .glyph { color:var(--wr-tax); text-shadow:0 0 8px rgba(255,138,61,.7); }
+    .board--atlas .tile--t-chance .tile__bar, .board--atlas .tile--t-community .tile__bar,
+    .board--atlas .tile--t-tax .tile__bar { display:none; }
+    .board--atlas .tile--t-chance .tile__inner, .board--atlas .tile--t-community .tile__inner,
+    .board--atlas .tile--t-tax .tile__inner {
+      align-items:center; justify-content:center; text-align:center; padding:2px;
+    }
+    .board--atlas .tile--t-tax .tile__name, .board--atlas .tile--t-chance .tile__name,
+    .board--atlas .tile--t-community .tile__name { font-size:.85em; }
+    /* GO / START: amber cartouche (mockup .node--start) */
+    .board--atlas .tile--t-go {
+      border-color:rgba(255,213,120,.6);
+      background:linear-gradient(160deg, #2c2410 0% 40%, #1c1808 40% 100%);
+    }
+    .board--atlas .tile--t-go .tile__name { color:var(--wr-amber-soft); text-shadow:1px 1px 0 rgba(0,0,0,.5); }
+    /* hub ring recolor into the cyan-strong language (was --accent when accent
+       was GB amber; explicit cyan + soft outer glow now) */
+    .board--atlas .tile--hub { outline-color:var(--accent); box-shadow:0 0 14px rgba(79,227,255,.35); }
+
     /* ── R1b: war-room console — dice, TOTAL, prompt, in-game button mapping ── */
     /* Dice: navy banded face + amber glow pips (mockup .die). Same .die element
        the anim overlay reuses at 2x — restyle only, tumble cadence untouched. */

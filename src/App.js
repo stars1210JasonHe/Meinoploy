@@ -1657,7 +1657,7 @@ class MonopolyBoard {
       ? `<div class="tile__photo" style="background-image:url('${cityImg}')"></div><div class="tile__scrim"></div>`
       : '';
 
-    const cls = `tile tile--${edge} ${isCorner ? 'tile--corner' : ''} ${mortgaged ? 'tile--mortgaged' : ''} ${opts.abs ? 'tile--abs' : ''} ${space.isHub ? 'tile--hub' : ''} ${cityImg ? 'tile--photo' : ''} ${hasOwner ? 'tile--owned' : ''} tile--click`;
+    const cls = `tile tile--${edge} tile--t-${space.type} ${isCorner ? 'tile--corner' : ''} ${mortgaged ? 'tile--mortgaged' : ''} ${opts.abs ? 'tile--abs' : ''} ${space.isHub ? 'tile--hub' : ''} ${cityImg ? 'tile--photo' : ''} ${hasOwner ? 'tile--owned' : ''} tile--click`;
     // --ocol lives on the TILE itself (not just the .tile__owner pip strip) so both
     // the tile--owned border AND the .tile__flag (child, inherits the custom prop)
     // can read it. Appended onto opts.style rather than replacing it — opts.style
