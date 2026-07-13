@@ -524,6 +524,170 @@ describe('createBotDriver', () => {
     });
   });
 
+  // === Fix wave 2: the WHOLE scheduled chain is error-guarded =================
+  // Re-review PROVED (with reproductions) that fix wave 1's per-function
+  // try/catch/finally (inside act()/actCharacterSelect() only) left
+  // waitForAnim() and beginStep() themselves completely unguarded — both ran
+  // outside any try/catch, either as the synchronous prefix onUpdate() calls
+  // directly, or as the body of an animPoll recheck timer. animBusy()
+  // throwing (sync first check, or a later deferred recheck) and getState()
+  // throwing (inside beginStep's own delay-choosing callback) each escaped
+  // uncaught, never called onError, and left `scheduled` wedged true forever
+  // — the exact bug this wave exists to close. The fix routes every timer
+  // callback AND the synchronous onUpdate() entry through one guardedStep()
+  // helper (see src/bot-driver.js), which is now the sole place that
+  // catches, reports via onError, and releases the single-flight flag.
+  describe('error recovery (fix wave 2 — full scheduled chain)', () => {
+    test('decideRoute() throwing inside the G.awaitingRoute branch: onError + recovery', () => {
+      const { deps, dispatched } = makeHarness({ G: { hasRolled: true, awaitingRoute: true } });
+      const boom = new Error('decideRoute exploded');
+      deps.decideRoute = jest.fn()
+        .mockImplementationOnce(() => { throw boom; })
+        .mockReturnValueOnce(['route-x']);
+      deps.onError = jest.fn();
+      const driver = createBotDriver(deps);
+
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched.length).toBe(0); // decideRoute() threw before any dispatch
+      expect(deps.onError).toHaveBeenCalledTimes(1);
+      expect(deps.onError).toHaveBeenCalledWith(boom);
+
+      // single-flight was released -> a later onUpdate() schedules and
+      // succeeds on the next step.
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['commitRoute', ['route-x']]]);
+      expect(deps.decideRoute).toHaveBeenCalledTimes(2);
+    });
+
+    test('dispatch() throwing inside the G.trade branch: onError + recovery, and lastActionWasRoll resets despite the throw (Minor fix)', () => {
+      const { deps, dispatched, state } = makeHarness({ G: { hasRolled: false } });
+      deps.decide = jest.fn().mockReturnValueOnce([['rollDice']]);
+      // deps are captured once at createBotDriver() construction (a stable
+      // DI closure) — the throwing dispatch() must be wired up BEFORE
+      // construction, not by reassigning deps.dispatch afterward (a stale
+      // reference the driver would never see; same pitfall task-1-report.md
+      // already flags for the postRoll/stuck-guard tests above).
+      const boom = new Error('trade dispatch exploded');
+      let tradeDispatchCalls = 0;
+      deps.dispatch = jest.fn((name, ...args) => {
+        if (name === 'acceptTrade' || name === 'rejectTrade') {
+          tradeDispatchCalls++;
+          if (tradeDispatchCalls === 1) throw boom;
+        }
+        dispatched.push([name, ...args]);
+      });
+      deps.onError = jest.fn(); // also wired up before construction, same reason
+      const driver = createBotDriver(deps);
+
+      // Step 1: a roll, so the driver's internal lastActionWasRoll flag
+      // becomes true (drives the LONGER postRoll delay for the very next
+      // step only).
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['rollDice']]);
+
+      // Step 2: a trade now targets this bot (seat '0'); its dispatch()
+      // (acceptTrade/rejectTrade) throws on the first attempt (see the
+      // throwing deps.dispatch wired up above, before construction).
+      state.G = makeG({
+        hasRolled: true,
+        board: { spaces: { 5: { price: 300 } } },
+        mortgaged: {},
+        trade: {
+          proposerId: '1', targetPlayerId: '0',
+          offeredProperties: [5], requestedProperties: [],
+          offeredMoney: 0, requestedMoney: 0,
+        },
+      });
+
+      driver.onUpdate();
+      // lastActionWasRoll is still true entering this step -> postRoll delay.
+      jest.advanceTimersByTime(BOT_DELAYS.postRoll);
+      expect(dispatched).toEqual([['rollDice']]); // trade dispatch threw before push
+      expect(deps.onError).toHaveBeenCalledTimes(1);
+      expect(deps.onError).toHaveBeenCalledWith(boom);
+
+      // Step 3 (recovery): if lastActionWasRoll had NOT been reset despite
+      // step 2's throw (the Minor fix), this step would need the longer
+      // postRoll delay and advancing only `think` below would be too short,
+      // so this dispatch would still be missing. Advancing exactly `think`
+      // and seeing the dispatch land proves the flag WAS reset.
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched.length).toBe(2);
+      expect(dispatched[1][0]).toBe('acceptTrade');
+      expect(tradeDispatchCalls).toBe(2);
+    });
+
+    test('animBusy() throwing on the first synchronous check: onError + recovery, single-flight released', () => {
+      const { deps, dispatched } = makeHarness({});
+      const boom = new Error('animBusy exploded (sync)');
+      deps.animBusy = jest.fn()
+        .mockImplementationOnce(() => { throw boom; })
+        .mockReturnValue(false);
+      deps.onError = jest.fn();
+      const driver = createBotDriver(deps);
+
+      // The throw happens synchronously inside onUpdate() -> beginStep() ->
+      // waitForAnim() -> animBusy(), before any timer is ever scheduled.
+      driver.onUpdate();
+      expect(dispatched.length).toBe(0);
+      expect(deps.onError).toHaveBeenCalledTimes(1);
+      expect(deps.onError).toHaveBeenCalledWith(boom);
+
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['endTurn']]);
+    });
+
+    test('animBusy() throwing on a DEFERRED animPoll recheck: onError + recovery, single-flight released', () => {
+      const { deps, dispatched } = makeHarness({});
+      const boom = new Error('animBusy exploded (deferred)');
+      let calls = 0;
+      deps.animBusy = jest.fn(() => {
+        calls++;
+        if (calls === 1) return true; // busy on the first synchronous check
+        if (calls === 2) throw boom; // throws on the deferred animPoll recheck
+        return false; // clear from here on (recovery)
+      });
+      deps.onError = jest.fn();
+      const driver = createBotDriver(deps);
+
+      driver.onUpdate();
+      expect(dispatched.length).toBe(0); // still busy, no throw yet
+      jest.advanceTimersByTime(BOT_DELAYS.animPoll);
+      expect(deps.onError).toHaveBeenCalledTimes(1);
+      expect(deps.onError).toHaveBeenCalledWith(boom);
+      expect(dispatched.length).toBe(0);
+
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['endTurn']]);
+    });
+
+    test("getState() throwing inside beginStep's delay-choosing callback: onError + recovery", () => {
+      const { deps, dispatched, state } = makeHarness({});
+      const boom = new Error('getState exploded');
+      deps.getState = jest.fn()
+        .mockReturnValueOnce(state) // onUpdate()'s own pre-check read
+        .mockImplementationOnce(() => { throw boom; }) // beginStep's cb read
+        .mockReturnValue(state); // every call after that (recovery)
+      deps.onError = jest.fn();
+      const driver = createBotDriver(deps);
+
+      driver.onUpdate();
+      expect(dispatched.length).toBe(0);
+      expect(deps.onError).toHaveBeenCalledTimes(1);
+      expect(deps.onError).toHaveBeenCalledWith(boom);
+
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['endTurn']]);
+    });
+  });
+
   // === Finding 2 fix: trade-response dead path ================================
   // sim/bot.js's decideMoves has no G.trade branch (verified: src/sim/bot.js:
   // 195-252), so before this fix a bot targeted by a pending trade would fall

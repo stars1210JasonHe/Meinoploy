@@ -284,18 +284,18 @@ export const BOT_DELAYS = Object.freeze({
 //     decideTradeResponse's file comment for the full explanation), so
 //     calling decide() here would eventually dispatch a rejected endTurn
 //     forever instead of ever resolving the trade.
-//   - error recovery: EVERY step (`act()` and its `actCharacterSelect()`
-//     sub-step) runs its body inside try/catch/finally. A throw from ANY
-//     injected dep (decide/decideRoute/dispatch/getCharacterIds/etc.) is
-//     reported via onError(err) instead of propagating — propagating would
-//     skip the dispatch-time single-flight release when a step throws mid-
-//     body (before its own `finish()` line runs), permanently wedging
-//     `scheduled = true` and silently no-op-ing every future onUpdate()
-//     forever. The `finally` block calls finish() unconditionally, so the
-//     NEXT onUpdate() (fired by the app's normal client.subscribe on the
-//     next state change, or the bot's own already-scheduled following turn)
-//     can always schedule a fresh step regardless of whether the previous
-//     one threw.
+//   - error recovery (fix wave 2 — see guardedStep() below): the ENTIRE
+//     scheduled chain is error-guarded, not just act()/actCharacterSelect().
+//     A throw from ANY injected dep this module calls while a step is
+//     in-flight — decide/decideRoute/dispatch/getCharacterIds/getState/
+//     animBusy, at ANY point in the chain (the synchronous prefix that runs
+//     inside onUpdate(), a deferred animPoll recheck, or the final paced
+//     act() timer) — is reported via onError(err) instead of propagating,
+//     and ALWAYS releases the single-flight `scheduled` flag, so the NEXT
+//     onUpdate() (fired by the app's normal client.subscribe on the next
+//     state change, or the bot's own already-scheduled following turn) can
+//     always schedule a fresh step regardless of whether the previous one
+//     threw partway through, at any hop.
 export function createBotDriver(deps) {
   const {
     getState,
@@ -319,16 +319,71 @@ export function createBotDriver(deps) {
   // from G.hasRolled, which stays true for the rest of the turn).
   let lastActionWasRoll = false;
 
-  function schedule(delay, myEpoch, fn) {
-    timerHandle = setTimeoutImpl(() => {
-      timerHandle = null;
-      if (myEpoch !== epoch) return; // stop() ran since this was queued
-      fn();
-    }, delay);
-  }
-
   function finish() {
     scheduled = false;
+  }
+
+  // === Fix wave 2: ONE error boundary for the WHOLE scheduled chain ==========
+  // Fix wave 1 (d2b5416) wrapped act()'s and actCharacterSelect()'s own
+  // bodies in try/catch/finally, but left waitForAnim() and beginStep()
+  // themselves completely unguarded — both run OUTSIDE any try/catch, once
+  // as the synchronous prefix onUpdate() calls directly, and again as the
+  // body of every animPoll recheck timer. animBusy() throwing (at the first
+  // synchronous check, or inside a later animPoll recheck) or getState()
+  // throwing (inside beginStep's own delay-choosing callback) therefore
+  // escaped uncaught, never reached act()'s try/catch at all, and
+  // permanently wedged `scheduled = true` — the exact bug this wave exists
+  // to close (re-review PROVED it with reproductions; see task-1-report.md
+  // "Fix wave 2").
+  //
+  // guardedStep(myEpoch, fn, terminal) is now the ONLY place in this module
+  // that (a) checks the epoch guard, (b) catches a throw from `fn`, (c)
+  // reports it via onError, and (d) releases the single-flight `scheduled`
+  // flag. EVERY timer callback in the chain (an animPoll recheck, or the
+  // final think/postRoll/charPick-delayed act() call) and the ONE
+  // synchronous prefix that runs inside onUpdate() (the initial call into
+  // beginStep()) funnel through this single helper — replacing fix wave 1's
+  // per-function try/catch/finally, which also produced a "double-finish"
+  // smell: actCharacterSelect() had its own nested try/catch/finally INSIDE
+  // act()'s try/catch/finally, so a throw in actCharacterSelect() called
+  // finish() twice for the same error (harmless since finish() is
+  // idempotent, but exactly the kind of sprinkled-guard confusion this
+  // rewrite eliminates — actCharacterSelect() no longer has any try/catch of
+  // its own; act()'s wrapping guardedStep call is now the only guard on that
+  // path too).
+  //
+  // `terminal` distinguishes the two kinds of guarded hop in this chain:
+  //   - non-terminal (false): a CONTINUATION step — on SUCCESS it schedules
+  //     more work of its own (another animPoll recheck, or the final act()
+  //     timer) and must NOT release `scheduled` yet, since the chain isn't
+  //     done. On FAILURE it still must release `scheduled` — nothing further
+  //     in the chain will ever run to do it otherwise (that's the wedge).
+  //   - terminal (true): the chain's actual last hop — act() itself, which
+  //     performs the one dispatch this step ever makes (or legitimately
+  //     no-ops, e.g. the stuck guard or a non-bot seat). On success OR
+  //     failure this is always the end of the chain, so `scheduled` is
+  //     released either way.
+  // A stray callback whose epoch no longer matches the current `epoch`
+  // (stop() ran, or it fired after a newer chain already started) is a pure
+  // no-op: it must not call onError, and must not call finish() either —
+  // doing so could incorrectly release a DIFFERENT, currently in-flight
+  // chain's single-flight flag.
+  function guardedStep(myEpoch, fn, terminal) {
+    if (myEpoch !== epoch) return; // stale: stop() ran, or a newer chain superseded this hop
+    try {
+      fn();
+      if (terminal) finish();
+    } catch (err) {
+      onError(err);
+      finish();
+    }
+  }
+
+  function schedule(delay, myEpoch, fn, terminal) {
+    timerHandle = setTimeoutImpl(() => {
+      timerHandle = null;
+      guardedStep(myEpoch, fn, terminal);
+    }, delay);
   }
 
   // Seat that should act right now, for either phase.
@@ -336,95 +391,97 @@ export function createBotDriver(deps) {
     return G.phase === 'characterSelect' ? String(ctx.currentPlayer) : deriveActingSeat(G, ctx);
   }
 
+  // Continuation step: animBusy() throwing here (first synchronous check OR
+  // a later deferred recheck) is caught by whichever guardedStep call is
+  // currently running this function (the onUpdate-entry guard for the first
+  // synchronous check, or the animPoll timer's own guard for a recheck).
   function waitForAnim(myEpoch, cb) {
     if (!animBusy()) {
       cb();
       return;
     }
-    schedule(BOT_DELAYS.animPoll, myEpoch, () => waitForAnim(myEpoch, cb));
+    schedule(BOT_DELAYS.animPoll, myEpoch, () => waitForAnim(myEpoch, cb), false);
   }
 
+  // Continuation step: getState() throwing inside the delay-choosing
+  // callback is caught by whichever guardedStep call is currently running
+  // this function, same as waitForAnim above.
   function beginStep(myEpoch) {
     waitForAnim(myEpoch, () => {
       const { G } = getState();
       const delay = G.phase === 'characterSelect'
         ? BOT_DELAYS.charPick
         : (lastActionWasRoll ? BOT_DELAYS.postRoll : BOT_DELAYS.think);
-      schedule(delay, myEpoch, () => act(myEpoch));
+      schedule(delay, myEpoch, () => act(), true);
     });
   }
 
-  // Finding 1 fix: the ENTIRE step body runs inside try/catch/finally. A
-  // throw from any injected dep this function calls (getCharacterIds,
-  // dispatch, ...) is reported via onError(err) rather than propagating —
-  // propagating out of a scheduled setTimeout callback would skip the
-  // `finish()` call below it, permanently wedging the single-flight
-  // `scheduled` flag at true and silently no-op-ing every later onUpdate().
-  // The `finally` guarantees `finish()` always runs, throw or not, so the
-  // driver can always take its NEXT step after an error.
+  // Plain function, no try/catch of its own — guardedStep (above) is the
+  // sole error boundary and sole owner of finish() for every path that
+  // reaches this body (called only from inside act(), which itself only
+  // ever runs as the terminal hop of a guardedStep call; see guardedStep's
+  // own comment for why a second, nested guard here would double-finish).
   function actCharacterSelect(G, ctx) {
-    try {
-      const seat = String(ctx.currentPlayer);
-      if (!isBot(seat)) return;
-      if (typeof getCharacterIds !== 'function') return; // graceful no-op (no roster dep wired)
-      const ids = getCharacterIds() || [];
-      const taken = new Set(G.players.filter(p => p.character).map(p => p.character.id));
-      const candidates = ids.filter(id => !taken.has(id));
-      if (candidates.length === 0) return;
-      const idx = Math.min(Math.floor(rngImpl() * candidates.length), candidates.length - 1);
-      dispatch('selectCharacter', candidates[idx]);
-      lastActionWasRoll = false;
-    } catch (err) {
-      onError(err);
-    } finally {
-      finish();
-    }
+    const seat = String(ctx.currentPlayer);
+    if (!isBot(seat)) return;
+    if (typeof getCharacterIds !== 'function') return; // graceful no-op (no roster dep wired)
+    const ids = getCharacterIds() || [];
+    const taken = new Set(G.players.filter(p => p.character).map(p => p.character.id));
+    const candidates = ids.filter(id => !taken.has(id));
+    if (candidates.length === 0) return;
+    const idx = Math.min(Math.floor(rngImpl() * candidates.length), candidates.length - 1);
+    dispatch('selectCharacter', candidates[idx]);
+    lastActionWasRoll = false;
   }
 
-  function act(myEpoch) {
-    if (myEpoch !== epoch) return;
-    try {
-      const { G, ctx } = getState();
-      if (ctx.gameover) return;
+  // Plain function, no try/catch of its own (see actCharacterSelect's
+  // comment above — same reasoning) — always invoked as the terminal hop of
+  // a guardedStep call (via schedule(..., true) in beginStep), which is the
+  // sole error boundary now.
+  function act() {
+    const { G, ctx } = getState();
+    if (ctx.gameover) return;
 
-      if (G.phase === 'characterSelect') {
-        actCharacterSelect(G, ctx);
-        return;
-      }
-
-      const seat = deriveActingSeat(G, ctx);
-      if (!isBot(seat)) return;
-
-      // Finding 2 fix: sim/bot.js's decide() has no G.trade branch (see
-      // decideTradeResponse's file comment above) — resolve a pending trade
-      // targeting this seat directly, BEFORE ever consulting decide(), same
-      // reasoning as the G.awaitingRoute special-case immediately below.
-      if (G.trade && seat === String(G.trade.targetPlayerId)) {
-        const [name, ...args] = decideTradeResponse(G, seat)[0];
-        dispatch(name, ...args);
-        lastActionWasRoll = false;
-        return;
-      }
-
-      // The one state decide() can't re-derive on its own (see file-header
-      // comment) — resolve it directly instead of consulting decide().
-      if (G.awaitingRoute) {
-        const route = decideRoute(G, ctx, seat);
-        dispatch('commitRoute', route);
-        lastActionWasRoll = false;
-        return;
-      }
-
-      const moves = decide(G, ctx, seat);
-      if (!moves || moves.length === 0) return; // stuck guard — no-op, releases single-flight
-      const [name, ...args] = moves[0];
-      dispatch(name, ...args);
-      lastActionWasRoll = (name === 'rollDice' || name === 'rollOnly');
-    } catch (err) {
-      onError(err);
-    } finally {
-      finish();
+    if (G.phase === 'characterSelect') {
+      actCharacterSelect(G, ctx);
+      return;
     }
+
+    const seat = deriveActingSeat(G, ctx);
+    if (!isBot(seat)) return;
+
+    // Finding 2 fix (fix wave 1): sim/bot.js's decide() has no G.trade
+    // branch (see decideTradeResponse's file comment above) — resolve a
+    // pending trade targeting this seat directly, BEFORE ever consulting
+    // decide(), same reasoning as the G.awaitingRoute special-case
+    // immediately below.
+    if (G.trade && seat === String(G.trade.targetPlayerId)) {
+      const [name, ...args] = decideTradeResponse(G, seat)[0];
+      // Minor fix (wave 2): reset the roll-pacing flag BEFORE dispatch(),
+      // not after. This step is "finished" either way (accept/reject
+      // resolved, or dispatch() throws and guardedStep aborts the chain) —
+      // a throw here must not leave a stale `true` behind, which would
+      // wrongly slow the NEXT successful step's think-vs-postRoll choice
+      // even though this step never rolled anything.
+      lastActionWasRoll = false;
+      dispatch(name, ...args);
+      return;
+    }
+
+    // The one state decide() can't re-derive on its own (see file-header
+    // comment) — resolve it directly instead of consulting decide().
+    if (G.awaitingRoute) {
+      const route = decideRoute(G, ctx, seat);
+      dispatch('commitRoute', route);
+      lastActionWasRoll = false;
+      return;
+    }
+
+    const moves = decide(G, ctx, seat);
+    if (!moves || moves.length === 0) return; // stuck guard — no-op, releases single-flight
+    const [name, ...args] = moves[0];
+    dispatch(name, ...args);
+    lastActionWasRoll = (name === 'rollDice' || name === 'rollOnly');
   }
 
   return {
@@ -437,7 +494,14 @@ export function createBotDriver(deps) {
       const seat = currentActingSeat(G, ctx);
       if (!isBot(seat)) return;
       scheduled = true;
-      beginStep(epoch);
+      // The synchronous entry into the chain: beginStep() itself, and
+      // waitForAnim()'s first synchronous animBusy() check nested inside it,
+      // both run HERE, synchronously, inside this guardedStep call — not
+      // inside a setTimeout — so this is the "synchronous prefix" fix wave
+      // 2 closes. Non-terminal: on success it only ever SCHEDULES further
+      // work (an animPoll recheck or the paced act() timer); the chain's
+      // actual dispatch happens later, in act(), as the terminal hop.
+      guardedStep(epoch, () => beginStep(epoch), false);
     },
     stop() {
       epoch++; // invalidate any pending scheduled callback
