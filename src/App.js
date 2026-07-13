@@ -2656,8 +2656,8 @@ class MonopolyBoard {
       && G.players.filter(p => p.id !== ctx.currentPlayer && !p.bankrupt).length > 0 && player.properties.length > 0;
     const canEnd = G.hasRolled && !G.canBuy && !G.pendingCard && !G.trade && !G.auction && G.turnPhase === 'done';
     html += `<div class="turnbox__btnrow">`;
-    if (canTrade) html += `<button class="pix-btn pix-btn--default" id="btn-propose-trade">TRADE</button>`;
-    html += `<button class="pix-btn pix-btn--primary" id="btn-end" ${canEnd ? '' : 'disabled'}>END TURN &#9656;</button>`;
+    if (canTrade) html += `<button class="pix-btn pix-btn--default" id="btn-propose-trade">交易 TRADE</button>`;
+    html += `<button class="pix-btn pix-btn--primary" id="btn-end" ${canEnd ? '' : 'disabled'}>结束回合 END TURN &#9656;</button>`;
     html += `</div>`;
 
     html += `</div>`;

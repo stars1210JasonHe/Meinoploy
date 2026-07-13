@@ -1283,6 +1283,67 @@
     .app--game .pcard--chip .chip__face { box-shadow:0 0 0 2px rgba(4,7,14,.85), 0 0 10px 1px var(--pc, var(--accent)); }
     /* Active player: neon edge + amber ACTIVE tag stays readable on the banded fill */
     .app--game .pcard--chip.pcard--active.wr-panel { border-color:var(--pc, var(--accent)); }
+
+    /* ── R1b: war-room console — dice, TOTAL, prompt, in-game button mapping ── */
+    /* Dice: navy banded face + amber glow pips (mockup .die). Same .die element
+       the anim overlay reuses at 2x — restyle only, tumble cadence untouched. */
+    .app--game .die {
+      background:linear-gradient(155deg, #1b3350 0% 45%, #0c1a2c 45% 100%);
+      border:2px solid rgba(120,195,225,.35);
+      box-shadow:0 4px 0 rgba(0,0,0,.4), inset 0 2px 0 rgba(255,255,255,.08);
+    }
+    .app--game .pip {
+      background:var(--wr-amber-soft);
+      box-shadow:0 0 0 1px rgba(255,182,72,.2), 0 0 6px rgba(255,182,72,.8);
+    }
+    .app--game .centerslot__total {
+      font-size:14px; color:var(--wr-cyan-soft); letter-spacing:2px;
+      text-shadow:0 0 12px rgba(79,227,255,.55);
+    }
+    .app--game .centerslot__prompt {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.05) 0px, rgba(255,255,255,.05) 1px, transparent 1px, transparent 3px),
+        linear-gradient(152deg, var(--wr-panel-1) 0% 30%, var(--wr-panel-2) 30% 62%, var(--wr-panel-3) 62% 84%, var(--wr-panel-4) 84% 100%);
+      border:2px solid rgba(79,227,255,.45);
+      box-shadow:0 6px 0 rgba(0,0,0,.35), 0 0 18px rgba(79,227,255,.15);
+    }
+
+    /* In-game button mapping onto the existing .pix-btn class family. Game-scoped
+       override only — the shared primitives keep the GB look on entry screens
+       until R3. Variant rules follow the base rule (equal specificity, source
+       order wins), mirroring the original .pix-btn block's structure. */
+    .app--game .pix-btn {
+      border:2px solid var(--wr-steel-lt); background:var(--wr-panel-3);
+      box-shadow:0 4px 0 rgba(0,0,0,.4);
+    }
+    .app--game .pix-btn:active:not(:disabled) { transform:translate(0,3px); box-shadow:0 1px 0 rgba(0,0,0,.4); }
+    /* primary = THE turn CTA (mockup .btn-end): banded amber, stepped glow pulse */
+    .app--game .pix-btn--primary {
+      color:#1a1206; border-color:rgba(255,213,120,.55);
+      background:linear-gradient(120deg, var(--wr-amber-soft) 0% 35%, var(--accent2) 35% 70%, #ff9d3d 70% 100%);
+      box-shadow:0 4px 0 rgba(180,100,20,.4), 0 0 18px rgba(255,182,72,.35);
+      animation:wrCtaGlow 1.4s steps(6) infinite;
+    }
+    .app--game .pix-btn--primary:disabled { animation:none; }
+    .app--game .pix-btn--default {
+      color:var(--wr-cyan-soft); background:rgba(79,227,255,.1);
+      border-color:rgba(79,227,255,.45);
+    }
+    .app--game .pix-btn--success {
+      color:#06180e; background:linear-gradient(180deg, #7dffc4 0% 45%, var(--good) 45% 100%);
+      border-color:rgba(125,255,196,.5);
+      box-shadow:0 4px 0 rgba(10,80,45,.5);
+    }
+    .app--game .pix-btn--danger {
+      color:#ffb3bd; background:rgba(255,84,104,.12); border-color:rgba(255,84,104,.5);
+    }
+    .app--game .pix-btn--ghost {
+      color:var(--wr-ink-faint); background:rgba(255,255,255,.04); border-color:rgba(120,190,230,.3);
+    }
+    @keyframes wrCtaGlow {
+      0%,100% { box-shadow:0 4px 0 rgba(180,100,20,.4), 0 0 18px rgba(255,182,72,.35); }
+      50% { box-shadow:0 4px 0 rgba(180,100,20,.4), 0 0 30px rgba(255,182,72,.55); }
+    }
   </style>
 </head>
 <body>
