@@ -101,6 +101,86 @@ export function policyForSeat(seat) {
   return BOT_STYLES[idx].policy;
 }
 
+// === Trade response (Finding 2 fix) ===========================================
+// sim/bot.js's decideMoves (src/sim/bot.js:195-252) has NO branch for G.trade
+// — it was never taught about the trade mechanism at all (verified by reading
+// the whole function). Without this, a bot targeted by a pending trade (see
+// deriveActingSeat above: G.trade always resolves the acting seat to
+// G.trade.targetPlayerId) would fall through decide()'s priority chain all
+// the way to endTurn, which the engine unconditionally rejects while a trade
+// is pending (Game.js's move-guard list keeps G.turnPhase === 'trade' pinned
+// until acceptTrade/rejectTrade/cancelTrade resolves it — proposeTrade sets
+// G.turnPhase = 'trade' at Game.js:1722) — an INVALID_MOVE dispatched forever
+// on every paced step, freezing that seat's turn.
+//
+// G.trade shape (created by proposeTrade, Game.js:1714-1721):
+//   { proposerId, targetPlayerId, offeredProperties, requestedProperties,
+//     offeredMoney, requestedMoney }
+// offeredProperties/offeredMoney flow proposer -> target; requestedProperties/
+// requestedMoney flow target -> proposer (see the transfer loops inside
+// acceptTrade, Game.js:1782-1803). acceptTrade/rejectTrade take NO extra
+// move args beyond (G, ctx) — both moves resolve everything from G.trade
+// itself (Game.js:1741 acceptTrade, Game.js:1813 rejectTrade) — so the move
+// tuples below are single-element (['acceptTrade'] / ['rejectTrade']), same
+// convention as sim/bot.js's own zero-arg move tuples (e.g. ['endTurn']).
+export const DEFAULT_TRADE_POLICY = Object.freeze({
+  // Accept when net value to the acting seat >= this threshold; reject
+  // otherwise. 0 = accept anything at least break-even. Policy-tunable
+  // (CLAUDE.md: no inline magic numbers) rather than a hardcoded 0 check.
+  tradeAcceptThreshold: 0,
+  // Fraction of face price a MORTGAGED property counts for in the net-value
+  // sum (on either side of the trade). Mirrors the engine's own mortgaged-
+  // property valuation convention in getTotalAssets (Game.js:644-659,
+  // specifically 647-652: "A mortgaged property is worth its mortgage value
+  // ... not its full price") which uses RULES.core.mortgageRate (0.5 in the
+  // dominion mod, mods/dominion/rules.js:16). Kept as a local policy default
+  // here instead of importing RULES — bot-driver.js deliberately has zero
+  // import-time coupling to any mods/ package (Design Decision 2,
+  // task-1-report.md), since the repo hosts multiple mods with their own
+  // rules modules. If no engine convention existed this would just be a
+  // bare 0.5; one does exist, so this value mirrors it exactly.
+  mortgagedPropertyRate: 0.5,
+});
+
+// Face-value price of a board space, discounted per mortgagedPropertyRate if
+// currently mortgaged. Reads G.board.spaces[pid].price the same way sim/
+// bot.js resolves space prices (see buyDecision/auctionDecision above,
+// src/sim/bot.js:279/293: `G.board.spaces[...].price`), and G.mortgaged[pid]
+// the same way calculateRent/getTotalAssets read it in Game.js.
+function tradePropertyValue(G, pid, rate) {
+  const space = G.board.spaces[pid];
+  const price = space ? space.price : 0;
+  return G.mortgaged && G.mortgaged[pid] ? Math.floor(price * rate) : price;
+}
+
+// Pure: decides how the acting `seat` should respond to a pending G.trade.
+// Net value TO `seat` = (incoming money + incoming properties' price sum)
+// - (outgoing money + outgoing properties' price sum); accepts when net >=
+// policy.tradeAcceptThreshold, else rejects. "Incoming"/"outgoing" are
+// resolved relative to `seat` (not hardcoded to the target side) so the
+// function stays correct even if ever called for the proposer's seat —
+// though in practice only the target can dispatch acceptTrade/rejectTrade
+// (Game.js:1743/1815 requireActor(..., G.trade.targetPlayerId)), so
+// createBotDriver only ever calls this once it has confirmed
+// seat === G.trade.targetPlayerId.
+export function decideTradeResponse(G, seat, policy) {
+  const pol = Object.assign({}, DEFAULT_TRADE_POLICY, policy || {});
+  const trade = G.trade;
+  const actingIsTarget = String(seat) === String(trade.targetPlayerId);
+  const incomingProperties = actingIsTarget ? trade.offeredProperties : trade.requestedProperties;
+  const outgoingProperties = actingIsTarget ? trade.requestedProperties : trade.offeredProperties;
+  const incomingMoney = actingIsTarget ? trade.offeredMoney : trade.requestedMoney;
+  const outgoingMoney = actingIsTarget ? trade.requestedMoney : trade.offeredMoney;
+
+  const incomingValue = (incomingMoney || 0) + (incomingProperties || [])
+    .reduce((sum, pid) => sum + tradePropertyValue(G, pid, pol.mortgagedPropertyRate), 0);
+  const outgoingValue = (outgoingMoney || 0) + (outgoingProperties || [])
+    .reduce((sum, pid) => sum + tradePropertyValue(G, pid, pol.mortgagedPropertyRate), 0);
+
+  const net = incomingValue - outgoingValue;
+  return net >= pol.tradeAcceptThreshold ? [['acceptTrade']] : [['rejectTrade']];
+}
+
 // === Pacing constants ==========================================================
 // Frozen; every delay the stepper uses lives here (CLAUDE.md: no inline
 // magic numbers). Values are the brief's exact spec.
@@ -160,6 +240,11 @@ export const BOT_DELAYS = Object.freeze({
 //   rngImpl (optional)      -> defaults to Math.random; the ONE extra dep the
 //                             task brief itself calls out by name, so tests
 //                             can make character auto-pick deterministic.
+//   onError(err) (optional) -> defaults to console.error. Called whenever a
+//                             step throws (see "error recovery" below) INSTEAD
+//                             of the error being swallowed — same "no API key
+//                             = game still works, but errors aren't silently
+//                             eaten" idiom as character-ai.js.
 //
 // Behavior:
 //   - single-flight: onUpdate() is a no-op while a step is already scheduled
@@ -191,6 +276,26 @@ export const BOT_DELAYS = Object.freeze({
 //   - waits on animBusy(), re-polling every animPoll ms, before every step's
 //     think/postRoll delay begins.
 //   - gameover (ctx.gameover truthy): no-op, nothing is ever scheduled.
+//   - pending trade targeting the acting bot (G.trade, seat ===
+//     G.trade.targetPlayerId per deriveActingSeat): resolved via
+//     decideTradeResponse() BEFORE decide() is ever consulted, same reason
+//     and same pattern as the G.awaitingRoute special-case above — sim/
+//     bot.js's decideMoves has no G.trade branch at all (see
+//     decideTradeResponse's file comment for the full explanation), so
+//     calling decide() here would eventually dispatch a rejected endTurn
+//     forever instead of ever resolving the trade.
+//   - error recovery: EVERY step (`act()` and its `actCharacterSelect()`
+//     sub-step) runs its body inside try/catch/finally. A throw from ANY
+//     injected dep (decide/decideRoute/dispatch/getCharacterIds/etc.) is
+//     reported via onError(err) instead of propagating — propagating would
+//     skip the dispatch-time single-flight release when a step throws mid-
+//     body (before its own `finish()` line runs), permanently wedging
+//     `scheduled = true` and silently no-op-ing every future onUpdate()
+//     forever. The `finally` block calls finish() unconditionally, so the
+//     NEXT onUpdate() (fired by the app's normal client.subscribe on the
+//     next state change, or the bot's own already-scheduled following turn)
+//     can always schedule a fresh step regardless of whether the previous
+//     one threw.
 export function createBotDriver(deps) {
   const {
     getState,
@@ -203,6 +308,7 @@ export function createBotDriver(deps) {
     clearTimeoutImpl = clearTimeout,
     getCharacterIds,
     rngImpl = Math.random,
+    onError = console.error,
   } = deps;
 
   let epoch = 0;
@@ -248,49 +354,77 @@ export function createBotDriver(deps) {
     });
   }
 
+  // Finding 1 fix: the ENTIRE step body runs inside try/catch/finally. A
+  // throw from any injected dep this function calls (getCharacterIds,
+  // dispatch, ...) is reported via onError(err) rather than propagating —
+  // propagating out of a scheduled setTimeout callback would skip the
+  // `finish()` call below it, permanently wedging the single-flight
+  // `scheduled` flag at true and silently no-op-ing every later onUpdate().
+  // The `finally` guarantees `finish()` always runs, throw or not, so the
+  // driver can always take its NEXT step after an error.
   function actCharacterSelect(G, ctx) {
-    const seat = String(ctx.currentPlayer);
-    if (!isBot(seat)) { finish(); return; }
-    if (typeof getCharacterIds !== 'function') { finish(); return; } // graceful no-op (no roster dep wired)
-    const ids = getCharacterIds() || [];
-    const taken = new Set(G.players.filter(p => p.character).map(p => p.character.id));
-    const candidates = ids.filter(id => !taken.has(id));
-    if (candidates.length === 0) { finish(); return; }
-    const idx = Math.min(Math.floor(rngImpl() * candidates.length), candidates.length - 1);
-    dispatch('selectCharacter', candidates[idx]);
-    lastActionWasRoll = false;
-    finish();
+    try {
+      const seat = String(ctx.currentPlayer);
+      if (!isBot(seat)) return;
+      if (typeof getCharacterIds !== 'function') return; // graceful no-op (no roster dep wired)
+      const ids = getCharacterIds() || [];
+      const taken = new Set(G.players.filter(p => p.character).map(p => p.character.id));
+      const candidates = ids.filter(id => !taken.has(id));
+      if (candidates.length === 0) return;
+      const idx = Math.min(Math.floor(rngImpl() * candidates.length), candidates.length - 1);
+      dispatch('selectCharacter', candidates[idx]);
+      lastActionWasRoll = false;
+    } catch (err) {
+      onError(err);
+    } finally {
+      finish();
+    }
   }
 
   function act(myEpoch) {
     if (myEpoch !== epoch) return;
-    const { G, ctx } = getState();
-    if (ctx.gameover) { finish(); return; }
+    try {
+      const { G, ctx } = getState();
+      if (ctx.gameover) return;
 
-    if (G.phase === 'characterSelect') {
-      actCharacterSelect(G, ctx);
-      return;
-    }
+      if (G.phase === 'characterSelect') {
+        actCharacterSelect(G, ctx);
+        return;
+      }
 
-    const seat = deriveActingSeat(G, ctx);
-    if (!isBot(seat)) { finish(); return; }
+      const seat = deriveActingSeat(G, ctx);
+      if (!isBot(seat)) return;
 
-    // The one state decide() can't re-derive on its own (see file-header
-    // comment) — resolve it directly instead of consulting decide().
-    if (G.awaitingRoute) {
-      const route = decideRoute(G, ctx, seat);
-      dispatch('commitRoute', route);
-      lastActionWasRoll = false;
+      // Finding 2 fix: sim/bot.js's decide() has no G.trade branch (see
+      // decideTradeResponse's file comment above) — resolve a pending trade
+      // targeting this seat directly, BEFORE ever consulting decide(), same
+      // reasoning as the G.awaitingRoute special-case immediately below.
+      if (G.trade && seat === String(G.trade.targetPlayerId)) {
+        const [name, ...args] = decideTradeResponse(G, seat)[0];
+        dispatch(name, ...args);
+        lastActionWasRoll = false;
+        return;
+      }
+
+      // The one state decide() can't re-derive on its own (see file-header
+      // comment) — resolve it directly instead of consulting decide().
+      if (G.awaitingRoute) {
+        const route = decideRoute(G, ctx, seat);
+        dispatch('commitRoute', route);
+        lastActionWasRoll = false;
+        return;
+      }
+
+      const moves = decide(G, ctx, seat);
+      if (!moves || moves.length === 0) return; // stuck guard — no-op, releases single-flight
+      const [name, ...args] = moves[0];
+      dispatch(name, ...args);
+      lastActionWasRoll = (name === 'rollDice' || name === 'rollOnly');
+    } catch (err) {
+      onError(err);
+    } finally {
       finish();
-      return;
     }
-
-    const moves = decide(G, ctx, seat);
-    if (!moves || moves.length === 0) { finish(); return; } // stuck guard — no-op, releases single-flight
-    const [name, ...args] = moves[0];
-    dispatch(name, ...args);
-    lastActionWasRoll = (name === 'rollDice' || name === 'rollOnly');
-    finish();
   }
 
   return {

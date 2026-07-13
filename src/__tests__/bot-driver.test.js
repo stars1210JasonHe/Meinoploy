@@ -15,6 +15,7 @@ import {
   BOT_DELAYS,
   policyForSeat,
   createBotDriver,
+  decideTradeResponse,
 } from '../bot-driver';
 
 // --- small G/ctx fixture builders -------------------------------------------
@@ -423,5 +424,239 @@ describe('createBotDriver', () => {
     driver.onUpdate();
     jest.advanceTimersByTime(BOT_DELAYS.think);
     expect(dispatched).toEqual([['endTurn']]);
+  });
+
+  // === Finding 1 fix: error recovery ==========================================
+  // Before this fix, a throw from any injected dep inside act()/
+  // actCharacterSelect() skipped the `finish()` call that follows it,
+  // permanently wedging `scheduled = true` — every later onUpdate() would
+  // then silently no-op forever (the bot's whole turn freezes with no
+  // recovery). The fix wraps each step body in try/catch/finally: the catch
+  // reports the error via onError(err) (default console.error) instead of
+  // swallowing it, and the finally unconditionally releases the single-flight
+  // flag so the driver can always take its NEXT step.
+  describe('error recovery (Finding 1)', () => {
+    test('throwing decide(): single-flight resets, onError is called, a later onUpdate() schedules again', () => {
+      const { deps, dispatched } = makeHarness({});
+      const boom = new Error('decide exploded');
+      deps.decide = jest.fn()
+        .mockImplementationOnce(() => { throw boom; })
+        .mockReturnValueOnce([['endTurn']]);
+      deps.onError = jest.fn();
+      const driver = createBotDriver(deps);
+
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched.length).toBe(0); // decide() threw before any dispatch
+      expect(deps.onError).toHaveBeenCalledTimes(1);
+      expect(deps.onError).toHaveBeenCalledWith(boom);
+
+      // single-flight was released by the finally -> a later onUpdate() can
+      // schedule and successfully take the NEXT step.
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['endTurn']]);
+      expect(deps.decide).toHaveBeenCalledTimes(2);
+    });
+
+    test('throwing dispatch(): single-flight resets, onError is called, a later onUpdate() schedules again', () => {
+      const { deps, dispatched } = makeHarness({});
+      const boom = new Error('dispatch exploded');
+      let calls = 0;
+      deps.dispatch = jest.fn((name, ...args) => {
+        calls++;
+        if (calls === 1) throw boom;
+        dispatched.push([name, ...args]);
+      });
+      deps.onError = jest.fn();
+      const driver = createBotDriver(deps);
+
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched.length).toBe(0);
+      expect(deps.onError).toHaveBeenCalledTimes(1);
+      expect(deps.onError).toHaveBeenCalledWith(boom);
+
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['endTurn']]);
+    });
+
+    test('throwing getCharacterIds() during character-select: single-flight resets, onError is called, recovers', () => {
+      const state = {
+        G: makeG({ phase: 'characterSelect', players: [{ id: '0', character: null }] }),
+        ctx: makeCtx({ currentPlayer: '0' }),
+      };
+      const dispatched = [];
+      const boom = new Error('roster exploded');
+      const deps = {
+        getState: () => state,
+        dispatch: (name, ...args) => dispatched.push([name, ...args]),
+        decide: jest.fn(),
+        decideRoute: jest.fn(),
+        isBot: () => true,
+        animBusy: () => false,
+        getCharacterIds: jest.fn(() => { throw boom; }),
+        onError: jest.fn(),
+      };
+      const driver = createBotDriver(deps);
+
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.charPick);
+      expect(dispatched.length).toBe(0);
+      expect(deps.onError).toHaveBeenCalledWith(boom);
+
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.charPick);
+      expect(deps.getCharacterIds).toHaveBeenCalledTimes(2);
+    });
+
+    test('onError defaults to console.error when not supplied', () => {
+      const { deps } = makeHarness({});
+      const boom = new Error('kaboom');
+      deps.decide = jest.fn(() => { throw boom; });
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const driver = createBotDriver(deps);
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(spy).toHaveBeenCalledWith(boom);
+      spy.mockRestore();
+    });
+  });
+
+  // === Finding 2 fix: trade-response dead path ================================
+  // sim/bot.js's decideMoves has no G.trade branch (verified: src/sim/bot.js:
+  // 195-252), so before this fix a bot targeted by a pending trade would fall
+  // through decide()'s priority chain to endTurn, which the engine rejects
+  // while G.trade is pending (Game.js keeps G.turnPhase === 'trade' until
+  // acceptTrade/rejectTrade/cancelTrade resolves it) — an INVALID_MOVE
+  // dispatched forever. createBotDriver now special-cases G.trade the same
+  // way it already special-cased G.awaitingRoute: resolved directly via
+  // decideTradeResponse(), before decide() is ever consulted.
+  describe('createBotDriver: trade-response routing (Finding 2)', () => {
+    test('pending trade targeting the acting bot resolves via decideTradeResponse; decide() is not consulted', () => {
+      const { deps, dispatched } = makeHarness({
+        G: {
+          board: { spaces: { 5: { price: 300 } } },
+          mortgaged: {},
+          trade: {
+            proposerId: '0', targetPlayerId: '1',
+            offeredProperties: [5], requestedProperties: [],
+            offeredMoney: 0, requestedMoney: 0,
+          },
+        },
+        ctx: { currentPlayer: '0' },
+      });
+      const driver = createBotDriver(deps);
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['acceptTrade']]);
+      expect(deps.decide).not.toHaveBeenCalled();
+    });
+
+    // "bot-not-target -> falls through to decide()": a contrived-but-valid
+    // fixture (the real engine keeps auction/trade mutually exclusive —
+    // proposeTrade rejects while G.auction is set, Game.js:1678 — but this
+    // pure module doesn't itself enforce that) that exercises the driver's
+    // own `seat === G.trade.targetPlayerId` guard in isolation: the acting
+    // seat here is the AUCTION bidder ('2', higher precedence in
+    // deriveActingSeat), which does not match G.trade.targetPlayerId ('1'),
+    // so the trade branch must be skipped and decide() consulted normally.
+    test('a pending trade NOT targeting the acting seat falls through to decide()', () => {
+      const { deps, dispatched } = makeHarness({
+        G: {
+          auction: { bidders: [{ playerId: '2', passed: false }], currentBidderIndex: 0 },
+          trade: {
+            proposerId: '0', targetPlayerId: '1',
+            offeredProperties: [], requestedProperties: [],
+            offeredMoney: 0, requestedMoney: 0,
+          },
+        },
+        ctx: { currentPlayer: '2' },
+      });
+      deps.decide = jest.fn(() => [['placeBid', 10]]);
+      const driver = createBotDriver(deps);
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['placeBid', 10]]);
+      expect(deps.decide).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
+// === decideTradeResponse (Finding 2 fix) =====================================
+// Pure function: net value to the acting seat = (incoming money + incoming
+// properties' price sum) - (outgoing money + outgoing properties' price sum);
+// accepts when net >= policy.tradeAcceptThreshold (default 0), else rejects.
+// Mortgaged properties count at policy.mortgagedPropertyRate (default 0.5) of
+// face price, mirroring Game.js's getTotalAssets valuation convention
+// (Game.js:647-652, RULES.core.mortgageRate).
+describe('decideTradeResponse', () => {
+  // proposerId is always '0', targetPlayerId '1' — seat '1' (the target) is
+  // the acting bot in every test unless noted otherwise.
+  function makeTradeG(trade, mortgaged) {
+    return {
+      board: { spaces: { 1: { price: 200 }, 2: { price: 100 }, 3: { price: 300 } } },
+      mortgaged: mortgaged || {},
+      trade,
+    };
+  }
+
+  test('accept-favorable: bot receives more value than it gives up', () => {
+    const G = makeTradeG({
+      proposerId: '0', targetPlayerId: '1',
+      offeredProperties: [1], requestedProperties: [2], // bot gets pid1(200), gives pid2(100)
+      offeredMoney: 0, requestedMoney: 0,
+    });
+    expect(decideTradeResponse(G, '1')).toEqual([['acceptTrade']]);
+  });
+
+  test('reject-unfavorable: bot gives up more value than it receives', () => {
+    const G = makeTradeG({
+      proposerId: '0', targetPlayerId: '1',
+      offeredProperties: [2], requestedProperties: [1], // bot gets pid2(100), gives pid1(200)
+      offeredMoney: 0, requestedMoney: 0,
+    });
+    expect(decideTradeResponse(G, '1')).toEqual([['rejectTrade']]);
+  });
+
+  test('mortgaged discount: an incoming mortgaged property is valued at half price, and this actually flips the decision at the margin', () => {
+    // Property 1 (face 200) offered to the bot for 150 cash.
+    //   Unmortgaged: incoming=200, outgoing=150 -> net=+50 -> accept.
+    //   Mortgaged:   incoming=100 (200 * 0.5 default rate), outgoing=150 -> net=-50 -> reject.
+    const trade = {
+      proposerId: '0', targetPlayerId: '1',
+      offeredProperties: [1], requestedProperties: [],
+      offeredMoney: 0, requestedMoney: 150,
+    };
+    expect(decideTradeResponse(makeTradeG(trade, {}), '1')).toEqual([['acceptTrade']]);
+    expect(decideTradeResponse(makeTradeG(trade, { 1: true }), '1')).toEqual([['rejectTrade']]);
+  });
+
+  test('respects a custom policy (tradeAcceptThreshold / mortgagedPropertyRate)', () => {
+    // Break-even trade (net = 0): accepted under the default threshold (0),
+    // rejected under a strictly-positive custom threshold.
+    const trade = {
+      proposerId: '0', targetPlayerId: '1',
+      offeredProperties: [], requestedProperties: [],
+      offeredMoney: 100, requestedMoney: 100,
+    };
+    const G = makeTradeG(trade, {});
+    expect(decideTradeResponse(G, '1')).toEqual([['acceptTrade']]);
+    expect(decideTradeResponse(G, '1', { tradeAcceptThreshold: 1 })).toEqual([['rejectTrade']]);
+  });
+
+  test('bot-not-target: called with the PROPOSER seat computes net from that seat\'s own perspective', () => {
+    // From proposer '0' 's perspective: incoming = requestedProperties/Money,
+    // outgoing = offeredProperties/Money (mirror image of the target's view).
+    const trade = {
+      proposerId: '0', targetPlayerId: '1',
+      offeredProperties: [1], requestedProperties: [2], // proposer gives pid1(200), gets pid2(100)
+      offeredMoney: 0, requestedMoney: 0,
+    };
+    const G = makeTradeG(trade, {});
+    // Target's view (net=+100) says accept; proposer's view (net=-100) says reject.
+    expect(decideTradeResponse(G, '1')).toEqual([['acceptTrade']]);
+    expect(decideTradeResponse(G, '0')).toEqual([['rejectTrade']]);
   });
 });
