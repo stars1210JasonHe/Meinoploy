@@ -1,0 +1,6 @@
+A single pixel-art game-board background for "Gilded Rails".
+Era and tone, drawn from the cast: Augusta Vane
+plays to win. Augusta Vane, The Magnate, contends for control of the board. Eli Crowe
+plays to win. Eli Crowe, The Surveyor, contends for control of the board. Min Zhou
+plays to win. Min Zhou, The Engineer, contends for control of the board.
+Hi-bit pixel-art night map background, top-down terrain viewed from high above, ordered-dither banded gradients (never smooth washes), dark deep-space palette (navy/void base) with cyan and amber glow accents, chunky visible pixels, limited palette (~32 colors), atmospheric night-lights mood. NO text, NO labels, NO UI elements, NO borders, NO characters or figures — pure environment art that reads as a game-board backdrop.

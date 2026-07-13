@@ -4,12 +4,13 @@ import { silkRoadData } from './bundle.data';
 import { CHARACTERS } from './characters';
 import keyArt from '../dominion/keyart.png';
 import { getGlobe } from '../dominion/atlas/globe-lib';
+import boardBg from './backgrounds/silk-road.png';
 
 export const silkRoadClient = Object.assign({}, silkRoadData, {
   characters: CHARACTERS,
   portraits: {},
   keyArt: keyArt,
-  atlasAssets: {},
+  atlasAssets: { 'silk-road': { worldBg: boardBg, cityImages: {} } },
   getGlobe: getGlobe,
 });
 

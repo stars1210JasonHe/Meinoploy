@@ -1,0 +1,7 @@
+A single pixel-art game-board background for "Ancient Empires".
+Era and tone, drawn from the cast: Hammurabi
+plays to win. Hammurabi, The Lawgiver, contends for control of the board. Cyrus the Great
+plays to win. Cyrus the Great, King of Kings, contends for control of the board. Alexander the Great
+plays to win. Alexander the Great, World-Conqueror, contends for control of the board.
+Geography flavor — the region spans: New York, Sao Paulo, London, Lagos, Johannesburg, Cairo, Dubai, Mumbai, Singapore, Shanghai, Tokyo, Sydney.
+Hi-bit pixel-art night map background, top-down terrain viewed from high above, ordered-dither banded gradients (never smooth washes), dark deep-space palette (navy/void base) with cyan and amber glow accents, chunky visible pixels, limited palette (~32 colors), atmospheric night-lights mood. NO text, NO labels, NO UI elements, NO borders, NO characters or figures — pure environment art that reads as a game-board backdrop.

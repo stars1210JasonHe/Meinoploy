@@ -14,6 +14,7 @@ import { CHARACTERS } from './characters';
 import keyArt from './keyart.png';
 import { TERRA_ASSETS } from './atlas/terra-assets';
 import { getGlobe } from './atlas/globe-lib';
+import classicBoardBg from './backgrounds/classic.png';
 
 const portraits = {};
 CHARACTERS.forEach(function (c) {
@@ -29,6 +30,8 @@ export const dominionClient = Object.assign({}, dominionData, {
   keyArt: keyArt,
   // Both Terra worlds reuse the same real-city asset pack (city photos + world bg).
   atlasAssets: { 'terra-circuit': TERRA_ASSETS, 'terra-globe': TERRA_ASSETS },
+  // Classic-map board art (reskin R2) — feeds the .board__bg layer, keyed by map id.
+  mapAssets: { 'classic': { boardBg: classicBoardBg } },
   getGlobe: getGlobe,
 });
 

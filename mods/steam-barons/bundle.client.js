@@ -4,12 +4,14 @@ import { steamBaronsData } from './bundle.data';
 import { CHARACTERS } from './characters';
 import keyArt from '../dominion/keyart.png';
 import { getGlobe } from '../dominion/atlas/globe-lib';
+import boardBg from './backgrounds/steam-barons.png';
 
 export const steamBaronsClient = Object.assign({}, steamBaronsData, {
   characters: CHARACTERS,
   portraits: {},
   keyArt: keyArt,
   atlasAssets: {},
+  mapAssets: { 'steam-barons': { boardBg: boardBg } },
   getGlobe: getGlobe,
 });
 

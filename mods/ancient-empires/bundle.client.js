@@ -4,12 +4,13 @@ import { ancientEmpiresData } from './bundle.data';
 import { CHARACTERS } from './characters';
 import keyArt from '../dominion/keyart.png';
 import { getGlobe } from '../dominion/atlas/globe-lib';
+import boardBg from './backgrounds/ancient-empires.png';
 
 export const ancientEmpiresClient = Object.assign({}, ancientEmpiresData, {
   characters: CHARACTERS,
   portraits: {},
   keyArt: keyArt,
-  atlasAssets: {},
+  atlasAssets: { 'ancient-empires': { worldBg: boardBg, cityImages: {} } },
   getGlobe: getGlobe,
 });
 

@@ -4,12 +4,14 @@ import { gildedRailsData } from './bundle.data';
 import { CHARACTERS } from './characters';
 import keyArt from '../dominion/keyart.png';
 import { getGlobe } from '../dominion/atlas/globe-lib';
+import boardBg from './backgrounds/gilded-rails.png';
 
 export const gildedRailsClient = Object.assign({}, gildedRailsData, {
   characters: CHARACTERS,
   portraits: {},
   keyArt: keyArt,
   atlasAssets: {},
+  mapAssets: { 'gilded-rails': { boardBg: boardBg } },
   getGlobe: getGlobe,
 });
 

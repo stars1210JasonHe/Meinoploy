@@ -1,0 +1,8 @@
+A single pixel-art game-board background for "Silk Road".
+Era and tone, drawn from the cast: Zhang Qian
+plays to win. Zhang Qian, The Trailblazer, contends for control of the board. Marco Polo
+plays to win. Marco Polo, The Traveler, contends for control of the board. Ibn Battuta
+plays to win. Ibn Battuta, The Wanderer, contends for control of the board. Tomyris
+plays to win. Tomyris, The Steppe Queen, contends for control of the board.
+Geography flavor — the region spans: Xi'an, Dunhuang, Kashgar, Samarkand, Bukhara, Merv, Baghdad, Palmyra, Constantinople, Venice.
+Hi-bit pixel-art night map background, top-down terrain viewed from high above, ordered-dither banded gradients (never smooth washes), dark deep-space palette (navy/void base) with cyan and amber glow accents, chunky visible pixels, limited palette (~32 colors), atmospheric night-lights mood. NO text, NO labels, NO UI elements, NO borders, NO characters or figures — pure environment art that reads as a game-board backdrop.
