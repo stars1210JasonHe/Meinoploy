@@ -125,6 +125,12 @@ async function playUntilBotTurnsObserved(page, minBotTurns, maxIterations) {
     const evAccept = page.locator('#ev-accept');
     if (await evAccept.isVisible().catch(() => false)) { await evAccept.click(); await page.waitForTimeout(250); continue; }
 
+    // Final-review Important #1: a bot may PASS on buying, opening an auction
+    // where the HUMAN is the active bidder — without this branch the loop
+    // idles to maxIterations. The human always passes (bots settle it).
+    const passAuction = page.locator('#btn-pass-auction');
+    if (await passAuction.isVisible().catch(() => false)) { await passAuction.click(); await page.waitForTimeout(300); continue; }
+
     if (rollVisible && await rollBtn.isEnabled().catch(() => false)) {
       await rollBtn.click();
       await page.waitForTimeout(1100);
