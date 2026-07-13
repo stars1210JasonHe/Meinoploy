@@ -205,3 +205,28 @@ export function tokenVisual(char, color, fallbackLabel) {
   const text = char && char.name ? char.name[0] : String(fallbackLabel);
   return { portraitUrl: null, color, text };
 }
+
+// R1c: dither-bloom glow per atlas node — color by type (mockup glowColor
+// table), owner neon overriding; context is a BLOOM_CONTEXTS key (fixed enum,
+// wr-bloom): hubs use the wider 'hub' halo, GO uses 'start', ownership only
+// brightens alpha via 'nodeOwned' — never a continuous per-instance value.
+export const NODE_GLOW_COLORS = Object.freeze({
+  neutral: '#4fe3ff', // cyan — unowned ownables
+  tax: '#ff8a3d',
+  chance: '#a97bff',
+  start: '#ffb648',
+  dim: '#5c7690', // jail / parking / other non-play specials
+});
+
+export function nodeGlow(space, ownerColor) {
+  const context = space.isHub ? 'hub' : (space.type === 'go' ? 'start' : (ownerColor ? 'nodeOwned' : 'node'));
+  if (ownerColor) return { color: ownerColor, context };
+  switch (space.type) {
+    case 'property': case 'railroad': case 'utility':
+      return { color: NODE_GLOW_COLORS.neutral, context };
+    case 'tax': return { color: NODE_GLOW_COLORS.tax, context };
+    case 'chance': case 'community': return { color: NODE_GLOW_COLORS.chance, context };
+    case 'go': return { color: NODE_GLOW_COLORS.start, context };
+    default: return { color: NODE_GLOW_COLORS.dim, context };
+  }
+}

@@ -796,6 +796,11 @@
     .app--game #game-area.game--routepick .board__edges line.edge--hot {
       opacity:1; stroke:var(--good); stroke-width:2.2;
     }
+    /* R1c: dither-bloom node halos — sibling layer under the tiles (the tile
+       clips overflow, so halos can't be children). Sprite comes from wr-bloom
+       (memoized data URI), stretched chunky. */
+    .tile-halo { position:absolute; transform:translate(-50%,-50%); z-index:0; pointer-events:none;
+      background-size:100% 100%; background-repeat:no-repeat; image-rendering:pixelated; }
     /* atlas: city label above each place's tile cluster */
     .place-label { position:absolute; transform:translateX(-50%); z-index:2; pointer-events:none;
       font-family:var(--disp); font-size:7px; letter-spacing:1px; color:var(--ink);

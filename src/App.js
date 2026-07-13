@@ -15,8 +15,9 @@ import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
 import { isDuelCooldownBlocked } from './events';
 import { createAnimator, DICE_TUMBLE_MS } from './anim';
 import { createAudio } from './audio';
-import { chipHtml, chipDetailHtml, tileDetailHtml, drawerShellHtml, tokenVisual } from './game-chrome';
+import { chipHtml, chipDetailHtml, tileDetailHtml, drawerShellHtml, tokenVisual, nodeGlow } from './game-chrome';
 import { resolveBoardBg, starfieldDataUri } from './board-bg';
+import { bloomSprite } from './wr-bloom';
 
 // Client-side mod registry — static bundle imports (Parcel v1 forces all imports static, so
 // every registered mod is bundled at build; only WHICH is active is chosen at runtime). This
@@ -2317,6 +2318,7 @@ class MonopolyBoard {
     this.boardEl.className = isAtlas ? 'board board--atlas board--rect' : 'board';
     this._ensureBoardChildren();
     let tiles = '';
+    let halos = '';
     for (let i = 0; i < this.mapData.spaceCount; i++) {
       const pos = this.mapData.positions[i];
       if (!pos) continue;
@@ -2341,6 +2343,18 @@ class MonopolyBoard {
       const sizeUnit = isRect ? 'cqmin' : '%';
       const style = `left:${pos.x}%;top:${pos.y}%;width:${size}${sizeUnit};height:${size}${sizeUnit};`;
       tiles += this._tileHtml(i, G, { edge, abs: true, style });
+      // R1c: dither-bloom halo under each atlas node — a SIBLING layer (the
+      // tile clips overflow, a child halo would be cut off), same pos math,
+      // ~1.9x the tile size. bloomSprite memoizes per color|context, and
+      // nodeGlow only ever emits enum contexts, so cache stays bounded.
+      if (isAtlas) {
+        const sp = this.boardSpaces[i];
+        const owner = G.ownership[i];
+        const ownColor = owner !== null && owner !== undefined ? this._playerColor(G, owner) : null;
+        const glow = nodeGlow(sp, ownColor);
+        const hs = size * 1.9;
+        halos += `<div class="tile-halo" style="left:${pos.x}%;top:${pos.y}%;width:${hs}${sizeUnit};height:${hs}${sizeUnit};background-image:url('${bloomSprite(glow.color, glow.context)}')"></div>`;
+      }
     }
     // Atlas frees the center (the dice/buy/pass HUD moves to the side panel —
     // see renderTurnbox), so the board renders only a small logo badge top-center.
@@ -2398,7 +2412,8 @@ class MonopolyBoard {
     }
     // World art now renders via the persistent .board__bg layer (_syncBoardBg,
     // reskin R2) — the old inline background-image on this grid is retired.
-    this._gridWrap.innerHTML = `<div class="board__grid board__grid--absolute">${edgesSvg}${tiles}${labels || ''}${center}</div>`;
+    // Halos paint between the route network and the tiles (edges < halos < tiles).
+    this._gridWrap.innerHTML = `<div class="board__grid board__grid--absolute">${edgesSvg}${halos}${tiles}${labels || ''}${center}</div>`;
   }
 
   // Returns {x, y} as PERCENT of the board element, for positioning overlay tokens.

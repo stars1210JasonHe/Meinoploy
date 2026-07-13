@@ -1,4 +1,4 @@
-import { chipHtml, chipDetailHtml, drawerShellHtml, tokenVisual, tileDetailHtml } from '../game-chrome';
+import { chipHtml, chipDetailHtml, drawerShellHtml, tokenVisual, tileDetailHtml, nodeGlow, NODE_GLOW_COLORS } from '../game-chrome';
 
 const P = { idx: 0, name: 'Hammurabi', title: 'The Lawgiver', color: '#e8a33d',
   money: '$3,085', portraitUrl: '/portraits/h.png', isCurrent: true, isBankrupt: false,
@@ -226,5 +226,32 @@ describe('tileDetailHtml', () => {
   test('groupHtml is a raw pass-through (not escaped)', () => {
     const h = tileDetailHtml(OWNED);
     expect(h).toContain('<span class="propchip">Sibling A</span>');
+  });
+});
+
+// R1c: node glow chooser — color + BLOOM_CONTEXTS key per space type/ownership
+// (mockup: haloColor by type; haloAlpha by owner).
+describe('nodeGlow', () => {
+  test('owned property glows in the owner neon (overrides type)', () => {
+    expect(nodeGlow({ type: 'property' }, '#ff3b5c')).toEqual({ color: '#ff3b5c', context: 'nodeOwned' });
+    expect(nodeGlow({ type: 'railroad' }, '#e8b34d')).toEqual({ color: '#e8b34d', context: 'nodeOwned' });
+  });
+  test('unowned ownables glow neutral cyan', () => {
+    expect(nodeGlow({ type: 'property' }, null)).toEqual({ color: NODE_GLOW_COLORS.neutral, context: 'node' });
+    expect(nodeGlow({ type: 'utility' }, null)).toEqual({ color: NODE_GLOW_COLORS.neutral, context: 'node' });
+  });
+  test('special types carry their mockup glow colors', () => {
+    expect(nodeGlow({ type: 'tax' }, null)).toEqual({ color: NODE_GLOW_COLORS.tax, context: 'node' });
+    expect(nodeGlow({ type: 'chance' }, null)).toEqual({ color: NODE_GLOW_COLORS.chance, context: 'node' });
+    expect(nodeGlow({ type: 'community' }, null)).toEqual({ color: NODE_GLOW_COLORS.chance, context: 'node' });
+    expect(nodeGlow({ type: 'go' }, null)).toEqual({ color: NODE_GLOW_COLORS.start, context: 'start' });
+  });
+  test('hubs glow cyan in the wider hub context; dim steel for the rest', () => {
+    expect(nodeGlow({ type: 'property', isHub: true }, null)).toEqual({ color: NODE_GLOW_COLORS.neutral, context: 'hub' });
+    expect(nodeGlow({ type: 'jail' }, null)).toEqual({ color: NODE_GLOW_COLORS.dim, context: 'node' });
+    expect(nodeGlow({ type: 'parking' }, null)).toEqual({ color: NODE_GLOW_COLORS.dim, context: 'node' });
+  });
+  test('owner neon wins even on a hub (context stays hub-wide)', () => {
+    expect(nodeGlow({ type: 'property', isHub: true }, '#a97bff')).toEqual({ color: '#a97bff', context: 'hub' });
   });
 });
