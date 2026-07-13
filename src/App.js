@@ -1178,6 +1178,30 @@ class MonopolyBoard {
       this._lastChromeBottom = bottom;
       this.gameAreaEl.style.setProperty('--chrome-bottom', `${bottom}px`);
     }
+    // Rail actionbar clip fix (owner-reported: dice roll's bottom-left half
+    // hidden — probe @1890x920: turnbox rect 276px tall vs the actionbar's old
+    // static 170px cap). index.html's `.game--gutters .game__actionbar` no
+    // longer clips at a fixed worst-case height — it sizes to its REAL content
+    // and grows upward from its bottom:8px anchor (safe: it lives entirely in
+    // the rail, never touches the board — the deform-bug lock above is
+    // untouched). The chip column above it (`.game--gutters .game__chips`)
+    // must yield the SAME real height back, or a tall turnbox (jail, or
+    // roll -> buy-prompt) would overlap the chips instead of clipping the
+    // dice. `--rail-bar-h` carries the actionbar's MEASURED offsetHeight —
+    // read here because this method already runs last, after
+    // renderPlayerInfo/renderTurnbox have painted this render's real content
+    // (see the doc comment above) — to the chip column's CSS
+    // `bottom: calc(var(--rail-bar-h) + 16px)`. Same measured-var +
+    // throttled-write pattern as --chrome-top/--chrome-bottom just above.
+    // Gated on `gutters`: the var is only ever read by gutter-mode CSS, so
+    // skip the forced-layout offsetHeight read in narrow mode.
+    if (gutters && this.actionBarEl) {
+      const railBarH = this.actionBarEl.offsetHeight;
+      if (railBarH !== this._lastRailBarH) {
+        this._lastRailBarH = railBarH;
+        this.gameAreaEl.style.setProperty('--rail-bar-h', `${railBarH}px`);
+      }
+    }
   }
 
   // Owner acceptance fix wave, Fix 3 ("wide-screen gutter layout" — the owner's

@@ -818,3 +818,139 @@ test.describe('Locked board size (Redesign B)', () => {
     expect(pageErrors).toEqual([]);
   });
 });
+
+// ─── Rail actionbar content-sizing (dice-clip fix) ───
+//
+// Owner-reported, controller-probed: in gutter mode the vertical rail
+// turnbox content genuinely reaches ~276px tall (probe @1890x920: turnbox
+// rect t:662 b:938 vs the OLD actionbar rect t:742 b:912, viewport 920) while
+// the rail actionbar clipped at a static max-height:170px worst-case reserve
+// — the dice block's bottom ran past its own container, rendering half-
+// hidden bottom-left. Fix (index.html `.game--gutters .game__actionbar` /
+// `.game--gutters .game__chips`, App.js `_syncChromeBands`): the actionbar
+// sizes to its REAL content and grows UPWARD from its bottom:8px rail anchor
+// instead of clipping — it lives entirely in the rail so this never touches
+// the board (the Redesign B deform-bug lock in the describe block above is
+// untouched: gutter-mode --chrome-top/--chrome-bottom stay the flat
+// CHROME_GUTTER_MARGIN constant regardless of the actionbar's real height).
+// The chip column above it yields the same real height back via the
+// measured `--rail-bar-h` custom prop instead of the old static 186px
+// reserve. Driven on 三国志 (sanguo-excerpt — an atlas/flat-rect-board mod
+// with no classic maps, `bundle.data.js`: `maps: []`) per the fix brief, at
+// three wide viewports that all cross the >=300px-per-side gutter threshold
+// for a rect board (App.js `_syncGutterMode`'s rect-board probe).
+test.describe('Rail actionbar content-sizing (dice-clip fix)', () => {
+  async function selectCharactersSanguo(page, viewport) {
+    await page.setViewportSize(viewport);
+    await page.goto('/');
+    await page.waitForSelector('#btn-mode-local', { timeout: 10000 });
+    await page.click('#btn-mode-local');
+    await selectMod(page, '三国志');
+    await page.waitForSelector('.map-card[data-map-idx="0"]', { timeout: 10000 });
+    await page.click('.map-card[data-map-idx="0"]');
+    await page.waitForSelector('.count-btn[data-count="2"]', { timeout: 10000 });
+    await page.click('.count-btn[data-count="2"]');
+    await page.waitForSelector('#btn-vic-start', { timeout: 10000 });
+    await page.click('#btn-vic-start');
+    await page.waitForSelector('.charcard', { timeout: 10000 });
+    await pickAndConfirm(page);
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.select__p');
+      return el && /PLAYER 2/.test(el.textContent);
+    }, { timeout: 10000 });
+    await pickAndConfirm(page);
+    await page.waitForSelector('#btn-roll', { timeout: 10000 });
+  }
+
+  // Full containment probe — reused at rest AND after forcing a taller
+  // (buy-prompt) turnbox state, the exact regression surface the owner hit.
+  async function assertContainment(page, label) {
+    const turnboxRect = await page.locator('#turnbox').evaluate(el => el.getBoundingClientRect());
+    const actionbarRect = await page.locator('.game__actionbar').evaluate(el => el.getBoundingClientRect());
+    const chipsRect = await page.locator('.game__chips').evaluate(el => el.getBoundingClientRect());
+    const viewport = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }));
+    console.log(`[rail-clip ${label}] turnbox t:${Math.round(turnboxRect.top)} b:${Math.round(turnboxRect.bottom)} `
+      + `| actionbar t:${Math.round(actionbarRect.top)} b:${Math.round(actionbarRect.bottom)} `
+      + `| chips b:${Math.round(chipsRect.bottom)} | viewport ${viewport.w}x${viewport.h}`);
+
+    // Turnbox fully inside the actionbar rail — the dice block never runs
+    // past its own container again.
+    expect(turnboxRect.top).toBeGreaterThanOrEqual(actionbarRect.top - 1);
+    expect(turnboxRect.bottom).toBeLessThanOrEqual(actionbarRect.bottom + 1);
+    expect(turnboxRect.left).toBeGreaterThanOrEqual(actionbarRect.left - 1);
+    expect(turnboxRect.right).toBeLessThanOrEqual(actionbarRect.right + 1);
+
+    // ...and fully inside the viewport — a container that itself ran
+    // off-screen would pass the check above and still be a visible bug.
+    expect(turnboxRect.top).toBeGreaterThanOrEqual(-1);
+    expect(turnboxRect.left).toBeGreaterThanOrEqual(-1);
+    expect(turnboxRect.bottom).toBeLessThanOrEqual(viewport.h + 1);
+    expect(turnboxRect.right).toBeLessThanOrEqual(viewport.w + 1);
+
+    // Zero-overlap invariant still holds between the two rail sections — the
+    // dynamic --rail-bar-h handoff must not let them collide.
+    expect(actionbarRect.top).toBeGreaterThanOrEqual(chipsRect.bottom - 1);
+  }
+
+  for (const viewport of [{ width: 1890, height: 920 }, { width: 1535, height: 900 }, { width: 1890, height: 1000 }]) {
+    test(`turnbox stays contained @${viewport.width}x${viewport.height}`, async ({ page }) => {
+      test.setTimeout(60000);
+      const pageErrors = [];
+      page.on('pageerror', err => pageErrors.push(err.message));
+
+      await selectCharactersSanguo(page, viewport);
+      await expect(page.locator('#game-area')).toHaveClass(/game--gutters/);
+
+      const boardBox = () => page.locator('#board').evaluate(el => {
+        const r = el.getBoundingClientRect();
+        return { width: Math.round(r.width), height: Math.round(r.height) };
+      });
+
+      // Rest-state containment — this alone reproduces the owner's report
+      // (the pre-roll turnbox column already includes the dice-or-atlas
+      // slot + roll/jail buttons + end-turn, tall enough on its own).
+      await assertContainment(page, `${viewport.width}x${viewport.height} rest`);
+      const before = await boardBox();
+
+      // Roll — and if a buy prompt lands (a taller turnbox state still),
+      // re-assert containment there too. Board rect must not move either
+      // way: the Redesign B lock is orthogonal to this fix (gutter-mode
+      // --chrome-top/--chrome-bottom stay the flat CHROME_GUTTER_MARGIN
+      // constant regardless of the actionbar's real height).
+      let sawTallerState = false;
+      for (let turn = 0; turn < 15 && !sawTallerState; turn++) {
+        const rollBtn = page.locator('#btn-roll');
+        if (await rollBtn.isVisible().catch(() => false)) {
+          await rollBtn.click();
+          await page.waitForTimeout(1100);
+          const buyBtn = page.locator('#btn-buy');
+          if (await buyBtn.isVisible().catch(() => false)) {
+            sawTallerState = true;
+            await assertContainment(page, `${viewport.width}x${viewport.height} buy-prompt`);
+            await page.locator('#btn-pass').click();
+            await page.waitForTimeout(300);
+            const passAuctionBtn = page.locator('#btn-pass-auction');
+            for (let i = 0; i < 6; i++) {
+              if (await passAuctionBtn.isVisible().catch(() => false)) { await passAuctionBtn.click(); await page.waitForTimeout(200); }
+              else break;
+            }
+          }
+        }
+        const evAccept = page.locator('#ev-accept');
+        if (await evAccept.isVisible().catch(() => false)) { await evAccept.click(); await page.waitForTimeout(300); }
+        const endBtn = page.locator('#btn-end');
+        if (await endBtn.isVisible().catch(() => false) && await endBtn.isEnabled().catch(() => false)) {
+          await endBtn.click();
+          await page.waitForTimeout(300);
+        }
+      }
+
+      const afterRoll = await boardBox();
+      console.log(`[rail-clip lock ${viewport.width}x${viewport.height}] board before: ${before.width}x${before.height} `
+        + `after: ${afterRoll.width}x${afterRoll.height} (sawTallerState=${sawTallerState})`);
+      expect(afterRoll).toEqual(before);
+
+      expect(pageErrors).toEqual([]);
+    });
+  }
+});

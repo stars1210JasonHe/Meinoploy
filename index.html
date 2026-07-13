@@ -605,16 +605,22 @@
        and _syncGutterMode auto-opens it (LOG tab) once per mode-ENTRY. */
     .app--game #game-area.game--gutters .game__chips {
       flex-direction:column; align-items:stretch;
-      /* bottom:186px (not 8px) — Redesign B docks the action bar into this SAME
-         left rail, below the chip column (see .game__actionbar override just
-         below); 186 = 8 (actionbar's own bottom offset) + 170 (its static
-         worst-case reserve, the SAME constant _syncChromeBands uses for the
-         narrow-mode bottom band — see that method's doc comment) + 8 (gap
-         between the two rail sections). A static reserve, not a measurement,
-         for the same reason the bottom chrome band went static: the chip
-         column's height must not visibly jostle every time the action bar's
-         real content changes turn to turn (roll -> buy prompt -> jail, etc). */
-      top:8px; bottom:186px; left:8px; right:auto; transform:none;
+      /* bottom is DYNAMIC now (owner-reported clip fix — dice roll's bottom-
+         left half hidden; probe @1890x920: turnbox rect 276px tall vs the
+         actionbar's old static 170px cap). The actionbar below no longer
+         reserves a static worst-case height — it sizes to its REAL content
+         and grows upward from its own bottom:8px anchor (see that rule just
+         below), so the chip column must yield the SAME real height back,
+         measured, not guessed. --rail-bar-h carries the actionbar's live
+         offsetHeight, written by App.js's _syncChromeBands right after
+         renderTurnbox has painted this render's real content (same
+         measured-var + throttled-write pattern as --chrome-top/
+         --chrome-bottom). +16px = 8 (actionbar's own bottom offset) + 8 (gap
+         between the two rail sections). Fallback 178px covers the one frame
+         before JS's first measurement lands. Chip column keeps
+         overflow-y:auto so it scrolls, not overlaps, when a tall actionbar
+         state (e.g. jail) squeezes it. */
+      top:8px; bottom:calc(var(--rail-bar-h, 178px) + 16px); left:8px; right:auto; transform:none;
       width:calc(var(--gutter-w, 300px) - 16px); max-width:calc(var(--gutter-w, 300px) - 16px);
       overflow-y:auto; overflow-x:hidden;
     }
@@ -628,15 +634,24 @@
        before/after probe). Fix, gutter-mode half: the action bar leaves the
        bottom-center FLOATING position entirely and docks into the same left
        rail as the chip column, below it (top:auto/bottom:8px here vs chips'
-       top:8px/bottom:186px above) — once neither bar floats over the board's
-       top or bottom edge, --chrome-top/--chrome-bottom collapse to the flat
-       8+4 margin every other "nothing floats here" edge already uses, and the
-       board's height stops depending on turn-state content at all. Own
-       max-height + overflow-y:auto (not a taller rail) absorbs the jail-state
-       worst case without growing past its reserved 170px band (kept in sync
-       with the chip column's bottom offset above and _syncChromeBands' narrow-
-       mode constant — three numbers, one source of truth, documented at each
-       use site since CSS custom properties can't share a JS constant directly). */
+       dynamic top:8px/bottom:calc(...) above) — once neither bar floats over
+       the board's top or bottom edge, --chrome-top/--chrome-bottom collapse
+       to the flat 8+4 margin every other "nothing floats here" edge already
+       uses, and the board's height stops depending on turn-state content at
+       all (this rule growing taller is safe: it lives entirely in the rail
+       and never touches the board — the deform-bug lock above holds).
+       Clip fix (owner-reported: dice roll's bottom-left half hidden — probe
+       @1890x920: turnbox rect 276px tall vs this bar's old static
+       max-height:170px cap, so the turnbox's own bottom ran past the bar's).
+       A fixed worst-case cap was wrong for the same reason a MEASURED one was
+       wrong for the board bands above — turnbox height genuinely varies with
+       turn state (96px rest / 152px jail / taller again for roll -> buy-
+       prompt) and 170px undershot the real worst case. Fix: size to content
+       (height:auto, no clamp at rest) and grow UPWARD from the bottom:8px
+       anchor instead of clipping — the chip column above yields the room via
+       --rail-bar-h (see that rule above). max-height:calc(100dvh - 120px) +
+       overflow-y:auto below is DEGRADATION ONLY, for a viewport too short to
+       fit the whole rail — not a clip at rest. */
     .app--game #game-area.game--gutters .game__actionbar {
       /* column, not the base row (App.js createLayout: `.game__actionbar`
          wraps TWO siblings, `#turnbox` and the standalone `#btn-fs` fullscreen
@@ -647,7 +662,7 @@
       flex-direction:column; align-items:stretch;
       top:auto; bottom:8px; left:8px; right:auto; transform:none;
       width:calc(var(--gutter-w, 300px) - 16px); max-width:calc(var(--gutter-w, 300px) - 16px);
-      max-height:170px; overflow-y:auto;
+      height:auto; max-height:calc(100dvh - 120px); overflow-y:auto; overflow-x:hidden;
     }
     /* Rail turnbox variant: pure CSS descendant-selector override (turnbox's
        own markup/#btn-* ids are byte-identical — renderTurnbox never learns
