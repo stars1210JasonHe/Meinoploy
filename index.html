@@ -752,11 +752,11 @@
     .board__bg { position:absolute; inset:0; z-index:0; pointer-events:none;
       background-size:cover; background-position:center; background-repeat:no-repeat;
       image-rendering:pixelated; }
-    .board__bg::after { content:''; position:absolute; inset:0; background:rgba(8,12,28,.45); }
+    .board__bg::after { content:''; position:absolute; inset:0; background:rgba(8,12,28,.22); }
     /* GB-green board shell retired (R2): translucent void so .board__bg shows
        through the grid gaps and center; steel edge in the B2 language. */
     .board__grid { display:grid; width:100%; height:100%; position:relative;
-      background:color-mix(in srgb, var(--wr-void) 45%, transparent); border:2px solid var(--wr-steel-lt);
+      background:color-mix(in srgb, var(--wr-void) 25%, transparent); border:2px solid var(--wr-steel-lt);
       box-shadow:0 6px 0 rgba(0,0,0,.4); padding:3px; gap:2px; }
     .board__grid--absolute { display:block; }
     .board__edges {
