@@ -1377,6 +1377,33 @@
       border:2px solid rgba(255,213,120,.55);
       box-shadow:0 4px 0 rgba(180,100,20,.4), 0 0 24px rgba(255,182,72,.4);
     }
+
+    /* ── R1b: popover cards (chip-detail / tile-detail via the shared in-game
+       ui-modal .modal box — trade/saves/AI settings inherit the same material;
+       entry-screen modals keep GB until R3). Mockup .popover: wr material +
+       cyan ring, amber prices, dashed hair dividers, amber build pips. ── */
+    .app--game .modal {
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.05) 0px, rgba(255,255,255,.05) 1px, transparent 1px, transparent 3px),
+        linear-gradient(152deg, var(--wr-panel-1) 0% 30%, var(--wr-panel-2) 30% 62%, var(--wr-panel-3) 62% 84%, var(--wr-panel-4) 84% 100%);
+      border:2px solid rgba(79,227,255,.4);
+      box-shadow:0 14px 0 rgba(0,0,0,.4), 0 0 26px rgba(79,227,255,.2);
+    }
+    /* Head band: entity-tinted gradient strip (mockup .pop-head) — the head
+       rows already exist in both card families; tint from the hair line. */
+    .app--game .chip-detail__head, .app--game .tile-detail__head {
+      border-bottom:2px solid var(--wr-hair); padding-bottom:9px;
+    }
+    .app--game .tile-detail__price, .app--game .chip-detail .money {
+      color:var(--wr-amber-soft); text-shadow:0 0 8px rgba(255,182,72,.4);
+    }
+    .app--game .tile-detail__pip {
+      background:var(--wr-amber-soft); border:none;
+      box-shadow:inset 0 -4px 0 rgba(0,0,0,.2), 0 0 0 1px rgba(255,182,72,.3);
+    }
+    .app--game .tile-detail__rent { color:var(--wr-cyan-soft); }
+    .app--game .tile-detail__description { border-left:3px solid rgba(79,227,255,.4); padding-left:9px; }
+    .app--game .chip-detail__lore { border-left:3px solid rgba(79,227,255,.4); padding-left:9px; }
   </style>
 </head>
 <body>
