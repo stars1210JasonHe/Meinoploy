@@ -752,13 +752,16 @@
     .board__bg { position:absolute; inset:0; z-index:0; pointer-events:none;
       background-size:cover; background-position:center; background-repeat:no-repeat;
       image-rendering:pixelated; }
-    .board__bg::after { content:''; position:absolute; inset:0; background:rgba(8,12,28,.22); }
+    .board__bg::after { content:''; position:absolute; inset:0; background:rgba(8,12,28,.10); }
     /* GB-green board shell retired (R2): translucent void so .board__bg shows
        through the grid gaps and center; steel edge in the B2 language. */
     .board__grid { display:grid; width:100%; height:100%; position:relative;
       background:color-mix(in srgb, var(--wr-void) 25%, transparent); border:2px solid var(--wr-steel-lt);
       box-shadow:0 6px 0 rgba(0,0,0,.4); padding:3px; gap:2px; }
     .board__grid--absolute { display:block; }
+    /* Brightness pass (owner: "背景还是暗了"): atlas cards are opaque panels —
+       the grid veil double-darkened the art under them for nothing. */
+    .board--atlas .board__grid { background:transparent; }
     .board__edges {
       position: absolute;
       inset: 0;
@@ -777,11 +780,12 @@
          the same stroke-width gets visibly THICKER as the board grows, e.g.
          a fullscreen 900px+ board vs a small window). */
       stroke: var(--ink-dim);
-      stroke-width: 1;
+      stroke-width: 1.5;
       vector-effect: non-scaling-stroke;
-      opacity: 0.18;
-      /* R1c: pixel-dashed square caps (mockup .route-line) — opacity values
-         above/below are E2E-gated (layout.spec route-pick case), unchanged. */
+      /* Brightness pass: rest network .18 -> .32 over the (busier) board art.
+         The routepick DIM value below stays 0.06 — layout.spec gates < 0.1. */
+      opacity: 0.32;
+      /* R1c: pixel-dashed square caps (mockup .route-line). */
       stroke-linecap: square;
       stroke-dasharray: 7 5;
       transition: opacity .15s ease, stroke .15s ease, stroke-width .15s ease;

@@ -112,9 +112,9 @@ describe('BLOOM_CONTEXTS', () => {
     }).toThrow(TypeError);
   });
 
-  test('mirrors the mockup parameterizations', () => {
-    expect(BLOOM_CONTEXTS.node).toMatchObject({ res: 22, levels: 5, alpha: 0.55 });
-    expect(BLOOM_CONTEXTS.nodeOwned).toMatchObject({ res: 22, levels: 5, alpha: 0.85 });
+  test('mirrors the mockup geometry with brightness-pass alphas', () => {
+    expect(BLOOM_CONTEXTS.node).toMatchObject({ res: 22, levels: 5, alpha: 0.7 });
+    expect(BLOOM_CONTEXTS.nodeOwned).toMatchObject({ res: 22, levels: 5, alpha: 0.95 });
     expect(BLOOM_CONTEXTS.start).toMatchObject({ res: 30, levels: 6 });
   });
 });

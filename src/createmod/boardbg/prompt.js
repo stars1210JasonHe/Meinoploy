@@ -11,9 +11,10 @@ export const PLACES_MAX = 12;
 
 export const BOARDBG_STYLE =
   'Hi-bit pixel-art night map background, top-down terrain viewed from high above, ' +
-  'ordered-dither banded gradients (never smooth washes), dark deep-space palette ' +
-  '(navy/void base) with cyan and amber glow accents, chunky visible pixels, ' +
-  'limited palette (~32 colors), atmospheric night-lights mood. ' +
+  'ordered-dither banded gradients (never smooth washes), moonlit navy palette with ' +
+  'READABLE mid-tones (terrain clearly visible, never pitch black), generous cyan and ' +
+  'amber glow accents, chunky visible pixels, limited palette (~32 colors), ' +
+  'atmospheric night-lights mood. ' +
   'NO text, NO labels, NO UI elements, NO borders, NO characters or figures — ' +
   'pure environment art that reads as a game-board backdrop.';
 

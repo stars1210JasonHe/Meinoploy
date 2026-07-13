@@ -19,13 +19,16 @@ const BAYER4 = [
 ];
 
 export const BLOOM_CONTEXTS = Object.freeze({
-  // Mockup: haloSize = start ? 30 : 22; haloLevels = start ? 6 : 5; haloAlpha = owner ? 0.85 : 0.55
-  node: Object.freeze({ res: 22, levels: 5, alpha: 0.55, falloff: 1.35 }),
-  nodeOwned: Object.freeze({ res: 22, levels: 5, alpha: 0.85, falloff: 1.35 }),
-  tokenTurn: Object.freeze({ res: 24, levels: 5, alpha: 0.9, falloff: 1.35 }),
-  start: Object.freeze({ res: 30, levels: 6, alpha: 0.7, falloff: 1.35 }),
-  hub: Object.freeze({ res: 26, levels: 5, alpha: 0.65, falloff: 1.35 }),
-  contested: Object.freeze({ res: 22, levels: 4, alpha: 0.8, falloff: 1.35 }),
+  // Base geometry from the mockup (haloSize = start ? 30 : 22; haloLevels =
+  // start ? 6 : 5). Alphas lifted +0.1-0.15 over the mockup's 0.55/0.85 in the
+  // owner brightness pass (2026-07-13 "线路什么的也有点暗") — the real board art
+  // is busier than the mockup's flat terrain, so halos need more presence.
+  node: Object.freeze({ res: 22, levels: 5, alpha: 0.7, falloff: 1.35 }),
+  nodeOwned: Object.freeze({ res: 22, levels: 5, alpha: 0.95, falloff: 1.35 }),
+  tokenTurn: Object.freeze({ res: 24, levels: 5, alpha: 0.95, falloff: 1.35 }),
+  start: Object.freeze({ res: 30, levels: 6, alpha: 0.8, falloff: 1.35 }),
+  hub: Object.freeze({ res: 26, levels: 5, alpha: 0.75, falloff: 1.35 }),
+  contested: Object.freeze({ res: 22, levels: 4, alpha: 0.85, falloff: 1.35 }),
 });
 
 export function bayerMatrix(n) {
