@@ -221,11 +221,13 @@ wave (Phase 9 already lists "Localization (English + Chinese)"). UI strings are 
 (templates in App.js/game-chrome/entry-ui) — needs a small string-table design first.
 
 ## Near-term (owner 2026-07-12): mod balance simulator (standalone)
-Owner wants a tool to test NEW mods' balance. Today: `create-mod --balance` runs a 60/40 gate at
-creation time, but `src/sim/cli.js` is hardcoded to dominion characters + terra worlds (never
-calls setActiveMod). Wave: extend the sim to `--mod <id>` (resolve characters/world/rules from
-the registry), friendly per-character win-rate + fairness-gate report, `npm run sim-mod -- <id>`;
-re-runnable against any registered mod (e.g. sanguo) after tuning. Own wave, after wave 4.
+> **DONE 2026-07-14.** `npm run sim -- --mod <id>` runs any registered mod on its REAL board
+> (registry resolution; fixed the ingest that silently clobbered non-dominion boards with
+> dominion's classic map.json): headline MELEE table (full roster in shared 8-seat games,
+> rotation windows for 16-char rosters, per-character win% vs the 1/seats baseline with
+> CI-gated STRONG/WEAK flags) + the existing 1v1 fit/strategy gates generalized to any roster.
+> Dominion runs without --mod stay byte-identical. First real finding (sanguo, 200 games):
+> 關羽 wins 67.5% of 8-seat games (5.4× baseline), 李儒 0% — sanguo needs tuning before play.
 
 ## Near-term (owner 2026-07-12): per-place 简介 in create-mod
 Wave 4 ships a tile-info popover that displays an OPTIONAL `place.description`; no world carries
