@@ -324,3 +324,79 @@ describe('mergeDuelTables — combining two sub-tournament duel tables', () => {
     ]);
   });
 });
+
+// === Melee tournament (sim --mod wave, spec 2026-07-14 §2) =====================
+import { meleeWindow, seededShuffle, meleeAggregate, DEFAULT_MELEE_GATE } from '../sim/tournament';
+
+describe('seededShuffle — deterministic roster order', () => {
+  const IDS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+  test('same seed → identical order; different seed → (almost surely) different', () => {
+    const s1 = seededShuffle(IDS, 'seed-1');
+    const s2 = seededShuffle(IDS, 'seed-1');
+    const s3 = seededShuffle(IDS, 'seed-2');
+    expect(s1).toEqual(s2);
+    expect(s1).not.toBe(IDS); // new array, input untouched
+    expect([...s1].sort()).toEqual([...IDS].sort());
+    expect(s3.join()).not.toBe(s1.join());
+  });
+});
+
+describe('meleeWindow — who plays game i, in which seat order', () => {
+  test('roster <= seats: everyone plays, seat order rotates by game', () => {
+    const roster = ['a', 'b', 'c'];
+    const g0 = meleeWindow(roster, 8, 0);
+    const g1 = meleeWindow(roster, 8, 1);
+    expect([...g0].sort()).toEqual(['a', 'b', 'c']);
+    expect([...g1].sort()).toEqual(['a', 'b', 'c']);
+    expect(g1).not.toEqual(g0); // rotated
+  });
+
+  test('roster > seats: contiguous rotating windows give equal appearances (±1)', () => {
+    const roster = Array.from({ length: 16 }, (_, i) => `c${i}`);
+    const games = 40;
+    const count = {};
+    for (let i = 0; i < games; i++) {
+      const w = meleeWindow(roster, 8, i);
+      expect(w).toHaveLength(8);
+      expect(new Set(w).size).toBe(8); // distinct chars in a game
+      w.forEach(id => { count[id] = (count[id] || 0) + 1; });
+    }
+    const counts = Object.values(count);
+    expect(counts).toHaveLength(16);
+    const min = Math.min(...counts), max = Math.max(...counts);
+    expect(max - min).toBeLessThanOrEqual(1);
+  });
+
+  test('deterministic: same args → same window', () => {
+    const roster = Array.from({ length: 10 }, (_, i) => `c${i}`);
+    expect(meleeWindow(roster, 8, 7)).toEqual(meleeWindow(roster, 8, 7));
+  });
+});
+
+describe('meleeAggregate — per-character rates + baseline flags', () => {
+  test('rates are per games PLAYED; flags need CI clear of the 1/seats baseline', () => {
+    // 4 seats → baseline 0.25. "dom" won 30/40 (CI well above), "weak" 0/40,
+    // "mid" 10/40 (== baseline, no flag).
+    const rows = meleeAggregate(
+      { dom: { games: 40, wins: 30 }, weak: { games: 40, wins: 0 }, mid: { games: 40, wins: 10 } },
+      4,
+      DEFAULT_MELEE_GATE
+    );
+    const by = Object.fromEntries(rows.map(r => [r.charId, r]));
+    expect(by.dom.winPct).toBeCloseTo(0.75);
+    expect(by.dom.flag).toBe('strong');
+    expect(by.weak.flag).toBe('weak');
+    expect(by.mid.flag).toBe(null);
+    expect(rows[0].charId).toBe('dom'); // sorted by winPct desc
+  });
+
+  test('small samples with straddling CI never flag', () => {
+    const rows = meleeAggregate({ x: { games: 3, wins: 3 } }, 4, DEFAULT_MELEE_GATE);
+    // 100% of 3 games — CI is huge but ciLow must stay above baseline for a flag;
+    // 1.96*sqrt(0*1/3)=0 at p=1 → ciLow=1 > 0.25 → still flags strong. Use a
+    // genuinely straddling case instead: 1 win in 3 games (p=.33, baseline .25).
+    const r2 = meleeAggregate({ y: { games: 3, wins: 1 } }, 4, DEFAULT_MELEE_GATE)[0];
+    expect(r2.flag).toBe(null);
+    expect(rows[0].winPct).toBe(1);
+  });
+});

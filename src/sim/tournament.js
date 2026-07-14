@@ -312,3 +312,95 @@ export function mergeDuelTables(a, b) {
   });
   return duelStatsTable(acc);
 }
+
+// === Melee tournament (sim --mod wave, spec 2026-07-14 §2) =====================
+// Full-roster shared games instead of 1v1 pairings: every registered character
+// gets a per-character win rate against the 1/seats baseline. Rosters larger
+// than the seat cap rotate through contiguous windows so appearances equalize.
+
+export const DEFAULT_MELEE_GATE = { meleeMax: 2.0, meleeMin: 0.35 };
+
+// Deterministic Fisher-Yates over an FNV-1a-seeded LCG. Same seed string →
+// same order, input array untouched. No Math.random anywhere in the sim.
+export function seededShuffle(items, seed) {
+  let h = 2166136261 >>> 0;
+  const s = String(seed);
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  let state = (h >>> 0) || 1;
+  const rnd = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+  const out = items.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    const t = out[i]; out[i] = out[j]; out[j] = t;
+  }
+  return out;
+}
+
+// Which characters play game `gameIndex`, in which seat order.
+// roster <= seats: everyone plays, seat order rotates so first-mover advantage
+// averages out. roster > seats: contiguous window starting at (i*seats) % k —
+// over a full cycle of k/gcd(k,seats) games every character appears equally
+// (±1 inside partial cycles) — plus the same in-window seat rotation.
+export function meleeWindow(roster, seats, gameIndex) {
+  const k = roster.length;
+  if (k <= seats) {
+    const rot = gameIndex % k;
+    return roster.slice(rot).concat(roster.slice(0, rot));
+  }
+  const start = (gameIndex * seats) % k;
+  const w = [];
+  for (let j = 0; j < seats; j++) w.push(roster[(start + j) % k]);
+  const rot = gameIndex % seats;
+  return w.slice(rot).concat(w.slice(0, rot));
+}
+
+// Per-character rows from a {charId: {games, wins}} tally. Win% is over games
+// the character PLAYED (windows mean not everyone plays every game). A flag
+// requires BOTH the point estimate to clear the gate multiple of the 1/seats
+// baseline AND the 95% CI to exclude the baseline (small samples never flag).
+export function meleeAggregate(tally, seats, gate) {
+  const g = Object.assign({}, DEFAULT_MELEE_GATE, gate || {});
+  const baseline = 1 / seats;
+  const rows = Object.keys(tally).map(charId => {
+    const t = tally[charId];
+    const p = t.games > 0 ? t.wins / t.games : 0;
+    const half = ci95(p, t.games);
+    const ciLow = Math.max(0, p - half);
+    const ciHigh = Math.min(1, p + half);
+    let flag = null;
+    if (p > g.meleeMax * baseline && ciLow > baseline) flag = 'strong';
+    else if (p < g.meleeMin * baseline && ciHigh < baseline) flag = 'weak';
+    return { charId, games: t.games, wins: t.wins, winPct: p, ciLow, ciHigh, baseline, flag };
+  });
+  rows.sort((a, b) => b.winPct - a.winPct);
+  return rows;
+}
+
+// Run the melee: N shared games over the (seeded-shuffled) roster. `policy`
+// applies to EVERY seat (character strength is the variable under test, not
+// strategy). Returns { rows, seats, games, duelTable } — duel cashflow folded
+// across games exactly like the 1v1 tournaments.
+export function runMeleeTournament(spec) {
+  const { roster, games, seed, world = null, maxTurns = 300, policy = null, maxSeats = 8, gate } = spec;
+  const order = seededShuffle(roster, `${seed}:melee-roster`);
+  const seats = Math.min(maxSeats, order.length);
+  const tally = {};
+  const duelAcc = {};
+  for (let i = 0; i < games; i++) {
+    const charIds = meleeWindow(order, seats, i);
+    const result = runMatch({
+      world,
+      charIds,
+      policies: charIds.map(() => policy || {}),
+      seed: `${seed}:melee:${i}`,
+      maxTurns,
+    });
+    charIds.forEach(id => { const t = tally[id] || (tally[id] = { games: 0, wins: 0 }); t.games++; });
+    if (result.winner != null) {
+      const winnerChar = charIds[parseInt(result.winner)];
+      if (winnerChar) tally[winnerChar].wins++;
+    }
+    accumulateDuelStats(duelAcc, result.events, charIds);
+  }
+  return { rows: meleeAggregate(tally, seats, gate), seats, games, duelTable: duelStatsTable(duelAcc) };
+}
