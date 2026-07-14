@@ -235,6 +235,20 @@ it yet. Follow-up: the create-mod pipeline (extract-facts → smart-builder → 
 a short per-place description from the source book so generated mods (sanguo etc.) ship with 简介.
 Touches the LLM extraction schema + emit pass-through + validateWorld optional-field tolerance.
 
+## Engine stat mechanics (owner 2026-07-14, from the balance-sim findings)
+> **DONE 2026-07-14 (feat/stat-mechanics, 5 commits, 1285 unit + 44 E2E).** The sim proved
+> negotiation/tech/luck/stamina contributed ZERO to outcomes (no hooks in recurring money
+> flows). New continuous passive modifiers, all RULES-config and per-mod overridable:
+> negotiation +1.5%/pt rent COLLECTED (charisma's mirror), tech +2%/pt rent on built
+> properties, luck +3%/pt card gains + floor(luck/3) redraws (threshold retired — redraw
+> pauses now roster-wide, owner-approved), stamina −3%/pt tax/negative-card losses.
+> Validation: dominion 200-game melee zero flags before AND after (the earlier "4 flags"
+> was 6-game noise), bottom tightened (Evelyn luck-10 5.6→8.1%). Honest limit, measured:
+> melee bottom (sanguo 李儒 3.5%) is early-capital-snowball × winner-take-all — needs stat
+> redistribution (meaningful now), not rules knobs; aggressive-value probe reverted.
+> Post-merge tickets: gainAll logs nominal amount, MCP digest redraw hint unconditional,
+> old-save luckRedraws drift.
+
 ## Sequencing (proposed; to confirm)
 1. Near-term: entry-UI polish (small, visible).
 2. Then pick ONE major task to design first. Task 1 (create-mod engine) compounds content velocity;
