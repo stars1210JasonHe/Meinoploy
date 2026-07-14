@@ -24,6 +24,7 @@ export function parseArgs(argv) {
   const out = {
     input: null, remove: null, dryRun: false, force: false, balance: false, smart: false, seed: null,
     fromBook: false, portraits: false, style: null, imageModel: null,
+    autoBalance: false, balanceGames: 100, searchGames: 60, maxIterations: 8, maxEvals: 80,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -31,6 +32,11 @@ export function parseArgs(argv) {
     else if (a === '--dry-run') { out.dryRun = true; }
     else if (a === '--force') { out.force = true; }
     else if (a === '--balance') { out.balance = true; }
+    else if (a === '--auto-balance') { out.autoBalance = true; out.balance = true; }
+    else if (a === '--balance-games') { out.balanceGames = parseInt(argv[++i], 10); }
+    else if (a === '--search-games') { out.searchGames = parseInt(argv[++i], 10); }
+    else if (a === '--max-iterations') { out.maxIterations = parseInt(argv[++i], 10); }
+    else if (a === '--max-evals') { out.maxEvals = parseInt(argv[++i], 10); }
     else if (a === '--smart') { out.smart = true; }
     else if (a === '--seed') { out.seed = argv[++i]; }
     else if (a === '--portraits') { out.portraits = true; }
@@ -47,8 +53,8 @@ export function parseArgs(argv) {
 // set) must be stripped before delegating to parseExtractArgs, which REJECTS any unrecognized
 // "--" flag (spec rule, see src/createmod/extract/flags.js) — so combining e.g.
 // `--from-book --chars 3 --force` would otherwise misfire as "unrecognized flag: --force".
-const CREATE_MOD_ONLY_BOOL_FLAGS = ['--from-book', '--dry-run', '--force', '--balance', '--smart', '--portraits'];
-const CREATE_MOD_ONLY_VALUE_FLAGS = ['--seed', '--style', '--image-model'];
+const CREATE_MOD_ONLY_BOOL_FLAGS = ['--from-book', '--dry-run', '--force', '--balance', '--auto-balance', '--smart', '--portraits'];
+const CREATE_MOD_ONLY_VALUE_FLAGS = ['--seed', '--style', '--image-model', '--balance-games', '--search-games', '--max-iterations', '--max-evals'];
 
 export function stripCreateModFlags(argv) {
   const out = [];
@@ -73,27 +79,26 @@ export function buildFromBookClientOptions(argv) {
   return { extractModel: resolveExtractModel(ex), synthModel: resolveSynthModel(ex) };
 }
 
-function runBalance(normalized) {
-  // Atlas only — the sim has no path to ingest a custom classic map.json (loads Dominion's
-  // hardcoded classic board when world is null), so a classic balance run would test the
-  // wrong board. Advisory: never blocks emit.
-  const { runTournament } = require('../src/sim/tournament');
-  const { CHARACTERS_DATA } = require('../mods/dominion/characters-data');
-  const [a, b] = [CHARACTERS_DATA[0].id, CHARACTERS_DATA[1].id];
-  const res = runTournament({
-    world: normalized.world,
-    contestants: [
-      { label: a, charId: a, policy: { routeStrategy: 'camper' } },
-      { label: b, charId: b, policy: { routeStrategy: 'camper' } },
-    ],
-    games: 40, baseSeed: '1',
-    maxTurns: (normalized.world.victory && normalized.world.victory.maxTurns) || 150,
+// Creation-time balance (spec 2026-07-14-createmod-balance): the modern melee
+// on the mod's REAL board with its REAL roster (the old slice ran two DOMINION
+// characters as a proxy and skipped classic maps entirely — both fixed by the
+// sim-mod wave's mapJson ingest + Game.setActiveModObject). Advisory: never
+// blocks emit. Returns the balance context for the persisted report, and the
+// tuned roster when --auto-balance applied moves (caller swaps it into
+// `normalized` BEFORE emit so the written data.json carries the tuned stats).
+function runBalance(normalized, args) {
+  const { runCreateModBalance } = require('../src/createmod/balance/run');
+  return runCreateModBalance(normalized, {
+    games: args.balanceGames,
+    searchGames: args.searchGames,
+    seed: args.seed != null ? String(args.seed) : '1',
+    autoBalance: args.autoBalance,
+    maxIterations: args.maxIterations,
+    maxEvals: args.maxEvals,
   });
-  const g = res.gate;
-  console.log(`[balance] gate 60/40: ${g.pass ? 'PASS' : 'FAIL'} (leader ${g.leader} ${(g.maxWinPct * 100).toFixed(1)}%)`);
 }
 
-export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, force = false, balance = false, smart = false, seed = null }) {
+export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, force = false, balance = false, smart = false, seed = null, balanceArgs = null }) {
   let input;
   if (smart) {
     // Facts -> near-final input. A throw here is an IMPOSSIBLE derivation: return the
@@ -139,9 +144,16 @@ export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, forc
     return { ok: false, errors: [`mod "${input.id}" already registered (use --force)`], warnings, id: input.id, written: [] };
   }
 
+  let balanceCtx = null;
   if (balance) {
-    if (normalized.mapType === 'atlas') runBalance(normalized);
-    else console.log('[balance] skipped: the sim cannot ingest a custom classic map.json this slice');
+    const bArgs = balanceArgs || { balanceGames: 100, searchGames: 60, autoBalance: false, maxIterations: 8, maxEvals: 80, seed };
+    balanceCtx = runBalance(normalized, bArgs);
+    if (balanceCtx.tunedRoster) {
+      // Swap the tuned stats in BEFORE emit — the written data.json/bundles
+      // then carry them natively (no post-hoc file editing).
+      normalized.roster = balanceCtx.tunedRoster;
+      console.log('[balance] tuned roster will be emitted (auto-balance applied moves)');
+    }
   }
 
   const { files, copies } = emitMod(normalized);
@@ -180,6 +192,27 @@ export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, forc
   }
   fs.writeFileSync(indexPath, patched.indexSrc);
   fs.writeFileSync(appPath, patched.appSrc);
+
+  // Persist the balance report beside the mod (spec §1 — the persist-for-later
+  // pattern backgrounds/*.prompt.txt established). Written after the mod files
+  // so a balance-report can never exist for a mod that failed to write.
+  if (balanceCtx) {
+    const { renderBalanceReport } = require('../src/createmod/balance/report');
+    const reportPath = path.join(rootDir, 'mods', input.id, 'balance-report.md');
+    const auto = balanceCtx.auto
+      ? Object.assign({ ran: true }, balanceCtx.auto)
+      : { ran: false };
+    fs.writeFileSync(reportPath, renderBalanceReport({
+      modId: input.id,
+      seed: seed != null ? String(seed) : '1',
+      games: (balanceArgs && balanceArgs.balanceGames) || 100,
+      date: new Date().toISOString().slice(0, 10),
+      melee: balanceCtx.verifyMelee || balanceCtx.melee,
+      gate: balanceCtx.gate,
+      autoBalance: auto,
+    }));
+    written.push(path.join('mods', input.id, 'balance-report.md'));
+  }
   return { ok: true, errors: [], warnings, id: input.id, written };
 }
 
@@ -261,7 +294,7 @@ export async function runFromBook({ argv, rootDir = REPO_ROOT, llm }) {
   if (!r.ok) {
     return { ok: false, errors: ['extraction produced invalid facts (see report); hand-edit ' + r.factsPath + ' then run: create-mod -- <facts> --smart' + (force ? ' --force' : '')] };
   }
-  return createMod({ inputPath: r.factsPath, rootDir, smart: true, force, dryRun: args.dryRun, balance: args.balance, seed: args.seed });
+  return createMod({ inputPath: r.factsPath, rootDir, smart: true, force, dryRun: args.dryRun, balance: args.balance, seed: args.seed, balanceArgs: args });
 }
 
 function main(argv) {
@@ -284,7 +317,7 @@ function main(argv) {
       + ' | --remove <id>');
     process.exit(1);
   }
-  const r = createMod({ inputPath: args.input, dryRun: args.dryRun, force: args.force, balance: args.balance, smart: args.smart, seed: args.seed });
+  const r = createMod({ inputPath: args.input, dryRun: args.dryRun, force: args.force, balance: args.balance, smart: args.smart, seed: args.seed, balanceArgs: args });
   // Smart dry-run owns its own output (derived JSON + advisory) and exits 0 — but only
   // when a derived input exists; an impossible derivation falls through to ERROR + exit 1.
   if (args.smart && args.dryRun && r.input) {

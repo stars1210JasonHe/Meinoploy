@@ -78,13 +78,22 @@ export function setActiveMap(mapData) {
 export function setActiveMod(modId) {
   const mod = MODS[modId];
   if (!mod) throw new Error('Unknown mod: ' + modId);
+  setActiveModObject(mod, PRISTINE[modId]);
+}
 
+// Object-form twin of setActiveMod for TOOLING (create-mod's creation-time
+// balance runs a not-yet-registered mod's roster through the real reducer —
+// selectCharacter validates against _activeMod, which the registry can't
+// provide before emit). `pristineRules` must be a clone that is safe to merge
+// from (callers pass deepClone(modLike.rules)); the registry path above passes
+// its PRISTINE snapshot, so behavior there is byte-identical to before.
+export function setActiveModObject(mod, pristineRules) {
   // (a) clear own keys of the live RULES object (do NOT rebind the binding).
   for (const key of Object.keys(RULES)) {
     delete RULES[key];
   }
-  // (b) resolve from the PRISTINE clone (never from the live object) so switch-back is safe.
-  const resolved = deepMerge(PRISTINE[modId], DEFAULT_RULES);
+  // (b) resolve from the pristine clone (never from the live object) so switch-back is safe.
+  const resolved = deepMerge(pristineRules, DEFAULT_RULES);
   // (c) deep-assign resolved INTO the live RULES object in place.
   deepAssignInto(RULES, resolved);
 

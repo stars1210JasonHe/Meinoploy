@@ -137,3 +137,62 @@ describe('renderBalanceReport', () => {
     expect(md).toContain('rules-override');
   });
 });
+
+// === Wiring integration (real sim, tiny budgets) ==============================
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { createMod } from '../../scripts/create-mod';
+import { runCreateModBalance } from '../createmod/balance/run';
+import { MODS } from '../../mods';
+
+function makeRoot() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'createmod-bal-'));
+  fs.mkdirSync(path.join(root, 'mods'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'mods', 'index.js'),
+    "import { dominionData } from './dominion/bundle.data';\nexport const MODS = {\n  dominion: dominionData,\n};\n");
+  fs.writeFileSync(path.join(root, 'src', 'App.js'),
+    "import dominionMod from '../mods/dominion/bundle.client';\nconst MODS = [dominionMod];\n");
+  return root;
+}
+const CLASSIC = path.join(__dirname, '../../examples/create-mod/steam-barons.classic.json');
+
+describe('runCreateModBalance — real reducer, generated roster, real board', () => {
+  test('gilded-rails-shaped classic mod melees on its OWN board with its OWN roster', () => {
+    const gilded = MODS['gilded-rails'];
+    const normalized = { id: 'gilded-preview', roster: gilded.characters, map: gilded.maps[0], world: null, mapType: 'classic' };
+    const logs = [];
+    const ctx = runCreateModBalance(normalized, { games: 4, seed: 'wire-t', log: m => logs.push(m) });
+    expect(ctx.melee.rows).toHaveLength(3); // gilded roster, NOT dominion proxy
+    const total = ctx.melee.rows.reduce((a, r) => a + r.wins, 0);
+    expect(total).toBeGreaterThan(0);
+    expect(ctx.gate).not.toBeNull();
+    expect(logs.some(l => l.includes('[balance] melee'))).toBe(true);
+  }, 90000);
+});
+
+describe('createMod --balance wiring (fs, classic no longer skipped)', () => {
+  test('classic mod with balance writes balance-report.md; melee table inside', () => {
+    const root = makeRoot();
+    const r = createMod({
+      inputPath: CLASSIC, rootDir: root, balance: true,
+      balanceArgs: { balanceGames: 4, searchGames: 4, autoBalance: false, maxIterations: 1, maxEvals: 4, seed: 'fs-t' },
+      seed: 'fs-t',
+    });
+    expect(r.ok).toBe(true);
+    const reportPath = path.join(root, 'mods', 'steam-barons', 'balance-report.md');
+    expect(fs.existsSync(reportPath)).toBe(true);
+    const md = fs.readFileSync(reportPath, 'utf8');
+    expect(md).toContain('# Balance report — steam-barons');
+    expect(md).toContain('## Melee');
+    expect(md).not.toContain('skipped');
+    // emitted data.json roster stays sum-valid whether or not tuning ran
+    const data = JSON.parse(fs.readFileSync(path.join(root, 'mods', 'steam-barons', 'steam-barons.data.json'), 'utf8'));
+    for (const c of data.roster) {
+      const s = c.stats;
+      expect(s.capital + s.luck + s.negotiation + s.charisma + s.tech + s.stamina).toBe(34);
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  }, 120000);
+});
