@@ -44,12 +44,26 @@ export const DEFAULT_RULES = {
     ],
   },
   stats: {
+    // Kept in lockstep with mods/dominion/rules.js stats (stat-mechanics wave
+    // 2026-07-14): a loadMod()-path mod missing a stats override deep-merges
+    // THESE defaults — a missing key here resolves undefined at the Game.js
+    // read site (e.g. floor(luck/undefined) = NaN luckRedraws, whose <= 0
+    // guard then never fires: unlimited redraws). T2 review Important #2.
     capital: { startingMoneyBonus: 50 },
-    negotiation: { buyDiscountPerPoint: 0.01, buyDiscountMax: 0.10 },
-    tech: { upgradeDiscountPerPoint: 0.02, upgradeDiscountMax: 0.20 },
+    negotiation: {
+      buyDiscountPerPoint: 0.01, buyDiscountMax: 0.10,
+      rentCollectedBonusPerPoint: 0.015, rentCollectedBonusMax: 0.135,
+    },
+    tech: {
+      upgradeDiscountPerPoint: 0.02, upgradeDiscountMax: 0.20,
+      buildingRentBonusPerPoint: 0.02, buildingRentBonusMax: 0.18,
+    },
     charisma: { rentDiscountPerPoint: 0.01, rentDiscountMax: 0.10 },
-    luck: { redrawThreshold: 8, redrawCount: 1 },
-    stamina: { rerollThreshold: 7, rerollCount: 1 },
+    luck: { cardGainBonusPerPoint: 0.03, cardGainBonusMax: 0.27, redrawDivisor: 3 },
+    stamina: {
+      rerollThreshold: 7, rerollCount: 1,
+      lossReductionPerPoint: 0.03, lossReductionMax: 0.24,
+    },
   },
   passives: {
     financier: { buyDiscount: 0.10, negativeEventReduction: 0.20 },
