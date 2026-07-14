@@ -1482,6 +1482,64 @@ describe('rent stat modifiers (negotiation collection + tech building)', () => {
     // Capped at 0.18 -> same result as the tech:9 test -> 354
     expect(calculateRent(G, space, 0, visitor)).toBe(354);
   });
+
+  test('railroad rent: zero-negotiation owner is byte-identical to the pre-change formula', () => {
+    const G = freshG();
+    G.ownership[5] = '1'; // Reading Railroad
+    G.players[1].properties.push(5);
+    G.players[1].character = statChar({}); // negotiation 0
+    const visitor = G.players[0]; // no character -> isolates owner-side bonus only
+
+    const space = G.board.spaces[5];
+    // 1 railroad owned: base = railroadBase(25) * exponent(2)^(1-1) = 25.
+    // negotiation 0 -> no collection bonus -> unchanged from the
+    // pre-stat-modifier formula.
+    expect(calculateRent(G, space, 0, visitor)).toBe(25);
+  });
+
+  test('railroad rent: negotiation 9 (at cap) owner applies x1.135 collection bonus', () => {
+    const G = freshG();
+    G.ownership[5] = '1'; // Reading Railroad
+    G.players[1].properties.push(5);
+    G.players[1].character = statChar({ negotiation: 9 });
+    const visitor = G.players[0];
+
+    const space = G.board.spaces[5];
+    // 1 railroad owned: base = 25 * 2^(1-1) = 25
+    // negotiation 9 * 0.015 = 0.135 (at cap) -> 25 * 1.135 = 28.375 -> floor 28
+    expect(calculateRent(G, space, 0, visitor)).toBe(28);
+  });
+
+  test('utility rent: negotiation 9 (at cap) owner applies collection bonus on the dice-based amount', () => {
+    const G = freshG();
+    G.ownership[12] = '1'; // Electric Company
+    G.players[1].properties.push(12);
+    G.players[1].character = statChar({ negotiation: 9 });
+    const visitor = G.players[0];
+
+    const space = G.board.spaces[12];
+    // 1 utility owned, dice total 7: base = diceTotal(7) * utilityMultiplierSingle(4) = 28
+    // negotiation 9 * 0.015 = 0.135 (at cap) -> 28 * 1.135 = 31.78 -> floor 31
+    expect(calculateRent(G, space, 7, visitor)).toBe(31);
+  });
+
+  test('railroad rent: tech bonus cannot apply (railroads never carry a building level)', () => {
+    const G = freshG();
+    G.ownership[15] = '1'; // Pennsylvania RR
+    G.players[1].properties.push(15);
+    G.players[1].character = statChar({ negotiation: 9, tech: 9 });
+    const visitor = G.players[0];
+
+    const space = G.board.spaces[15];
+    // Railroads never receive a G.buildings entry (upgradeProperty rejects
+    // non-property space ids), so buildingLevel is always 0 here -> the
+    // tech branch (gated on buildingLevel > 0) never fires, even though
+    // the owner has tech 9. Only the always-on negotiation bonus applies.
+    // base = 25 * 2^(1-1) = 25
+    // negotiation 9 * 0.015 = 0.135 (at cap) -> 25 * 1.135 = 28.375 -> floor 28
+    expect(G.buildings[15]).toBeUndefined(); // sanity: no building entry exists
+    expect(calculateRent(G, space, 0, visitor)).toBe(28);
+  });
 });
 
 // ─── BANKRUPTCY WITH BUILDINGS ─────────────────────────
@@ -2347,10 +2405,13 @@ describe('RULES config coverage', () => {
     Monopoly.moves.rollDice(G, ctx);
 
     expect(renn.position).toBe(3);
-    // Base rent for space 3 (Baltic Avenue, rent $4), monopoly 2x = $8
+    // Base rent for space 3 (Baltic Avenue, rent $8), monopoly 2x = $16
     // (no building, so no tech bonus). Albert (owner) negotiation 8:
-    // min(8*0.015, 0.135) = 0.12 -> 8 * 1.12 = 8.96
+    // min(8*0.015, 0.135) = 0.12 -> 16 * 1.12 = 17.92
     // Renn (payer) has charisma 6, discount = min(6*0.01, 0.10) = 0.06
+    // -> 17.92 * 0.94 = 16.8448
+    // Breaker (Renn's passive): monopoly rent -25% -> 16.8448 * 0.75 = 12.6336
+    // -> floor = 12
     const baseRent = BOARD_SPACES[3].rent * RULES.core.monopolyRentMultiplier;
     const negBonus = Math.min(albert.character.stats.negotiation * RULES.stats.negotiation.rentCollectedBonusPerPoint, RULES.stats.negotiation.rentCollectedBonusMax);
     const afterNegotiation = baseRent * (1 + negBonus);
