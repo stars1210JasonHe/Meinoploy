@@ -249,7 +249,18 @@ Touches the LLM extraction schema + emit pass-through + validateWorld optional-f
 > Post-merge tickets: gainAll logs nominal amount, MCP digest redraw hint unconditional,
 > old-save luckRedraws drift.
 
-## Sequencing (proposed; to confirm)
+## Create-mod balance integration (owner 2026-07-14: "有没有与mod生成结合？")
+> **DONE 2026-07-14 (feat/createmod-balance, 4 commits, 1296 unit + 44 E2E).**
+> `create-mod --balance` now runs the modern MELEE with the mod's REAL roster on its REAL
+> board (old slice proxied two dominion characters and skipped classic maps entirely) and
+> persists `mods/<id>/balance-report.md`. NEW `--auto-balance`: identity-locked
+> stat-redistribution hill-climb (sim-evaluated, lexicographic fewer-flags-then-spread,
+> budget-capped) that swaps tuned stats into the emit; honest stall messaging points at the
+> rules-override pattern. Engine: additive `setActiveModObject` (unregistered rosters through
+> the reducer). Live proof: ancient-empires 40/33/27 zero flags → correct no-op.
+> **NEW TICKET — --force re-emit clobbers post-creation enrichments**: portrait wiring
+> (gen-portraits has a rewire path), R2 boardBg wiring, and position-derivation drift all
+> regress on re-emit; needs a preserve/rewire chain before --force is safe on enriched mods.
 1. Near-term: entry-UI polish (small, visible).
 2. Then pick ONE major task to design first. Task 1 (create-mod engine) compounds content velocity;
    Task 2 (API/MCP + dialogue) deepens the play experience. Each gets its own design pass (likely a
