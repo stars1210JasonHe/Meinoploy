@@ -251,11 +251,21 @@ describe('tax_paid / passive_triggered (financier, tax context)', () => {
     const reduced = Math.floor(200 * (1 - RULES.passives.financier.negativeEventReduction));
     const passives = eventsOfType(G, 'passive_triggered');
     expect(passives).toHaveLength(1);
+    // financier's own passive_triggered log stays isolated at $160 (its own
+    // effect, decoupled from any further reduction) — Task 2 does not touch
+    // this event/message.
     expect(passives[0].data).toEqual({ passive: 'financier', effect: 'loss_reduced', amount: reduced, context: 'tax' });
-    expect(eventsOfType(G, 'tax_paid')[0].data).toEqual({ amount: reduced, spaceId: 4 });
+    // Stamina loss reduction (Task 2, spec §1.4): the payer's OWN stat,
+    // applied as a final stage AFTER financier's isolated reduction — Albert
+    // Victor stamina 4 -> min(4*0.03, 0.24) = 0.12 ->
+    // floor(160 * (1 - 0.12)) = floor(140.8) = $140. tax_paid (the real
+    // charge) reflects this; the passive_triggered log above does not.
+    const staminaBonus = Math.min(4 * RULES.stats.stamina.lossReductionPerPoint, RULES.stats.stamina.lossReductionMax);
+    const finalTax = Math.floor(reduced * (1 - staminaBonus));
+    expect(eventsOfType(G, 'tax_paid')[0].data).toEqual({ amount: finalTax, spaceId: 4 });
     expect(G.messages).toEqual(expect.arrayContaining([
       `Financial expertise reduces tax to $${reduced}.`,
-      `Paid $${reduced} in Income Tax.`,
+      `Paid $${finalTax} in Income Tax.`,
     ]));
   });
 });
@@ -498,15 +508,18 @@ describe('card_drawn / card_prompt / card_applied — harness (golden-covered)',
     client.moves.acceptCard();
     G = client.getState().G;
     const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'payPercent');
+    // Stamina loss reduction (Task 2, spec §1.4): Lia Startrace stamina 6 ->
+    // min(6*0.03, 0.24) = 0.18 -> base 10% of $1750 = $175 ->
+    // floor(175 * (1 - 0.18)) = floor(143.5) = $143.
     expect(applied.data).toEqual({
       deck: 'chance',
       cardIndex: drawn[0].data.cardIndex,
       action: 'payPercent',
       text: 'Black Swan Event! Pay 10% of your total assets.',
-      effect: { assets: 1750, amount: 175, percent: 10 },
+      effect: { assets: 1750, amount: 143, percent: 10 },
     });
     expect(eventsOfType(G, 'passive_triggered')).toHaveLength(0); // Lia isn't financier
-    expect(G.messages).toContain('Total assets: $1750. Paid $175 (10%).');
+    expect(G.messages).toContain('Total assets: $1750. Paid $143 (10%).');
   });
 
   test('card_redrawn + card_applied(forceBuy, no_opponents)', () => {
@@ -539,12 +552,14 @@ describe('card_drawn / card_prompt / card_applied — harness (golden-covered)',
     ]);
     const G = client.getState().G;
     const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'gain');
+    // Luck card-gain amplifier (Task 2, spec §1.3): Marcus Grayline luck 4 ->
+    // min(4*0.03, 0.27) = 0.12 -> floor(200 * 1.12) = $224.
     expect(applied.data).toEqual({
       deck: 'community',
       cardIndex: applied.data.cardIndex,
       action: 'gain',
       text: 'Bank error in your favor. Collect $200.',
-      effect: { amount: 200 },
+      effect: { amount: 224 },
     });
     expect(G.messages).toEqual([
       'Marcus Grayline rolled 1 + 1 = 2',
@@ -579,7 +594,13 @@ describe('card_drawn / card_prompt / card_applied — harness (golden-covered)',
     playScript(client, [
       ['selectCharacter', 'knox-ironlaw'],
       ['selectCharacter', 'sophia-ember'],
-      ['rollDice'], // P0 -> Chance -> goToJail, applied immediately (no redraw offered)
+      // P0 -> Chance -> goToJail. Task 2 (spec §1.3) replaced the old
+      // redrawThreshold=8 gate with floor(luck/3) — Knox's luck 3 now yields
+      // floor(3/3)=1 redraw (was 0 before), so the card now PAUSES for a
+      // redraw offer instead of applying immediately. Accept it as-is; the
+      // outcome (jailed) is unchanged.
+      ['rollDice'],
+      ifPendingCard('acceptCard'),
     ]);
     const G = client.getState().G;
     const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'goToJail');
@@ -597,10 +618,14 @@ describe('card_drawn / card_prompt / card_applied — harness (golden-covered)',
     expect(jailed).toBeDefined();
     expect(jailed.data).toEqual({ reason: 'card' });
     expect(G.players[0].inJail).toBe(true);
+    // 'You may accept or redraw this card.' is new (Task 2's redraw offer,
+    // see comment above) — acceptCard itself adds no further line, since
+    // goToJail is still silent (formatter falls to null for this action).
     expect(G.messages).toEqual([
       'Knox Ironlaw rolled 3 + 4 = 7',
       'Landed on Chance.',
       'CHANCE: Go to Jail. Do not pass GO.',
+      'You may accept or redraw this card.',
     ]);
   });
 });
@@ -638,11 +663,16 @@ describe('card_applied: pay (direct-invocation, no golden scenario reaches this 
     Monopoly.moves.acceptCard(G, makeCtx('0'));
     const reduced = Math.floor(50 * (1 - RULES.passives.financier.negativeEventReduction));
     const passive = eventsOfType(G, 'passive_triggered')[0];
+    // financier's own log stays isolated at $40 — see the tax test's comment.
     expect(passive.data).toEqual({ passive: 'financier', effect: 'loss_reduced', amount: reduced, context: 'pay' });
+    // Stamina loss reduction (Task 2): Albert Victor stamina 4 -> 0.12 ->
+    // floor(40 * (1 - 0.12)) = floor(35.2) = $35 — the real final charge.
+    const staminaBonus = Math.min(4 * RULES.stats.stamina.lossReductionPerPoint, RULES.stats.stamina.lossReductionMax);
+    const final = Math.floor(reduced * (1 - staminaBonus));
     const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'pay');
-    expect(applied.data.effect).toEqual({ amount: reduced });
+    expect(applied.data.effect).toEqual({ amount: final });
     expect(applied.seq).toBeGreaterThan(passive.seq); // same relative order as the original pushes
-    expect(G.players[0].money).toBe(1000 - reduced);
+    expect(G.players[0].money).toBe(1000 - final);
     expect(G.messages).toEqual(['Select your characters!', `Financial expertise reduces loss to $${reduced}.`]);
   });
 });
@@ -658,16 +688,23 @@ describe('card_applied: payPercent + financier (direct-invocation)', () => {
     const rawAmount = Math.floor(assets * 20 / 100);
     const reduced = Math.floor(rawAmount * (1 - RULES.passives.financier.negativeEventReduction));
     const passive = eventsOfType(G, 'passive_triggered')[0];
+    // financier's own log stays isolated at $160 — see the tax test's comment.
     expect(passive.data).toEqual({ passive: 'financier', effect: 'loss_reduced', amount: reduced, context: 'payPercent' });
+    // Stamina loss reduction (Task 2): Albert Victor stamina 4 -> 0.12 ->
+    // floor(160 * (1 - 0.12)) = floor(140.8) = $140 — the real final charge,
+    // reflected in card_applied's effect.amount, player.money, and the
+    // 'Total assets...' message (which reads effect.amount).
+    const staminaBonus = Math.min(4 * RULES.stats.stamina.lossReductionPerPoint, RULES.stats.stamina.lossReductionMax);
+    const final = Math.floor(reduced * (1 - staminaBonus));
     const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'payPercent');
     expect(applied.data).toEqual({
       deck: 'community', cardIndex: 5, action: 'payPercent', text: 'Audit',
-      effect: { assets, amount: reduced, percent: 20 },
+      effect: { assets, amount: final, percent: 20 },
     });
-    expect(G.players[0].money).toBe(1000 - reduced);
+    expect(G.players[0].money).toBe(1000 - final);
     expect(G.messages).toEqual(expect.arrayContaining([
       `Financial expertise reduces loss to $${reduced}.`,
-      `Total assets: $${assets}. Paid $${reduced} (20%).`,
+      `Total assets: $${assets}. Paid $${final} (20%).`,
     ]));
   });
 });

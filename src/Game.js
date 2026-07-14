@@ -197,6 +197,29 @@ function getPassive(player) {
   return player.character ? player.character.passive.id : null;
 }
 
+// Luck stat: card-gain amplifier (spec §1.3). Positive money from the
+// 'gain' family of chance/community card actions (gain, gainAll's
+// per-recipient share, gainPerProperty) scales up per point of the
+// RECEIVING player's luck. Shared by every money-gain card branch so the
+// rate/cap live in exactly one place. Silent (no event) — same convention
+// as Task 1's owner/payer rent stat multipliers in calculateRent.
+function getLuckGainBonus(player) {
+  return player.character
+    ? Math.min(player.character.stats.luck * RULES.stats.luck.cardGainBonusPerPoint, RULES.stats.luck.cardGainBonusMax)
+    : 0;
+}
+
+// Stamina stat: loss reduction (spec §1.4). Negative money hits from TAX
+// spaces and card pay/payPercent actions are reduced per point of the
+// PAYING player's stamina. Deliberately NOT wired into calculateRent
+// (charisma's lane) or duel payouts (stamina is already the duel stat) —
+// only the tax handler and the pay/payPercent card branches call this.
+function getStaminaLossReduction(player) {
+  return player.character
+    ? Math.min(player.character.stats.stamina * RULES.stats.stamina.lossReductionPerPoint, RULES.stats.stamina.lossReductionMax)
+    : 0;
+}
+
 function ownsColorGroup(G, playerId, color) {
   if (!color || !G.board.colorGroups[color]) return false;
   return G.board.colorGroups[color].every(id => G.ownership[id] === playerId);
@@ -584,6 +607,13 @@ function handleLanding(G, ctx) {
         taxAmount = Math.floor(taxAmount * (1 - RULES.passives.financier.negativeEventReduction));
         logEvent(G, 'passive_triggered', ctx.currentPlayer, { passive: 'financier', effect: 'loss_reduced', amount: taxAmount, context: 'tax' });
       }
+      // Stamina loss reduction (spec §1.4): the payer's OWN stat, applied
+      // LAST after any passive reduction — mirrors calculateRent's payer-side
+      // charisma discount running after the owner-side mods (Task 1
+      // precedent). financier's passive_triggered log above stays isolated
+      // to financier's own effect; this is a separate, silent final stage.
+      // No-op (Math.floor of an already-integer amount) when stamina is 0.
+      taxAmount = Math.floor(taxAmount * (1 - getStaminaLossReduction(player)));
       player.money -= taxAmount;
       if (RULES.core.freeParkingPot) {
         G.freeParkingPot += taxAmount;
@@ -701,13 +731,22 @@ function rankStandings(G, players) {
 // event carries a stable card reference without applyCard re-deriving it.
 function applyCard(G, ctx, player, card, deck, cardIndex) {
   switch (card.action) {
-    case 'gain':
+    case 'gain': {
+      // Luck stat: card-gain amplifier (spec §1.3). Single final rounding —
+      // no floor existed here before (card.value was already an integer);
+      // the new multiplier makes one necessary, applied exactly once (zero
+      // luck -> multiplier 1 -> Math.floor(card.value) === card.value,
+      // byte-identical). The logged 'amount' is the FINAL amplified credit
+      // (mirrors rent_paid/tax_paid logging the final charged/collected
+      // amount, not the pre-modifier face value).
+      const amount = Math.floor(card.value * (1 + getLuckGainBonus(player)));
       // No message ever existed for this action (silent credit) — card_applied
       // is still logged (data-only; formatter returns null) so the event
       // stream has a complete record even where G.messages doesn't.
-      player.money += card.value;
-      logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'gain', text: card.text, effect: { amount: card.value } });
+      player.money += amount;
+      logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'gain', text: card.text, effect: { amount } });
       break;
+    }
     case 'pay': {
       let amount = card.value;
       // Albert Victor passive: financial negative event loss reduction
@@ -715,6 +754,10 @@ function applyCard(G, ctx, player, card, deck, cardIndex) {
         amount = Math.floor(amount * (1 - RULES.passives.financier.negativeEventReduction));
         logEvent(G, 'passive_triggered', player.id, { passive: 'financier', effect: 'loss_reduced', amount, context: 'pay' });
       }
+      // Stamina loss reduction (spec §1.4): payer's own stat, applied LAST
+      // after any passive reduction — see the tax handler's identical
+      // pattern/comment above. Silent, no-op at stamina 0.
+      amount = Math.floor(amount * (1 - getStaminaLossReduction(player)));
       player.money -= amount;
       if (RULES.core.freeParkingPot) {
         G.freeParkingPot += amount;
@@ -790,6 +833,8 @@ function applyCard(G, ctx, player, card, deck, cardIndex) {
         amount = Math.floor(amount * (1 - RULES.passives.financier.negativeEventReduction));
         logEvent(G, 'passive_triggered', player.id, { passive: 'financier', effect: 'loss_reduced', amount, context: 'payPercent' });
       }
+      // Stamina loss reduction (spec §1.4) — same final stage as 'pay'/tax.
+      amount = Math.floor(amount * (1 - getStaminaLossReduction(player)));
       player.money -= amount;
       if (RULES.core.freeParkingPot) {
         G.freeParkingPot += amount;
@@ -802,20 +847,35 @@ function applyCard(G, ctx, player, card, deck, cardIndex) {
     }
 
     case 'gainAll': {
-      // All non-bankrupt players gain money
+      // All non-bankrupt players gain money. NOTE (design decision, spec
+      // §1.3 "gainAll receiver"): the real card set ("Stimulus Package! All
+      // players receive $100.", "Community Fund! All players receive $50.")
+      // is a BANK-FUNDED broadcast bonus, not a peer-to-peer transfer —
+      // every non-bankrupt player (including the drawer) independently
+      // receives card.value from the bank; there is no "payer" side at all
+      // in this codebase's gainAll. So there's no money-conservation
+      // question to resolve here: each recipient's OWN luck amplifies their
+      // OWN share, same as a solo 'gain' card, applied per-player. Stamina
+      // never enters this branch (nobody pays).
       G.players.forEach(p => {
         if (!p.bankrupt) {
-          p.money += card.value;
+          p.money += Math.floor(card.value * (1 + getLuckGainBonus(p)));
         }
       });
+      // effect.amount stays the nominal per-recipient card face value (not
+      // player-specific) — recipients' amplified shares differ per player
+      // and aren't itemized here, consistent with calculateRent's silent,
+      // un-itemized stat multipliers (Task 1 precedent).
       logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'gainAll', text: card.text, effect: { amount: card.value } });
       break;
     }
 
     case 'gainPerProperty': {
-      // Gain $X per owned property
+      // Gain $X per owned property, luck-amplified (spec §1.3). 'perProperty'
+      // stays the nominal per-card rate; 'amount' is the final luck-amplified
+      // total actually credited (single final rounding, no-op at luck 0).
       const count = player.properties.length;
-      const amount = card.value * count;
+      const amount = Math.floor(card.value * count * (1 + getLuckGainBonus(player)));
       player.money += amount;
       logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'gainPerProperty', text: card.text, effect: { count, perProperty: card.value, amount } });
       break;
@@ -1313,10 +1373,9 @@ export const Monopoly = {
         player.affinityBonus = affinityBonus;
       }
 
-      // Luck stat threshold: free card redraws
-      if (char.stats.luck >= RULES.stats.luck.redrawThreshold) {
-        player.luckRedraws = RULES.stats.luck.redrawCount;
-      }
+      // Luck stat: free card redraws, scaled continuously (spec §1.3)
+      // instead of the old all-or-nothing threshold.
+      player.luckRedraws = Math.floor(char.stats.luck / RULES.stats.luck.redrawDivisor);
       // Evelyn Zero passive: additional redraws
       if (char.passive.id === 'speculator') {
         player.luckRedraws += RULES.passives.speculator.extraRedraws;

@@ -135,8 +135,13 @@ const SCENARIOS = {
     ],
   },
 
-  // Knox Ironlaw (luck 3, no merchant passive): first roll draws a goToJail
-  // card that applies IMMEDIATELY (no redraw pause). One turn later, payJailFine
+  // Knox Ironlaw (luck 3): first roll draws a goToJail card. Task 2
+  // (stat-mechanics) replaced the old redrawThreshold=8 all-or-nothing gate
+  // with luckRedraws = floor(luck / redrawDivisor) — Knox's luck 3 now
+  // yields floor(3/3)=1 redraw (previously 0, since 3 < 8), so the card now
+  // PAUSES for a redraw offer instead of applying immediately. The added
+  // ifPendingCard('acceptCard') accepts it as-is (still jails Knox),
+  // preserving the scenario's original intent. One turn later, payJailFine
   // covers the :1379 reset site — the message buffer resets to a single line.
   'jail-cycle': {
     seed: 34,
@@ -144,7 +149,8 @@ const SCENARIOS = {
     script: [
       ['selectCharacter', 'knox-ironlaw'],
       ['selectCharacter', 'sophia-ember'],
-      ['rollDice'],       // P0 -> chance card sends to jail, applied immediately
+      ['rollDice'],       // P0 -> chance card offers a redraw; accept below
+      ifPendingCard('acceptCard'),
       ['endTurn'],
       ['rollDice'],       // P1's turn
       ifCanBuy('buyProperty'),

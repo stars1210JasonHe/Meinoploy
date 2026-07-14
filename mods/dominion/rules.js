@@ -92,12 +92,31 @@ export const RULES = {
       rentDiscountMax: 0.10,
     },
     luck: {
-      redrawThreshold: 8,
-      redrawCount: 1,
+      // Card-gain amplifier (spec §1.3): positive money from chance/community
+      // 'gain' family card actions (gain / gainAll per-recipient share /
+      // gainPerProperty) scales up by this rate per point of the RECEIVING
+      // player's luck, capped. Hook: Game.js's getLuckGainBonus(), used in
+      // applyCard's gain/gainAll/gainPerProperty branches.
+      cardGainBonusPerPoint: 0.03,
+      cardGainBonusMax: 0.27,
+      // Free card redraws now scale continuously instead of an all-or-nothing
+      // threshold: luckRedraws = floor(luck / redrawDivisor). Replaces the old
+      // redrawThreshold/redrawCount pair (their only consumer was
+      // selectCharacter in Game.js). speculator's extraRedraws still adds on
+      // top, unchanged.
+      redrawDivisor: 3,
     },
     stamina: {
       rerollThreshold: 7,
       rerollCount: 1,
+      // Loss reduction (spec §1.4): negative money hits from TAX spaces and
+      // card pay/payPercent actions are reduced by this rate per point of the
+      // PAYING player's stamina, capped. Does NOT touch rent (charisma's
+      // lane) or duels (stamina is already the duel stat). Hook: Game.js's
+      // getStaminaLossReduction(), used in the tax handler + applyCard's
+      // pay/payPercent branches.
+      lossReductionPerPoint: 0.03,
+      lossReductionMax: 0.24,
     },
   },
 

@@ -22,10 +22,12 @@ function freshGWithChars(char0Id = 'albert-victor', char1Id = 'lia-startrace') {
   G.players[0].money = 1500 + char0.stats.capital * 50;
   G.players[1].character = char1;
   G.players[1].money = 1500 + char1.stats.capital * 50;
-  if (char0.stats.luck >= 8) G.players[0].luckRedraws = 1;
+  // Mirrors selectCharacter's luckRedraws formula (Task 2: continuous
+  // floor(luck/redrawDivisor), replacing the old >=8 all-or-nothing gate).
+  G.players[0].luckRedraws = Math.floor(char0.stats.luck / RULES.stats.luck.redrawDivisor);
   if (char0.passive.id === 'speculator') G.players[0].luckRedraws += 1;
   if (char0.stats.stamina >= 7) G.players[0].rerollsLeft = 1;
-  if (char1.stats.luck >= 8) G.players[1].luckRedraws = 1;
+  G.players[1].luckRedraws = Math.floor(char1.stats.luck / RULES.stats.luck.redrawDivisor);
   if (char1.passive.id === 'speculator') G.players[1].luckRedraws += 1;
   if (char1.stats.stamina >= 7) G.players[1].rerollsLeft = 1;
   G.phase = 'play';
@@ -199,17 +201,20 @@ describe('selectCharacter', () => {
   test('sets luck redraws for high-luck characters', () => {
     const ctx = { numPlayers: 2, playOrder: ['0', '1'] };
     const G = Monopoly.setup(ctx);
-    // Lia Startrace has Luck 8 → gets 1 redraw
+    // Lia Startrace has Luck 8 -> floor(8 / redrawDivisor=3) = 2 redraws
+    // (Task 2 replaced the old redrawThreshold=8/redrawCount=1 all-or-nothing
+    // gate with a continuous floor(luck/3) scale).
     Monopoly.moves.selectCharacter(G, makeCtx('0'), 'lia-startrace');
-    expect(G.players[0].luckRedraws).toBe(1);
+    expect(G.players[0].luckRedraws).toBe(2);
   });
 
   test('Evelyn Zero gets extra redraws', () => {
     const ctx = { numPlayers: 2, playOrder: ['0', '1'] };
     const G = Monopoly.setup(ctx);
-    // Evelyn Zero: Luck 10 → 1 redraw + speculator passive → +1 = 2
+    // Evelyn Zero: Luck 10 -> floor(10/3) = 3 redraws + speculator passive
+    // (+1) = 4.
     Monopoly.moves.selectCharacter(G, makeCtx('0'), 'evelyn-zero');
-    expect(G.players[0].luckRedraws).toBe(2);
+    expect(G.players[0].luckRedraws).toBe(4);
   });
 
   test('sets rerolls for high-stamina characters', () => {
@@ -939,9 +944,11 @@ describe('character passives', () => {
 
     Monopoly.moves.rollDice(G, ctx);
 
-    // Financier passive: tax * 0.80 = $160
+    // Financier passive: tax * 0.80 = $160.
+    // Stamina loss reduction (spec §1.4, Task 2): Albert Victor stamina 4 ->
+    // min(4*0.03, 0.24) = 0.12 -> $160 * (1 - 0.12) = $140.8 -> floor $140.
     expect(G.players[0].position).toBe(4);
-    expect(G.players[0].money).toBe(startMoney - 160);
+    expect(G.players[0].money).toBe(startMoney - 140);
   });
 
   test('Knox Ironlaw regulated property adds 20% rent', () => {
@@ -1827,8 +1834,10 @@ describe('enhanced event cards', () => {
 
     Monopoly.moves.acceptCard(G, makeCtx('0'));
 
-    // Total assets = $1000, 10% = $100, financier -20% = $80
-    expect(G.players[0].money).toBe(1000 - 80);
+    // Total assets = $1000, 10% = $100, financier -20% = $80.
+    // Stamina loss reduction: Albert Victor stamina 4 -> 0.12 ->
+    // $80 * (1 - 0.12) = $70.4 -> floor $70.
+    expect(G.players[0].money).toBe(1000 - 70);
   });
 
   test('gainAll gives money to all non-bankrupt players', () => {
@@ -2006,6 +2015,244 @@ describe('enhanced event cards', () => {
 
     expect(G.pendingCard).toBeNull();
     expect(G.players[0].luckRedraws).toBe(0);
+  });
+});
+
+// ─── LUCK CARD-GAIN AMPLIFIER + STAMINA LOSS REDUCTION (Task 2) ─────────
+// Luck (spec §1.3): positive money from the 'gain' family of chance/community
+// card actions (gain / gainAll's per-recipient share / gainPerProperty)
+// scales +cardGainBonusPerPoint (0.03) per point of the RECEIVING player's
+// luck, capped at cardGainBonusMax (0.27). Stamina (spec §1.4): negative
+// money hits from TAX spaces and pay/payPercent cards are reduced by
+// -lossReductionPerPoint (0.03) per point of the PAYING player's stamina,
+// capped at lossReductionMax (0.24) — deliberately NOT wired into rent
+// (charisma's lane) or duel payouts (stamina is already the duel roll stat;
+// see engine-duel.test.js for that guard). Each branch's rounding point
+// mirrors Game.js's comments (single final Math.floor per amount).
+describe('luck card-gain amplifier + stamina loss reduction (Task 2)', () => {
+  test('luck 9: gain card $100 -> $127 (9*0.03=0.27, exactly at cap)', () => {
+    const G = freshG();
+    G.players[0].character = statChar({ luck: 9 });
+    G.pendingCard = { card: { text: 'Dividend', action: 'gain', value: 100 }, deck: 'chance' };
+    const before = G.players[0].money;
+
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+
+    expect(G.players[0].money).toBe(before + 127);
+  });
+
+  test('luck 0: gain card is byte-identical to the base card value', () => {
+    const G = freshG();
+    G.players[0].character = statChar({});
+    G.pendingCard = { card: { text: 'Dividend', action: 'gain', value: 100 }, deck: 'chance' };
+    const before = G.players[0].money;
+
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+
+    expect(G.players[0].money).toBe(before + 100);
+  });
+
+  test('luck cap: 10+ does not exceed cardGainBonusMax (same result as luck 9)', () => {
+    const G = freshG();
+    G.players[0].character = statChar({ luck: 10 }); // uncapped would be 0.30
+    G.pendingCard = { card: { text: 'Dividend', action: 'gain', value: 100 }, deck: 'chance' };
+    const before = G.players[0].money;
+
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+
+    // Capped at 0.27 -> same as luck 9 -> $127
+    expect(G.players[0].money).toBe(before + 127);
+  });
+
+  test("gainAll: each RECEIVER's OWN luck amplifies only their own bank-funded share", () => {
+    // Design decision (task-2-report.md): the real card set ("Stimulus
+    // Package! All players receive $100.") is BANK-FUNDED — every
+    // non-bankrupt player independently receives card.value from the bank;
+    // there is no peer-to-peer "payer" side in this codebase's gainAll. So
+    // there's no money-conservation constraint across players (same as a
+    // solo 'gain' card) — each recipient's own luck amplifies only their own
+    // share.
+    const G = freshG();
+    G.players[0].character = statChar({ luck: 9 }); // amplified to 127%
+    G.players[1].character = statChar({}); // luck 0 -> unamplified
+    G.players[0].money = 1000;
+    G.players[1].money = 800;
+    G.pendingCard = { card: { text: 'Stimulus', action: 'gainAll', value: 100 }, deck: 'chance' };
+
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+
+    expect(G.players[0].money).toBe(1000 + 127); // floor(100 * 1.27)
+    expect(G.players[1].money).toBe(800 + 100);   // unamplified
+    // Explicit non-conservation check: the bank minted the extra $27 for
+    // player 0 — total money created is 227, NOT a redistributed 200.
+    const totalCreated = (G.players[0].money - 1000) + (G.players[1].money - 800);
+    expect(totalCreated).toBe(227);
+  });
+
+  test('gainAll skips bankrupt players regardless of their luck', () => {
+    const G = freshG();
+    G.players[0].character = statChar({ luck: 9 });
+    G.players[1].character = statChar({ luck: 9 });
+    G.players[0].money = 1000;
+    G.players[1].money = 0;
+    G.players[1].bankrupt = true;
+    G.pendingCard = { card: { text: 'Stimulus', action: 'gainAll', value: 100 }, deck: 'chance' };
+
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+
+    expect(G.players[0].money).toBe(1000 + 127);
+    expect(G.players[1].money).toBe(0); // still bankrupt, untouched
+  });
+
+  test("gainPerProperty amplified by the receiving player's luck", () => {
+    const G = freshG();
+    G.players[0].character = statChar({ luck: 9 });
+    G.ownership[1] = '0';
+    G.ownership[3] = '0';
+    G.ownership[6] = '0';
+    G.players[0].properties.push(1, 3, 6);
+    G.players[0].money = 1000;
+    G.pendingCard = { card: { text: 'Boom', action: 'gainPerProperty', value: 50 }, deck: 'chance' };
+
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+
+    // 3 properties x $50 = $150 base -> floor(150 * 1.27) = floor(190.5) = 190
+    expect(G.players[0].money).toBe(1000 + 190);
+  });
+
+  test('stamina 8: pay card reduced 24% (8*0.03=0.24, exactly at cap)', () => {
+    const G = freshG();
+    G.players[0].character = statChar({ stamina: 8 });
+    G.players[0].money = 1000;
+    G.pendingCard = { card: { text: 'Fine', action: 'pay', value: 100 }, deck: 'chance' };
+
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+
+    // floor(100 * (1 - 0.24)) = 76
+    expect(G.players[0].money).toBe(1000 - 76);
+  });
+
+  test('stamina 8: payPercent reduced 24%', () => {
+    const G = freshG();
+    G.players[0].character = statChar({ stamina: 8 });
+    G.players[0].money = 1000;
+    G.pendingCard = { card: { text: 'Audit', action: 'payPercent', value: 10 }, deck: 'community' };
+
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+
+    // 10% of $1000 = $100 -> floor(100 * (1 - 0.24)) = 76
+    expect(G.players[0].money).toBe(1000 - 76);
+  });
+
+  test('stamina 8: tax space reduced 24%', () => {
+    const G = freshG();
+    G.players[0].character = statChar({ stamina: 8 });
+    G.players[0].position = 0;
+    const startMoney = G.players[0].money;
+
+    Monopoly.moves.rollDice(G, makeCtx('0', 2, 2)); // total 4, Income Tax ($200)
+
+    // floor(200 * (1 - 0.24)) = 152
+    expect(G.players[0].money).toBe(startMoney - 152);
+  });
+
+  test('stamina does NOT reduce rent — payer-side rent discount is charisma-only', () => {
+    const G = freshG();
+    G.ownership[1] = '1'; // Mediterranean Ave, base rent $4
+    G.players[1].character = statChar({}); // owner, all zero -> isolates payer-side only
+    const space = G.board.spaces[1];
+
+    const highStaminaRent = calculateRent(G, space, 0, { character: statChar({ stamina: 10 }) });
+    const zeroStaminaRent = calculateRent(G, space, 0, { character: statChar({}) });
+
+    expect(highStaminaRent).toBe(zeroStaminaRent);
+    expect(highStaminaRent).toBe(4); // byte-identical to the pre-Task-2 base rent
+  });
+
+  describe('zero-stat byte-identity (character present, stats explicitly zero)', () => {
+    test('gain: unaffected', () => {
+      const G = freshG();
+      G.players[0].character = statChar({});
+      G.pendingCard = { card: { text: 'Dividend', action: 'gain', value: 100 }, deck: 'chance' };
+      const before = G.players[0].money;
+      Monopoly.moves.acceptCard(G, makeCtx('0'));
+      expect(G.players[0].money).toBe(before + 100);
+    });
+
+    test('pay: unaffected', () => {
+      const G = freshG();
+      G.players[0].character = statChar({});
+      G.players[0].money = 1000;
+      G.pendingCard = { card: { text: 'Fine', action: 'pay', value: 50 }, deck: 'chance' };
+      Monopoly.moves.acceptCard(G, makeCtx('0'));
+      expect(G.players[0].money).toBe(950);
+    });
+
+    test('payPercent: unaffected', () => {
+      const G = freshG();
+      G.players[0].character = statChar({});
+      G.players[0].money = 1000;
+      G.pendingCard = { card: { text: 'Audit', action: 'payPercent', value: 10 }, deck: 'community' };
+      Monopoly.moves.acceptCard(G, makeCtx('0'));
+      expect(G.players[0].money).toBe(900);
+    });
+
+    test('tax: unaffected', () => {
+      const G = freshG();
+      G.players[0].character = statChar({});
+      G.players[0].position = 0;
+      const startMoney = G.players[0].money;
+      Monopoly.moves.rollDice(G, makeCtx('0', 2, 2)); // Income Tax $200
+      expect(G.players[0].money).toBe(startMoney - 200);
+    });
+
+    test('gainAll: unaffected', () => {
+      const G = freshG();
+      G.players[0].character = statChar({});
+      G.players[1].character = statChar({});
+      G.players[0].money = 1000;
+      G.players[1].money = 800;
+      G.pendingCard = { card: { text: 'Stimulus', action: 'gainAll', value: 100 }, deck: 'chance' };
+      Monopoly.moves.acceptCard(G, makeCtx('0'));
+      expect(G.players[0].money).toBe(1100);
+      expect(G.players[1].money).toBe(900);
+    });
+
+    test('gainPerProperty: unaffected', () => {
+      const G = freshG();
+      G.players[0].character = statChar({});
+      G.ownership[1] = '0';
+      G.players[0].properties.push(1);
+      G.players[0].money = 1000;
+      G.pendingCard = { card: { text: 'Boom', action: 'gainPerProperty', value: 50 }, deck: 'chance' };
+      Monopoly.moves.acceptCard(G, makeCtx('0'));
+      expect(G.players[0].money).toBe(1050);
+    });
+  });
+
+  describe('luckRedraws formula: floor(luck / redrawDivisor), speculator stacking', () => {
+    test('formula holds for values not in the fixed character roster (9 -> 3, 5 -> 1, 2 -> 0)', () => {
+      expect(Math.floor(9 / RULES.stats.luck.redrawDivisor)).toBe(3);
+      expect(Math.floor(5 / RULES.stats.luck.redrawDivisor)).toBe(1);
+      expect(Math.floor(2 / RULES.stats.luck.redrawDivisor)).toBe(0);
+    });
+
+    test('knox-ironlaw (luck 3) via selectCharacter: floor(3/3) = 1 (was 0 under the old redrawThreshold=8 gate)', () => {
+      const ctx = { numPlayers: 2, playOrder: ['0', '1'] };
+      const G = Monopoly.setup(ctx);
+      Monopoly.moves.selectCharacter(G, makeCtx('0'), 'knox-ironlaw');
+      expect(G.players[0].luckRedraws).toBe(1);
+    });
+
+    test('speculator stacking: evelyn-zero (luck 10 -> floor 3) + extraRedraws(1) = 4', () => {
+      const ctx = { numPlayers: 2, playOrder: ['0', '1'] };
+      const G = Monopoly.setup(ctx);
+      Monopoly.moves.selectCharacter(G, makeCtx('0'), 'evelyn-zero');
+      expect(G.players[0].luckRedraws).toBe(
+        Math.floor(10 / RULES.stats.luck.redrawDivisor) + RULES.passives.speculator.extraRedraws
+      );
+      expect(G.players[0].luckRedraws).toBe(4);
+    });
   });
 });
 

@@ -796,6 +796,32 @@ describe('Duel mechanism — resolution moves (Task 4)', () => {
       expect(Monopoly.moves.endTurn(G, ctx2)).not.toBe(INVALID_MOVE);
     });
 
+    // Task 2 (stat-mechanics, spec §1.4): stamina's loss-reduction hook is
+    // wired into ONLY the tax handler + card pay/payPercent branches —
+    // deliberately NOT duel payouts (stamina is already the duel's own
+    // primary roll stat). Same 1/1 vs 6/6 dice split as the test above, but
+    // BOTH sides now carry stamina 10 (would yield the 0.24 loss-reduction
+    // cap if the hook were wrongly shared) — the loss payment must still be
+    // the raw, unreduced loseMultiplier(2) * rent(8) = 16.
+    test('challenger loses with high stamina: loss payment is NOT reduced (stamina loss-reduction does not apply to duels)', () => {
+      const G = freshG();
+      G.players[0].character = statChar({ stamina: 10, luck: 0 }); // challenger — high stamina
+      G.players[1].character = statChar({ stamina: 10, luck: 0 }); // owner/defender — dice decide
+      G.duel = responseDuel();
+      G.hasRolled = true;
+      const p0Before = G.players[0].money;
+      const p1Before = G.players[1].money;
+
+      const ctx = ctxWithDice('1', [1, 1, 6, 6]); // challenger 1+1 (total 12), defender 6+6 (total 22)
+      const result = Monopoly.moves.respondDuel(G, ctx);
+
+      expect(result).not.toBe(INVALID_MOVE);
+      expect(G.players[0].money).toBe(p0Before - 16); // unreduced: NOT floor(16*(1-0.24))=12
+      expect(G.players[1].money).toBe(p1Before + 16);
+      const rentPaid = G.events.filter(e => e.type === 'rent_paid');
+      expect(rentPaid[0].data).toEqual({ propertyId: 3, ownerId: '1', amount: 16 });
+    });
+
     test('challenger loses and cannot cover 2x rent -> bankruptcy; properties transfer to owner; G.duel already null before the payout', () => {
       const G = freshG();
       G.players[0].character = statChar({ stamina: 1, luck: 0 });
