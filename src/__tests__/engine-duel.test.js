@@ -410,8 +410,12 @@ describe('Duel mechanism — landing interception (Task 3)', () => {
     // Reuses golden-messages' 'rent-and-tax' scenario precondition VERBATIM
     // (same seed 96, same character picks, same script up to P1's rent-due
     // landing) — with the golden gate (duel disabled) that same script
-    // produces "Paid $11 rent to Marcus Grayline for Oriental Ave." at this
+    // produces "Paid $12 rent to Marcus Grayline for Oriental Ave." at this
     // exact step (fixtures/golden-messages.json, 'rent-and-tax' snapshot[5]).
+    // Rent stat modifiers (Task 1, stat-mechanics): Oriental Ave base rent
+    // $12, owner Marcus negotiation 7 -> min(7*0.015, 0.135) = 0.105
+    //   -> 12 * 1.105 = 13.26
+    // payer Sophia charisma 5% off -> 13.26 * 0.95 = 12.597 -> floor = 12.
     // Driven through the REAL boardgame.io Client (not direct move
     // invocation) so the assertion on G.turnPhase AFTER the move returns is
     // an honest proof that the Task 2 clobber-site fix survives Immer's
@@ -423,13 +427,13 @@ describe('Duel mechanism — landing interception (Task 3)', () => {
       client.moves.rollDice();     // P0 rolls 1+5=6, lands on Oriental Ave (unowned)
       client.moves.buyProperty();  // P0 buys Oriental Ave for $93
       client.moves.endTurn();
-      client.moves.rollDice();     // P1 rolls 1+5=6, lands on P0's Oriental Ave -> rent $11 due
+      client.moves.rollDice();     // P1 rolls 1+5=6, lands on P0's Oriental Ave -> rent $12 due
 
       const G = client.getState().G;
 
       // G.duel populated, rent frozen at landing time.
       expect(G.duel).toEqual({
-        phase: 'offer', propertyId: 6, ownerId: '0', challengerId: '1', rent: 11,
+        phase: 'offer', propertyId: 6, ownerId: '0', challengerId: '1', rent: 12,
       });
       // Behavioral clobber-fix proof: turnPhase is STILL 'duel' after the
       // move has fully returned (rollDice's own tail would otherwise set it
@@ -445,7 +449,7 @@ describe('Duel mechanism — landing interception (Task 3)', () => {
       const offered = G.events.filter(e => e.type === 'duel_offered');
       expect(offered).toHaveLength(1);
       expect(offered[0].actor).toBe('1');
-      expect(offered[0].data).toEqual({ propertyId: 6, ownerId: '0', rent: 11 });
+      expect(offered[0].data).toEqual({ propertyId: 6, ownerId: '0', rent: 12 });
 
       // duel_offered's formatter returns null (Task 1) — no "Paid $X rent" line either.
       expect(G.messages.some(m => /rent/i.test(m))).toBe(false);
@@ -926,7 +930,8 @@ describe('Duel mechanism — end-to-end via real seeded Client (Task 4)', () => 
 
   // Reuses Task 3's landing-interception scenario verbatim (seed 96,
   // marcus-grayline P0 / sophia-ember P1, P0 buys Oriental Ave, P1 lands on
-  // it owing $11 rent) through to full duel resolution.
+  // it owing $12 rent — see Task 3's test above for the stat-modifier
+  // arithmetic) through to full duel resolution.
   function playToResolution() {
     const client = makeClient(2, 96);
     client.moves.selectCharacter('marcus-grayline'); // P0 (owner)
@@ -948,10 +953,10 @@ describe('Duel mechanism — end-to-end via real seeded Client (Task 4)', () => 
     expect(resolved).toHaveLength(1);
     expect(resolved[0].data.challengerRoll.dice).toHaveLength(2);
     expect(resolved[0].data.defenderRoll.dice).toHaveLength(2);
-    expect(resolved[0].data.rent).toBe(11); // final-review Fix 2a — real-Client proof
+    expect(resolved[0].data.rent).toBe(12); // final-review Fix 2a — real-Client proof
     const initiated = G.events.filter(e => e.type === 'duel_initiated');
     expect(initiated).toHaveLength(1);
-    expect(initiated[0].data).toEqual({ propertyId: 6, ownerId: '0', rent: 11 });
+    expect(initiated[0].data).toEqual({ propertyId: 6, ownerId: '0', rent: 12 });
   });
 
   test('same seed run twice -> byte-identical dice arrays and outcome (determinism through the real PRNG)', () => {
@@ -1005,7 +1010,7 @@ describe('Duel mechanism — mid-duel save/load soft-lock (final-review Fix 1)',
   });
 
   // Reuses the Task 3/Task 4 seed-96 scenario verbatim: P0 (marcus-grayline)
-  // buys Oriental Ave, P1 (sophia-ember) lands on it owing $11 rent -> offer.
+  // buys Oriental Ave, P1 (sophia-ember) lands on it owing $12 rent -> offer.
   function playToOffer() {
     const client = makeClient(2, 96);
     client.moves.selectCharacter('marcus-grayline'); // P0 (owner)

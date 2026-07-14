@@ -337,6 +337,23 @@ export function calculateRent(G, space, diceTotal, visitor) {
   // Season rent modifier (Winter: +20%)
   rent = applyEconMods(G, 'rent', rent);
 
+  // Owner-side stat modifiers (spec §1-2): tech building-rent bonus, gated
+  // on the space having a building (level >= 1), then negotiation
+  // rent-collection bonus, which always applies. Both read the property
+  // OWNER's stats (not the visitor's) and run BEFORE the payer's charisma
+  // discount below.
+  const ownerPlayer = G.players[owner];
+  if (ownerPlayer && ownerPlayer.character) {
+    const buildingLevel = G.buildings[space.id] || 0;
+    if (buildingLevel > 0) {
+      const techBonus = Math.min(ownerPlayer.character.stats.tech * RULES.stats.tech.buildingRentBonusPerPoint, RULES.stats.tech.buildingRentBonusMax);
+      rent *= (1 + techBonus);
+    }
+
+    const negBonus = Math.min(ownerPlayer.character.stats.negotiation * RULES.stats.negotiation.rentCollectedBonusPerPoint, RULES.stats.negotiation.rentCollectedBonusMax);
+    rent *= (1 + negBonus);
+  }
+
   // Character effects only apply if visitor has a character
   if (visitor && visitor.character) {
     // Charisma stat discount
@@ -344,7 +361,6 @@ export function calculateRent(G, space, diceTotal, visitor) {
     rent *= (1 - chaDiscount);
 
     // Knox regulated property: bonus rent
-    const ownerPlayer = G.players[owner];
     if (ownerPlayer.regulatedProperty === space.id) {
       rent *= (1 + RULES.passives.enforcer.regulatedRentBonus);
     }

@@ -72,10 +72,20 @@ export const RULES = {
     negotiation: {
       buyDiscountPerPoint: 0.01,
       buyDiscountMax: 0.10,
+      // Rent-collection bonus (owner-side, mirrors charisma's payer-side
+      // discount). Hook: calculateRent — applies to the property OWNER's
+      // negotiation stat, always (no building-level gate).
+      rentCollectedBonusPerPoint: 0.015,
+      rentCollectedBonusMax: 0.135,
     },
     tech: {
       upgradeDiscountPerPoint: 0.02,
       upgradeDiscountMax: 0.20,
+      // Building-rent bonus (owner-side). Hook: calculateRent — applies to
+      // the property OWNER's tech stat, only when the space's building
+      // level >= 1 (gated per spec §1.2).
+      buildingRentBonusPerPoint: 0.02,
+      buildingRentBonusMax: 0.18,
     },
     charisma: {
       rentDiscountPerPoint: 0.01,

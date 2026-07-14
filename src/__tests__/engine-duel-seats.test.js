@@ -30,9 +30,12 @@
 // sequence of dice a seeded game produces is identical regardless of how
 // many players there are, VERIFIED empirically for numPlayers=3 during this
 // task: P0's and P1's rolls are byte-identical to the numPlayers=2 case),
-// landing P1 back on Oriental Ave (P0's) for $11 rent due -> RULES.duel.enabled
-// converts that into a duel OFFER: {phase:'offer', propertyId:6, ownerId:'0',
-// challengerId:'1', rent:11} — instead of auto-paying. A third seat (numPlayers
+// landing P1 back on Oriental Ave (P0's) for $12 rent due (base rent $12,
+// owner Marcus negotiation 7 -> +10.5% [min(7*0.015,0.135)=0.105] -> 13.26,
+// payer Sophia charisma 5% off -> 13.26*0.95=12.597 -> floor 12; stat-mechanics
+// Task 1) -> RULES.duel.enabled converts that into a duel OFFER:
+// {phase:'offer', propertyId:6, ownerId:'0',
+// challengerId:'1', rent:12} — instead of auto-paying. A third seat (numPlayers
 // 3, tests use 'lia-startrace' for P2) never rolls or acts before the offer
 // exists, so its presence doesn't perturb the P0/P1 dice sequence at all.
 import { makeSeatClients, dispatchAndWait, snapshotG } from './helpers/seatClients';
@@ -58,7 +61,7 @@ function tradeProposal(targetPlayerId, overrides = {}) {
 
 // Drives `numPlayers` seat clients (via makeSeatClients) through character
 // selection + P0 buying Oriental Ave + P1 landing back on it, resolving with
-// G.duel = {phase:'offer', propertyId:6, ownerId:'0', challengerId:'1', rent:11}.
+// G.duel = {phase:'offer', propertyId:6, ownerId:'0', challengerId:'1', rent:12}.
 // `patchG` (optional) threads straight through to makeSeatClients' own
 // setup-time hook (see seatClients.js's header for what survives onBegin —
 // ownership/properties/mortgaged/rerollsLeft all do, which is all this file
@@ -146,8 +149,10 @@ describe('Duel mechanism — cross-seat authorization matrix (Task 8)', () => {
     expect(declined).toHaveLength(1);
     expect(declined[0].actor).toBe('0'); // owner
 
-    expect(declineState.G.players[1].money).toBe(p1Before - 11); // challenger pays single rent
-    expect(declineState.G.players[0].money).toBe(p0Before + 11);
+    // rent = 12 (Oriental Ave base $12, owner Marcus negotiation +10.5%,
+    // payer Sophia charisma -5% -> floor(12*1.105*0.95)=12; see file header)
+    expect(declineState.G.players[1].money).toBe(p1Before - 12); // challenger pays single rent
+    expect(declineState.G.players[0].money).toBe(p0Before + 12);
 
     expect(declineState.ctx.activePlayers).toEqual({ '1': null }); // envelope restored
 
@@ -328,7 +333,9 @@ describe('Duel mechanism — cross-seat authorization matrix (Task 8)', () => {
       client.moves.rollDice();     // P1 -> Oriental Ave (P0's) -> duel offer
 
       const G = client.getState().G;
-      expect(G.duel).toEqual({ phase: 'offer', propertyId: 6, ownerId: '0', challengerId: '1', rent: 11 });
+      // rent = 12 (Oriental Ave base $12, owner Marcus negotiation +10.5%,
+      // payer Sophia charisma -5% -> floor(12*1.105*0.95)=12; see file header)
+      expect(G.duel).toEqual({ phase: 'offer', propertyId: 6, ownerId: '0', challengerId: '1', rent: 12 });
       return client;
     }
 

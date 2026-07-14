@@ -1,5 +1,5 @@
 import { INVALID_MOVE } from 'boardgame.io/core';
-import { Monopoly, computeAffinityBonus } from '../Game';
+import { Monopoly, computeAffinityBonus, calculateRent } from '../Game';
 import { UPGRADE_COST_MULTIPLIERS, RENT_MULTIPLIERS, SEASONS, SEASON_CHANGE_INTERVAL } from '../constants';
 import { BOARD_SPACES, COLOR_GROUPS, CHARACTERS, getCharacterById, getStartingMoney, RULES } from '../../mods/dominion';
 
@@ -30,6 +30,19 @@ function freshGWithChars(char0Id = 'albert-victor', char1Id = 'lia-startrace') {
   if (char1.stats.stamina >= 7) G.players[1].rerollsLeft = 1;
   G.phase = 'play';
   return G;
+}
+
+// Helper: minimal character fixture with explicit stats (all default to 0
+// unless overridden) — isolates one stat's contribution to calculateRent
+// without pulling in a real character's other nonzero stats. Mirrors the
+// statChar pattern used in engine-duel.test.js.
+function statChar(stats) {
+  return {
+    id: 'test-char', name: 'Test Character', passive: {},
+    stats: {
+      capital: 0, luck: 0, negotiation: 0, charisma: 0, tech: 0, stamina: 0, ...stats,
+    },
+  };
 }
 
 // Helper: die value from random.Number()
@@ -692,8 +705,13 @@ describe('bankruptcy', () => {
     Monopoly.moves.rollDice(G, ctx);
 
     expect(G.players[0].bankrupt).toBe(true);
-    // Sophia gets rent (100 * 0.96 charisma = 96) + $100 crisis bonus
-    expect(G.players[1].money).toBe(sophiaMoney + 96 + 100);
+    // Boardwalk base rent $100, no building (level 0, no tech bonus).
+    // Sophia (owner) negotiation 5: min(5*0.015, 0.135) = 0.075
+    //   -> 100 * 1.075 = 107.5
+    // Knox (payer) charisma 4: min(4*0.01, 0.10) = 0.04
+    //   -> 107.5 * 0.96 = 103.2 -> floor = 103 rent
+    // + $100 crisis (arbitrageur) bonus = 203
+    expect(G.players[1].money).toBe(sophiaMoney + 103 + 100);
   });
 });
 
@@ -940,8 +958,11 @@ describe('character passives', () => {
 
     Monopoly.moves.rollDice(G, ctx);
 
-    // Base rent $4, +20% regulation = $4.8 → Math.floor = $4 (Charisma 5 = 5% off → $4 * 0.95 * 1.20 = $4.56 → 4)
-    // Actually: rent = 4, charisma 5% off → 3.8, then *1.20 → 4.56 → floor = 4
+    // Base rent $4, no building (no tech bonus). Knox (owner) negotiation 6:
+    // min(6*0.015, 0.135) = 0.09 -> 4 * 1.09 = 4.36
+    // Lia (payer) charisma 5% off -> 4.36 * 0.95 = 4.142
+    // Knox regulation +20% -> 4.142 * 1.20 = 4.9704 -> floor = 4
+    // Loose bound only (>=4) — exact value not asserted here.
     expect(G.players[0].position).toBe(1);
     const rent = p0Money + 200 - G.players[0].money; // +200 from GO
     expect(rent).toBeGreaterThanOrEqual(4);
@@ -1354,6 +1375,112 @@ describe('rent with buildings', () => {
     // No rent paid, just GO bonus
     expect(G.players[0].money).toBe(1500 + 200);
     expect(G.players[1].money).toBe(1500);
+  });
+});
+
+// ─── RENT STAT MODIFIERS (negotiation collection + tech building) ──
+// Order of operations (spec §2): base × mapMechanics × season ×
+// (1 + tech building bonus [owner, level>=1 only]) × (1 + negotiation
+// collection bonus [owner, always]), THEN the payer's charisma discount,
+// with the single existing final Math.floor. All tests here call
+// calculateRent directly for precise isolation of each term.
+describe('rent stat modifiers (negotiation collection + tech building)', () => {
+  test('negotiation 9 (at cap): owner collects x1.135, no building', () => {
+    const G = freshG();
+    G.ownership[39] = '1'; // Boardwalk, base rent $100, owned alone (no monopoly)
+    G.players[1].character = statChar({ negotiation: 9 });
+    const visitor = G.players[0]; // no character -> isolates owner-side bonus only
+
+    const space = G.board.spaces[39];
+    // 9 * 0.015 = 0.135 (exactly at cap) -> 100 * 1.135 = 113.5 -> floor 113
+    expect(calculateRent(G, space, 0, visitor)).toBe(113);
+  });
+
+  test('tech 9 (at cap) + building level 1: owner collects x1.18', () => {
+    const G = freshG();
+    G.ownership[39] = '1';
+    G.buildings[39] = 1; // house: rentMultipliers[1] = 3 -> 100 * 3 = 300
+    G.players[1].character = statChar({ tech: 9 });
+    const visitor = G.players[0];
+
+    const space = G.board.spaces[39];
+    // base(building) = 100 * 3 = 300. tech 9 * 0.02 = 0.18 (at cap)
+    // -> 300 * 1.18 = 354
+    expect(calculateRent(G, space, 0, visitor)).toBe(354);
+  });
+
+  test('building level 0: high tech grants no bonus', () => {
+    const G = freshG();
+    G.ownership[39] = '1'; // no G.buildings entry -> level 0
+    G.players[1].character = statChar({ tech: 9 });
+    const visitor = G.players[0];
+
+    const space = G.board.spaces[39];
+    // Gated on level >= 1; level 0 -> base rent $100 unchanged
+    expect(calculateRent(G, space, 0, visitor)).toBe(100);
+  });
+
+  test('combined: owner negotiation 9 + tech 9 (building lvl 1) with payer charisma 9', () => {
+    const G = freshG();
+    G.ownership[39] = '1';
+    G.buildings[39] = 1;
+    G.players[1].character = statChar({ negotiation: 9, tech: 9 });
+    const visitor = G.players[0];
+    visitor.character = statChar({ charisma: 9 });
+
+    const space = G.board.spaces[39];
+    // base(building) = 100 * 3 = 300
+    // x tech (1 + 0.18)          = 300 * 1.18  = 354
+    // x negotiation (1 + 0.135)  = 354 * 1.135 = 401.79
+    // x charisma-payer (1 - 0.09) [9*0.01=0.09, under 0.10 cap]
+    //                              = 401.79 * 0.91 = 365.6289 -> floor 365
+    expect(calculateRent(G, space, 0, visitor)).toBe(365);
+  });
+
+  test('zero-stat characters: byte-identical to todays amounts (no building)', () => {
+    const G = freshG();
+    G.ownership[1] = '1'; // Mediterranean Ave, base rent $4
+    G.players[1].character = statChar({});
+    const visitor = G.players[0];
+    visitor.character = statChar({});
+
+    const space = G.board.spaces[1];
+    expect(calculateRent(G, space, 0, visitor)).toBe(4);
+  });
+
+  test('zero-stat characters: byte-identical to todays amounts (with building)', () => {
+    const G = freshG();
+    G.ownership[1] = '1';
+    G.buildings[1] = 1; // house: $4 * 3 = $12
+    G.players[1].character = statChar({});
+    const visitor = G.players[0];
+    visitor.character = statChar({});
+
+    const space = G.board.spaces[1];
+    expect(calculateRent(G, space, 0, visitor)).toBe(12);
+  });
+
+  test('caps enforced: negotiation 10 does not exceed the 0.135 cap', () => {
+    const G = freshG();
+    G.ownership[39] = '1';
+    G.players[1].character = statChar({ negotiation: 10 }); // uncapped would be 0.15
+    const visitor = G.players[0];
+
+    const space = G.board.spaces[39];
+    // Capped at 0.135 -> same result as the negotiation:9 test -> 113
+    expect(calculateRent(G, space, 0, visitor)).toBe(113);
+  });
+
+  test('caps enforced: tech 10 does not exceed the 0.18 cap', () => {
+    const G = freshG();
+    G.ownership[39] = '1';
+    G.buildings[39] = 1;
+    G.players[1].character = statChar({ tech: 10 }); // uncapped would be 0.20
+    const visitor = G.players[0];
+
+    const space = G.board.spaces[39];
+    // Capped at 0.18 -> same result as the tech:9 test -> 354
+    expect(calculateRent(G, space, 0, visitor)).toBe(354);
   });
 });
 
@@ -2221,9 +2348,13 @@ describe('RULES config coverage', () => {
 
     expect(renn.position).toBe(3);
     // Base rent for space 3 (Baltic Avenue, rent $4), monopoly 2x = $8
-    // Renn has charisma 6, discount = min(6*0.01, 0.10) = 0.06
+    // (no building, so no tech bonus). Albert (owner) negotiation 8:
+    // min(8*0.015, 0.135) = 0.12 -> 8 * 1.12 = 8.96
+    // Renn (payer) has charisma 6, discount = min(6*0.01, 0.10) = 0.06
     const baseRent = BOARD_SPACES[3].rent * RULES.core.monopolyRentMultiplier;
-    const afterCharisma = baseRent * (1 - Math.min(renn.character.stats.charisma * RULES.stats.charisma.rentDiscountPerPoint, RULES.stats.charisma.rentDiscountMax));
+    const negBonus = Math.min(albert.character.stats.negotiation * RULES.stats.negotiation.rentCollectedBonusPerPoint, RULES.stats.negotiation.rentCollectedBonusMax);
+    const afterNegotiation = baseRent * (1 + negBonus);
+    const afterCharisma = afterNegotiation * (1 - Math.min(renn.character.stats.charisma * RULES.stats.charisma.rentDiscountPerPoint, RULES.stats.charisma.rentDiscountMax));
     const afterBreaker = afterCharisma * (1 - RULES.passives.breaker.monopolyRentReduction);
     const expectedRent = Math.floor(afterBreaker);
     expect(expectedRent).toBeGreaterThan(0);
