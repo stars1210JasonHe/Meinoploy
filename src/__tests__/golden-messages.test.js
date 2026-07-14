@@ -106,8 +106,8 @@ const SCENARIOS = {
     ],
   },
 
-  // Lia Startrace (luck 8, meets redrawThreshold): first roll draws a
-  // redraw-eligible card (pauses in turnPhase 'card'); accept it as-is.
+  // Lia Startrace (luck 8 -> floor(8/redrawDivisor=3) = 2 redraws): first roll
+  // draws a redraw-eligible card (pauses in turnPhase 'card'); accept it as-is.
   'card-draw-accept': {
     seed: 14,
     numPlayers: 2,

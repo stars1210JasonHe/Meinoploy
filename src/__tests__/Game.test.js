@@ -2144,6 +2144,30 @@ describe('luck card-gain amplifier + stamina loss reduction (Task 2)', () => {
     expect(G.players[0].money).toBe(1000 - 76);
   });
 
+  test('financier passive stacks with stamina AT CAP: two sequential floors, passive log stays isolated', () => {
+    // Whole-branch review addition: the only real financier (Albert Victor)
+    // has stamina 4, so the roster never exercises financier x stamina with
+    // stamina AT the 0.24 cap — synthetic fixture covers the stacked maximum.
+    const G = freshG();
+    const char = statChar({ stamina: 8 }); // 8*0.03 = 0.24, exactly at cap
+    char.passive = { id: 'financier' };
+    G.players[0].character = char;
+    G.players[0].money = 1000;
+    G.pendingCard = { card: { text: 'Fine', action: 'pay', value: 100 }, deck: 'chance', cardIndex: 0 };
+
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+
+    // Stage 1 (financier, own isolated floor): floor(100 * (1 - 0.20)) = 80
+    // Stage 2 (stamina cap, separate final floor): floor(80 * (1 - 0.24)) = floor(60.8) = 60
+    expect(G.players[0].money).toBe(1000 - 60);
+    // financier's passive_triggered logs ITS OWN stage only ($80), never the
+    // stamina-stacked final charge (Task 2 §2b isolation contract).
+    const passive = G.events.find(e => e.type === 'passive_triggered');
+    expect(passive.data.amount).toBe(80);
+    const applied = G.events.find(e => e.type === 'card_applied' && e.data.action === 'pay');
+    expect(applied.data.effect.amount).toBe(60);
+  });
+
   test('stamina 8: tax space reduced 24%', () => {
     const G = freshG();
     G.players[0].character = statChar({ stamina: 8 });
