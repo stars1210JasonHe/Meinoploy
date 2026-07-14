@@ -12,7 +12,7 @@
 // the tournament runs games SERIALLY. Do not parallelize match runs.
 
 import { Client } from 'boardgame.io/client';
-import { Monopoly, setActiveMap } from '../Game';
+import { Monopoly, setActiveMap, setActiveMod } from '../Game';
 import { loadWorld } from '../world-loader';
 import { loadMap } from '../map-loader';
 import { ARCHETYPES } from '../../mods/dominion/atlas/archetypes';
@@ -43,16 +43,47 @@ function raiseEventLogCapForSim() {
   RULES.core.eventLogCap = 1e9;
 }
 
-// Ingest a map so Monopoly.setup reads the right board. world===null/undefined =>
-// the classic map. CRITICAL: we EXPLICITLY load + setActiveMap(classic) rather than
-// relying on Game.js's default _pendingMap — because setActiveMap mutates a module
-// global, a prior atlas game leaves Terra's board active, so a later classic game
-// would silently run on the wrong board (observed). Always setting the active map
-// makes each game self-contained regardless of run order. Mirrors App.setMap().
-// Returns the expanded mapData for inspection.
-function ingestMap(world) {
+// Ingest a map so Monopoly.setup reads the right board. CRITICAL: we EXPLICITLY
+// assert the board every game rather than relying on Game.js's module globals —
+// a prior atlas game leaves Terra's board active, so a later game would silently
+// run on the wrong board (observed). Mirrors App.setMap(). Exported for tests.
+//
+// sim --mod wave (spec 2026-07-14 §1):
+//   { modId }   assert the ACTIVE MOD first — the engine validates
+//               selectCharacter against the active mod's roster and reads its
+//               RULES, so any non-dominion game needs this regardless of map
+//               source. setActiveMod resets RULES from the pristine clone
+//               (wiping run-level overrides like the CLI's duel flag), so it
+//               re-runs ONLY when the asserted mod actually changes.
+//   { world }   atlas world object (loadWorld)
+//   { mapJson } classic map.json object (loadMap) — NEW; the old ingest
+//               hardcoded dominion's classic map.json for every non-world
+//               game, CLOBBERING any other mod's board.
+//   modId only  the mod's own default board (setActiveMod reseeds _pendingMap).
+//   (none)      legacy dominion classic (byte-identical old behavior).
+// Back-compat: a bare atlas world object (pre-wave callers) still works.
+let _lastModAsserted = null;
+export function ingestMap(source) {
+  const src = source && (source.world || source.mapJson || source.modId !== undefined)
+    ? source
+    : { world: source || null };
+  if (src.modId && src.modId !== _lastModAsserted) {
+    setActiveMod(src.modId);
+    _lastModAsserted = src.modId;
+  }
   raiseEventLogCapForSim();
-  const mapData = world ? loadWorld(world, ARCHETYPES) : loadMap(classicMapJson);
+  if (src.world) {
+    const mapData = loadWorld(src.world, ARCHETYPES);
+    setActiveMap(mapData);
+    return mapData;
+  }
+  if (src.mapJson) {
+    const mapData = loadMap(src.mapJson);
+    setActiveMap(mapData);
+    return mapData;
+  }
+  if (src.modId) return null; // mod default board, seeded by setActiveMod above
+  const mapData = loadMap(classicMapJson);
   setActiveMap(mapData);
   return mapData;
 }
@@ -82,10 +113,10 @@ function selectCharacters(client, charIds) {
 //   seed:     boardgame.io PRNG seed (string) — full reproducibility.
 //   maxTurns: hard turn cap; on cap, highest standings.score wins (D5 tiebreak).
 export function runMatch(spec) {
-  const { world = null, charIds, policies, seed, maxTurns = 300 } = spec;
+  const { world = null, mapJson = null, modId = null, charIds, policies, seed, maxTurns = 300 } = spec;
   const numPlayers = charIds.length;
 
-  ingestMap(world);
+  ingestMap({ world, mapJson, modId });
 
   // SEED FIDELITY FIX (deviation from the spike's claim): in boardgame.io v0.45 the
   // `seed` *Client option* is NOT threaded into the game PRNG — passing it there

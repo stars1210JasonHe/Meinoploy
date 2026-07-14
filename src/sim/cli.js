@@ -1,7 +1,12 @@
-// Atlas Balance Sim — CLI entry (plan D6). Run via `npm run sim -- <args>`.
+// Mod Balance Sim — CLI entry (plan D6 + sim --mod wave 2026-07-14).
+// Run via `npm run sim -- <args>`, e.g. `npm run sim -- --mod sanguo-excerpt`.
 //
-//   --games N        number of games per pairing (default 200)
-//   --map NAME       'classic' (default) | 'terra-circuit'
+//   --mod ID         any registered mod (default 'dominion'); roster, rules and
+//                    maps resolve from the mods/index.js registry
+//   --seats N        melee seat cap (default 8; rosters above it rotate windows)
+//   --games N        number of games per pairing/melee (default 200)
+//   --map NAME       mod world id | mod map id | 'default'; dominion keeps the
+//                    legacy names: 'classic' (default) | 'terra-circuit' | ...
 //   --seed S         base seed string (default '1'); per-game seed = `${seed}:${i}`
 //   --maxTurns N     per-game turn cap (default 300)
 //   --chars a,b      explicit two character ids for the character pairing; omit to
@@ -22,8 +27,10 @@
 // duel mechanism) a per-character duel-cashflow table whenever any duel
 // occurred during the run — silent otherwise, so duel-free runs are unchanged.
 
-import { runTournament, runStrategyTournament } from './tournament';
-import { CHARACTERS_DATA } from '../../mods/dominion/characters-data';
+import { runTournament, runStrategyTournament, runMeleeTournament } from './tournament';
+import { ingestMap } from './match';
+import { resolveMod, resolveMap, pickFitExtremes, pickBalancedPair } from './mod-resolve';
+import { MODS } from '../../mods';
 import { loadWorld } from '../world-loader';
 import { ARCHETYPES } from '../../mods/dominion/atlas/archetypes';
 import { TERRA_CIRCUIT } from '../../mods/dominion/atlas/worlds/terra-circuit';
@@ -42,13 +49,15 @@ const WORLDS = {
 // --- arg parsing (no deps) -----------------------------------------------------
 function parseArgs(argv) {
   const out = {
+    mod: 'dominion',
     games: 200,
-    map: 'classic',
+    map: null, // resolved against the mod (dominion defaults to legacy 'classic')
     seed: '1',
     maxTurns: 300,
     chars: null,
     strategy: 'camper',
     duelPolicy: 'never',
+    seats: 8, // melee seat cap
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -56,6 +65,7 @@ function parseArgs(argv) {
     const key = a.slice(2);
     const val = argv[i + 1];
     switch (key) {
+      case 'mod': out.mod = val; i++; break;
       case 'games': out.games = parseInt(val, 10); i++; break;
       case 'map': out.map = val; i++; break;
       case 'seed': out.seed = String(val); i++; break;
@@ -63,35 +73,15 @@ function parseArgs(argv) {
       case 'chars': out.chars = val.split(',').map(s => s.trim()); i++; break;
       case 'strategy': out.strategy = val; i++; break;
       case 'duel-policy': out.duelPolicy = val; i++; break;
+      case 'seats': out.seats = parseInt(val, 10); i++; break;
       default: break;
     }
   }
   return out;
 }
 
-// --- character fit scoring -----------------------------------------------------
-// "Fit" = dot product of a character's stats with the map's trait leans. Higher =
-// the character's strengths align with what the map rewards. With traits not yet
-// affecting gameplay this is a raw-balance proxy (spec D4 acknowledges this).
-// Classic has no traits → fall back to total-stat extremes (highest vs lowest sum),
-// which is still a meaningful balance probe.
-function statSum(c) {
-  const s = c.stats;
-  return s.capital + s.luck + s.negotiation + s.charisma + s.tech + s.stamina;
-}
-
-function fitScore(c, traits) {
-  if (!traits || Object.keys(traits).length === 0) return statSum(c);
-  let dot = 0;
-  for (const stat in traits) dot += (c.stats[stat] || 0) * traits[stat];
-  return dot;
-}
-
-function pickFitExtremes(traits) {
-  const scored = CHARACTERS_DATA.map(c => ({ id: c.id, score: fitScore(c, traits) }));
-  scored.sort((a, b) => b.score - a.score);
-  return { best: scored[0], worst: scored[scored.length - 1] };
-}
+// --- character fit scoring: moved to ./mod-resolve (pickFitExtremes over any
+// roster; classic maps fall back to stat-sum extremes as before). --------------
 
 // --- table rendering -----------------------------------------------------------
 function pct(x) { return (x * 100).toFixed(1) + '%'; }
@@ -118,6 +108,29 @@ function printTournament(title, result) {
 // run. Silent (prints nothing) when duelTable is null — i.e. every duel-free
 // run (RULES.duel.enabled off, or every contestant's duelPolicy is 'never')
 // leaves this function's output identical to before Task 7 existed.
+// Melee table (sim --mod wave): per-character win rate vs the 1/seats baseline.
+function printMelee(result, charNameById) {
+  console.log('\n=== MELEE: full roster, per-character win rates ===');
+  console.log(`seats=${result.seats}  games=${result.games}  baseline=${pct(1 / result.seats)}`);
+  const w = Math.max.apply(null, result.rows.map(r => (charNameById[r.charId] || r.charId).length).concat([9]));
+  console.log('  ' + 'character'.padEnd(w) + '   played   wins   win%     95% CI            flag');
+  result.rows.forEach(r => {
+    const name = charNameById[r.charId] || r.charId;
+    const ci = `[${pct(r.ciLow)}, ${pct(r.ciHigh)}]`;
+    console.log('  ' + name.padEnd(w) + '   '
+      + String(r.games).padStart(6) + '   '
+      + String(r.wins).padStart(4) + '   '
+      + pct(r.winPct).padStart(6) + '   '
+      + ci.padEnd(18)
+      + (r.flag ? r.flag.toUpperCase() : ''));
+  });
+  const flagged = result.rows.filter(r => r.flag);
+  console.log(flagged.length
+    ? `  BALANCE: ${flagged.length} character(s) outside the baseline band — see flags above.`
+    : '  BALANCE: no character significantly above/below the baseline band.');
+  printDuelStats(result.duelTable);
+}
+
 function printDuelStats(duelTable) {
   if (!duelTable || duelTable.length === 0) return;
   console.log('  --- duel cashflow ---');
@@ -137,11 +150,28 @@ function printDuelStats(duelTable) {
 // --- main ----------------------------------------------------------------------
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const world = WORLDS[args.map];
-  if (world === undefined) {
-    console.error(`Unknown map "${args.map}". Known: ${Object.keys(WORLDS).join(', ')}`);
+
+  // --mod resolution (sim --mod wave): roster/rules/maps come from the registry.
+  let mod, resolved;
+  try {
+    mod = resolveMod(MODS, args.mod);
+    const mapName = args.map != null ? args.map : (mod.id === 'dominion' ? 'classic' : null);
+    resolved = resolveMap(mod, mapName, WORLDS);
+  } catch (e) {
+    console.error(e.message);
     process.exit(1);
   }
+  const { world, mapJson } = resolved;
+  // dominion runs never pass modId → the legacy classic-map ingest path stays
+  // byte-identical to the pre---mod CLI. Non-dominion runs always assert their
+  // mod (roster validation + rules live on the active mod).
+  const modId = mod.id === 'dominion' ? null : mod.id;
+  const roster = mod.characters;
+  // Prime the ingest ONCE before run-level RULES overrides (duel flag below) —
+  // ingestMap's memo then never re-runs setActiveMod (which would reset RULES
+  // from pristine) mid-run.
+  ingestMap({ modId, world, mapJson });
+
   const isAtlas = !!world;
   const traits = isAtlas ? loadWorld(world, ARCHETYPES).traits : null;
 
@@ -167,21 +197,38 @@ function main() {
     console.log(`Note: --duel-policy=${args.duelPolicy} forces RULES.duel.enabled=true for this run.`);
   }
 
-  console.log('Atlas Balance Simulator');
-  console.log(`map=${args.map}  games=${args.games}  baseSeed=${args.seed}  maxTurns=${args.maxTurns}`);
+  console.log('Mod Balance Simulator');
+  console.log(`mod=${mod.id} (${mod.name})  map=${resolved.label}  games=${args.games}  baseSeed=${args.seed}  maxTurns=${args.maxTurns}`);
+
+  const charNameById = {};
+  roster.forEach(c => { charNameById[c.id] = c.name; });
+
+  // --- Question 0 (sim --mod wave): MELEE — every character's win rate ---
+  if (roster.length >= 2) {
+    const melee = runMeleeTournament({
+      roster: roster.map(c => c.id),
+      games: args.games,
+      seed: args.seed,
+      world, mapJson, modId,
+      maxTurns: args.maxTurns,
+      maxSeats: args.seats,
+      policy: { routeStrategy: isAtlas ? args.strategy : 'camper', duelPolicy: args.duelPolicy },
+    });
+    printMelee(melee, charNameById);
+  }
 
   // --- Question 1: best-fit vs worst-fit CHARACTER (charId varies; policy held) ---
   let bestId, worstId;
   if (args.chars && args.chars.length === 2) {
     [bestId, worstId] = args.chars;
   } else {
-    const ext = pickFitExtremes(traits);
+    const ext = pickFitExtremes(roster, traits);
     bestId = ext.best.id;
     worstId = ext.worst.id;
   }
   const charStrategy = isAtlas ? args.strategy : 'camper'; // strategy is a no-op on loop
   const charResult = runTournament({
-    world,
+    world, mapJson, modId,
     contestants: [
       { label: `best-fit:${bestId}`, charId: bestId, policy: { routeStrategy: charStrategy, duelPolicy: args.duelPolicy } },
       { label: `worst-fit:${worstId}`, charId: worstId, policy: { routeStrategy: charStrategy, duelPolicy: args.duelPolicy } },
@@ -198,11 +245,13 @@ function main() {
   // SINGLE fixed assignment would confound strategy with character strength.
   // runStrategyTournament removes that: it runs both character→strategy assignments
   // and tallies by STRATEGY, so the character edge nets out (see tournament.js).
-  if (isAtlas) {
-    const charX = 'cassian-echo';      // two distinct, stat-balanced (sum 34) carriers;
-    const charY = 'renn-chainbreaker'; // identity is averaged out by the swap, not relied on.
+  if (isAtlas && roster.length >= 2) {
+    // Two distinct, stat-balanced carriers from THIS mod's roster (was
+    // hardcoded to dominion's cassian/renn — which don't exist on other mods);
+    // identity is averaged out by the swap, not relied on.
+    const [charX, charY] = pickBalancedPair(roster);
     const stratResult = runStrategyTournament({
-      world,
+      world, mapJson, modId,
       charA: charX,
       charB: charY,
       strategyA: 'camper',

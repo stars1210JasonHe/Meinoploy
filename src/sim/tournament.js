@@ -163,6 +163,8 @@ export function duelStatsTable(acc) {
 export function runTournament(spec) {
   const {
     world = null,
+    mapJson = null,
+    modId = null,
     contestants,
     games = 200,
     baseSeed = '1',
@@ -189,6 +191,8 @@ export function runTournament(spec) {
 
     const result = runMatch({
       world,
+      mapJson,
+      modId,
       charIds,
       policies,
       seed: `${baseSeed}:${i}`,
@@ -221,7 +225,7 @@ export function runTournament(spec) {
     decisive,
     draws,
     seed: baseSeed,
-    world: world ? world.id : 'classic',
+    world: world ? world.id : (mapJson ? mapJson.id : (modId ? `${modId}:default` : 'classic')),
     duelTable,
   };
 }
@@ -247,6 +251,8 @@ function winsOf(result, label) {
 export function runStrategyTournament(spec) {
   const {
     world = null,
+    mapJson = null,
+    modId = null,
     charA, charB,
     strategyA = 'camper', strategyB = 'tourer',
     policyBase = {},
@@ -259,14 +265,14 @@ export function runStrategyTournament(spec) {
   const half = Math.floor(games / 2);
 
   const subA = runTournament({
-    world, games: half, baseSeed: `${baseSeed}:cAB`, maxTurns,
+    world, mapJson, modId, games: half, baseSeed: `${baseSeed}:cAB`, maxTurns,
     contestants: [
       { label: strategyA, charId: charA, policy: polFor(strategyA) },
       { label: strategyB, charId: charB, policy: polFor(strategyB) },
     ],
   });
   const subB = runTournament({
-    world, games: games - half, baseSeed: `${baseSeed}:cBA`, maxTurns,
+    world, mapJson, modId, games: games - half, baseSeed: `${baseSeed}:cBA`, maxTurns,
     contestants: [
       { label: strategyA, charId: charB, policy: polFor(strategyA) },
       { label: strategyB, charId: charA, policy: polFor(strategyB) },
@@ -288,7 +294,7 @@ export function runStrategyTournament(spec) {
     decisive,
     draws: subA.draws + subB.draws,
     seed: baseSeed,
-    world: world ? world.id : 'classic',
+    world: world ? world.id : (mapJson ? mapJson.id : (modId ? `${modId}:default` : 'classic')),
     // Per-character-assignment breakdown, so a reviewer can see the confound is gone:
     // if strategyA wins regardless of which character carries it, the effect is real.
     subTournaments: { charAisStrategyA: subA.table, charBisStrategyA: subB.table },
@@ -381,7 +387,7 @@ export function meleeAggregate(tally, seats, gate) {
 // strategy). Returns { rows, seats, games, duelTable } — duel cashflow folded
 // across games exactly like the 1v1 tournaments.
 export function runMeleeTournament(spec) {
-  const { roster, games, seed, world = null, maxTurns = 300, policy = null, maxSeats = 8, gate } = spec;
+  const { roster, games, seed, world = null, mapJson = null, modId = null, maxTurns = 300, policy = null, maxSeats = 8, gate } = spec;
   const order = seededShuffle(roster, `${seed}:melee-roster`);
   const seats = Math.min(maxSeats, order.length);
   const tally = {};
@@ -390,6 +396,8 @@ export function runMeleeTournament(spec) {
     const charIds = meleeWindow(order, seats, i);
     const result = runMatch({
       world,
+      mapJson,
+      modId,
       charIds,
       policies: charIds.map(() => policy || {}),
       seed: `${seed}:melee:${i}`,
