@@ -97,7 +97,6 @@ export const STRINGS = {
     'results.finalStandings': '最终排名',
     'results.propsWord': '处地产',
     'results.playAgain': '再来一局',
-    'results.playerFallback': '玩家 {n}',
 
     // Saves modal (showSavesModal).
     'saves.empty': '暂无存档，游戏进行中可保存进度。',
@@ -140,6 +139,206 @@ export const STRINGS = {
     'entry.plural.map.other': '{n} 张地图',
     'entry.plural.character.one': '{n} 位角色',
     'entry.plural.character.other': '{n} 位角色',
+
+    // ── Task 3 (in-game HUD + modals) ────────────────────────────────────
+    // Shared display-only fallback name for a seat with no picked character
+    // (renamed from Task 2's results.playerFallback — same string, now used by
+    // turnbox/duel/auction/trade/legend/tile-owner too). DISPLAY ONLY: wire
+    // values (Lobby.joinMatch's playerName) stay fixed English — see Lobby.js.
+    'game.playerFallback': '玩家 {n}',
+    // Topbar SAVE button transient feedback (saveGame).
+    'topbar.rolling': '掷骰中…',
+    'topbar.saved': '已保存 ✓',
+
+    // game-chrome.js: chip strip badges + chip detail popover.
+    'chip.turn': '行动中',
+    'chip.out': '出局',
+    'chip.jail': '入狱',
+    'chip.bot': 'BOT',
+    'chip.inJail': '狱中',
+    'chip.deeds': '{n} 处地契',
+    // Ability tags shown in the chip detail popover (renderPlayerInfo).
+    'chip.abilityReroll': '重掷 {n}',
+    'chip.abilityRedraw': '重抽 {n}',
+    'chip.abilityReg': '管控：{name}',
+
+    // game-chrome.js: right-drawer tab rail + footer.
+    'drawer.log': '日志',
+    'drawer.chat': '聊天',
+    'drawer.manage': '管理',
+    'drawer.exitToMenu': '退出至主菜单',
+
+    // Legend cartouche (game-chrome legendHtml title + App._renderLegend rows).
+    // Pre-i18n these were the reskin's bilingual labels — bilingual = zh value.
+    'legend.title': 'LEGEND · 图例',
+    'legend.neutral': '中立 NEUTRAL',
+    'legend.territory': '领地 · {name}',
+    'legend.tax': '税赋 TAX',
+    'legend.chance': '机变 CHANCE',
+
+    // Tile detail popover (game-chrome tileDetailHtml + App helpers).
+    'tile.unowned': '无主',
+    'tile.mortgaged': '已抵押',
+    'tile.rent': '租金 {rent}',
+    'tile.rentVaries': '视骰点而定',
+    'tile.pop': '人口 {v}',
+    'tile.gdp': 'GDP {v}',
+    'tile.fame': '声望 {v}',
+    // Space-type labels (App._tileTypeLabel; unknown types fall through to raw data).
+    'tile.type.go': '起点',
+    'tile.type.property': '地产',
+    'tile.type.railroad': '铁路',
+    'tile.type.utility': '公共事业',
+    'tile.type.tax': '税赋',
+    'tile.type.chance': '机变',
+    'tile.type.community': '命运',
+    'tile.type.jail': '监狱',
+    'tile.type.goToJail': '入狱',
+    'tile.type.parking': '免费停车',
+    // Corner/special flavor lines (App._tileFlavorText).
+    'tile.flavor.go': '每次经过起点即可领取薪金。',
+    'tile.flavor.jail': '路过参观，或是服刑中。',
+    'tile.flavor.goToJail': '直接入狱，不得经过起点。',
+    'tile.flavor.chance': '抽取一张机变卡。',
+    'tile.flavor.community': '抽取一张命运卡。',
+    'tile.flavor.tax': '向国库缴纳 ${amount}。',
+    'tile.flavor.parkingPot': '免费停车——领取累积的奖池。',
+    'tile.flavor.parking': '免费停车，稍作休整。',
+
+    // Season box (App._centerHtml). Season NAMES are engine-level constants
+    // (every mod ships summer/autumn/winter/spring today), so they localize as
+    // UI-layer names keyed by season id; an unknown/custom id falls back to the
+    // mod's own season.name data at the call site.
+    'season.label': '季节',
+    'season.name.summer': '夏季',
+    'season.name.autumn': '秋季',
+    'season.name.winter': '冬季',
+    'season.name.spring': '春季',
+    'season.cycle': '周期 {c}/{i}',
+    'season.turnOf': '回合 {n}/{max}',
+    'season.turn': '第 {n} 回合',
+    'season.fxPrice': '地价 {v}%',
+    'season.fxRent': '租金 +{v}%',
+    'season.fxTax': '税赋 x{v}',
+    'season.fxPot': '奖池 ${v}',
+
+    // Turnbox / board-center slot (renderTurnbox + _centerSlotHtml).
+    'turnbox.total': '总点 {n}',
+    'turnbox.doubles': '对子 x{n}',
+    'turnbox.buy': '购买',
+    'turnbox.pass': '放弃',
+    'turnbox.auction': '拍卖',
+    'turnbox.waiting': '等待中…',
+    'turnbox.chooseRoute': '选择路线——点击高亮的城市',
+    'turnbox.payFineOrRoll': '缴纳罚金，或掷出对子越狱',
+    'turnbox.rollToMove': '掷骰移动',
+    'turnbox.resolveCard': '请处理你的卡牌',
+    'turnbox.auctionInProgress': '拍卖进行中',
+    'turnbox.tradePending': '交易待定',
+    'turnbox.endWhenReady': '可随时结束回合',
+    'turnbox.botThinking': 'BOT 思考中…',
+    'turnbox.waitingFor': '等待<br/>{name}…',
+    'turnbox.rollForDoubles': '掷骰越狱',
+    'turnbox.payFine': '缴纳罚金 ${fine}',
+    'turnbox.rollDice': '掷骰子',
+    'turnbox.reroll': '重掷（{n}）',
+    // Reskin bilingual action labels — bilingual = zh value, plain EN = en value.
+    'turnbox.trade': '交易 TRADE',
+    'turnbox.endTurn': '结束回合 END TURN',
+
+    // Event card modal + turnbox fallback buttons (renderStateModal).
+    // Deck names reuse tile.type.chance / tile.type.community.
+    'card.accept': '接受',
+    'card.redraw': '重抽',
+    'card.tagGood': '鸿运',
+    'card.tagBad': '厄运',
+    'card.tagNeutral': '事件',
+
+    // Rent duel (offer/response prompts + result strip).
+    'duel.offer': '{name} — 租金 {rent}',
+    'duel.payRent': '支付租金',
+    'duel.duel': '决斗！',
+    'duel.cooldown': '还需 {n} 回合才能再次决斗',
+    'duel.waitingResponse': '等待 {name} 应战…',
+    'duel.challenged': '{owner}，有人为 {space} 向你发起决斗！',
+    'duel.stakes': '胜：免除 {challenger} 的租金。负：支付 {mult} 倍租金（{amount}）。',
+    'duel.fight': '应战',
+    'duel.decline': '拒绝',
+    'duel.vs': '对',
+    'duel.wins': '{name} 获胜（{outcome}）',
+    'duel.outcomeWaived': '租金免除',
+    'duel.outcomePaid': '已支付 {mult} 倍租金',
+
+    // Manage drawer (renderManage).
+    'manage.title': '资产管理',
+    'manage.unmort': '赎回 ${v}',
+    'manage.mort': '抵押 ${v}',
+    'manage.sell': '出售',
+
+    // Event-log drawer header (renderMessages — CONTENT is Task 4's scope).
+    'log.title': '事件日志',
+
+    // Auction modal (renderStateModal).
+    'auction.title': '拍卖',
+    'auction.listed': '标价 ${price}',
+    'auction.currentBid': '当前出价',
+    'auction.toBid': '轮到出价：{name}',
+    'auction.stateLeads': '领先',
+    'auction.stateIn': '在局',
+    'auction.pass': '弃权',
+    'auction.bid': '出价',
+
+    // Trade: pending-proposal modal + builder modal.
+    'trade.proposalTitle': '交易提案',
+    'trade.nothing': '无',
+    'trade.cancel': '取消',
+    'trade.reject': '拒绝',
+    'trade.accept': '接受',
+    'trade.builderTitle': '发起交易',
+    'trade.noDeeds': '没有可交易的地契',
+    'trade.cash': '现金',
+    'trade.with': '交易对象',
+    'trade.balance': '平衡',
+    'trade.balPos': '对你有利',
+    'trade.balNeg': '对方占优',
+    'trade.balEven': '大致均衡',
+    'trade.send': '发出提案',
+
+    // AI settings modal (showAISettings).
+    'aiset.title': 'AI 角色设置',
+    'aiset.connected': '已连接',
+    'aiset.noKey': '未设置 API 密钥',
+    'aiset.apiKeyLabel': 'OpenAI API 密钥',
+    'aiset.keyHint': '仅保存在你的浏览器本地，只发送给 OpenAI。',
+    'aiset.verbosityLabel': '回应频率',
+    'aiset.verbosityOff': '关闭（无 AI 回应）',
+    'aiset.verbosityMajor': '仅重大事件（推荐）',
+    'aiset.verbosityAll': '所有事件',
+    'aiset.verbosityHint': '角色评论游戏事件的频率。',
+    'aiset.cancel': '取消',
+    'aiset.save': '保存',
+
+    // Chat panel + AI chatter strip (AI REPLIES themselves are data, untouched).
+    'chat.title': '聊天',
+    'chat.start': '和 {name} 聊聊吧',
+    'chat.you': '你',
+    'chat.setKey': '请先在 AI 设置中填写 API 密钥',
+    'chat.typeMessage': '输入消息…',
+    'chat.send': '发送',
+    'chat.noResponse': '（没有回应——请检查 AI 设置中的 API 密钥）',
+    'ai.thinking': '思考中…',
+    'ai.councilChatter': '议会杂谈',
+
+    // Lore modal section labels (showLoreModal — lore TEXT is mod data).
+    // Pre-i18n these were hardcoded zh; they keep those values here.
+    'lore.background': '背景故事',
+    'lore.noticed': '被议会注意到的原因',
+    'lore.joining': '加入维度议会',
+    'lore.style': '行事风格',
+    'lore.relationships': '与其他代理人的关系',
+    'lore.passive': '被动技能',
+    'lore.startingCapital': '起始资金',
+    'lore.close': '关闭',
   },
   en: {
     'topbar.load': 'LOAD',
@@ -217,7 +416,6 @@ export const STRINGS = {
     'results.finalStandings': 'FINAL STANDINGS',
     'results.propsWord': 'PROPS',
     'results.playAgain': 'PLAY AGAIN',
-    'results.playerFallback': 'Player {n}',
 
     // Saves modal (showSavesModal).
     'saves.empty': 'No saved games. Save during play to see them here.',
@@ -259,6 +457,191 @@ export const STRINGS = {
     'entry.plural.map.other': '{n} MAPS',
     'entry.plural.character.one': '{n} CHARACTER',
     'entry.plural.character.other': '{n} CHARACTERS',
+
+    // ── Task 3 (in-game HUD + modals) — see the zh table for section notes ──
+    'game.playerFallback': 'Player {n}',
+    'topbar.rolling': 'ROLLING…',
+    'topbar.saved': 'SAVED ✓',
+
+    // game-chrome.js: chip strip badges + chip detail popover.
+    'chip.turn': 'TURN',
+    'chip.out': 'OUT',
+    'chip.jail': 'JAIL',
+    'chip.bot': 'BOT',
+    'chip.inJail': 'IN JAIL',
+    'chip.deeds': '{n} DEEDS',
+    'chip.abilityReroll': 'REROLL {n}',
+    'chip.abilityRedraw': 'REDRAW {n}',
+    'chip.abilityReg': 'REG: {name}',
+
+    // game-chrome.js: right-drawer tab rail + footer.
+    'drawer.log': 'LOG',
+    'drawer.chat': 'CHAT',
+    'drawer.manage': 'MANAGE',
+    'drawer.exitToMenu': 'EXIT TO MENU',
+
+    // Legend cartouche — en gets the plain-EN half of the reskin's bilingual labels.
+    'legend.title': 'LEGEND',
+    'legend.neutral': 'NEUTRAL',
+    'legend.territory': 'TERRITORY · {name}',
+    'legend.tax': 'TAX',
+    'legend.chance': 'CHANCE',
+
+    // Tile detail popover.
+    'tile.unowned': 'UNOWNED',
+    'tile.mortgaged': 'MORTGAGED',
+    'tile.rent': 'RENT {rent}',
+    'tile.rentVaries': 'varies by dice',
+    'tile.pop': 'POP {v}',
+    'tile.gdp': 'GDP {v}',
+    'tile.fame': 'FAME {v}',
+    'tile.type.go': 'GO',
+    'tile.type.property': 'PROPERTY',
+    'tile.type.railroad': 'RAILROAD',
+    'tile.type.utility': 'UTILITY',
+    'tile.type.tax': 'TAX',
+    'tile.type.chance': 'CHANCE',
+    'tile.type.community': 'COMMUNITY CHEST',
+    'tile.type.jail': 'JAIL',
+    'tile.type.goToJail': 'GO TO JAIL',
+    'tile.type.parking': 'FREE PARKING',
+    'tile.flavor.go': 'Collect on every pass around the board.',
+    'tile.flavor.jail': 'Just visiting — or serving time.',
+    'tile.flavor.goToJail': 'Go directly to jail. Do not pass GO.',
+    'tile.flavor.chance': 'Draw a Chance card.',
+    'tile.flavor.community': 'Draw a Community Chest card.',
+    'tile.flavor.tax': 'Pay ${amount} to the treasury.',
+    'tile.flavor.parkingPot': 'Free Parking — collects the accumulated pot.',
+    'tile.flavor.parking': 'Free Parking. Take a breather.',
+
+    // Season box.
+    'season.label': 'SEASON',
+    'season.name.summer': 'Summer',
+    'season.name.autumn': 'Autumn',
+    'season.name.winter': 'Winter',
+    'season.name.spring': 'Spring',
+    'season.cycle': 'Cycle {c}/{i}',
+    'season.turnOf': 'T{n}/{max}',
+    'season.turn': 'Turn {n}',
+    'season.fxPrice': 'PRICE {v}%',
+    'season.fxRent': 'RENT +{v}%',
+    'season.fxTax': 'TAX x{v}',
+    'season.fxPot': 'POT ${v}',
+
+    // Turnbox / board-center slot.
+    'turnbox.total': 'TOTAL {n}',
+    'turnbox.doubles': 'DOUBLES x{n}',
+    'turnbox.buy': 'BUY',
+    'turnbox.pass': 'PASS',
+    'turnbox.auction': 'AUCTION',
+    'turnbox.waiting': 'WAITING…',
+    'turnbox.chooseRoute': 'CHOOSE YOUR ROUTE — CLICK A HIGHLIGHTED CITY',
+    'turnbox.payFineOrRoll': 'PAY FINE OR ROLL FOR DOUBLES',
+    'turnbox.rollToMove': 'ROLL TO MOVE',
+    'turnbox.resolveCard': 'RESOLVE YOUR CARD',
+    'turnbox.auctionInProgress': 'AUCTION IN PROGRESS',
+    'turnbox.tradePending': 'TRADE PENDING',
+    'turnbox.endWhenReady': 'END TURN WHEN READY',
+    'turnbox.botThinking': 'BOT thinking…',
+    'turnbox.waitingFor': 'WAITING FOR<br/>{name}…',
+    'turnbox.rollForDoubles': 'ROLL FOR DOUBLES',
+    'turnbox.payFine': 'PAY ${fine} FINE',
+    'turnbox.rollDice': 'ROLL DICE',
+    'turnbox.reroll': 'REROLL ({n})',
+    'turnbox.trade': 'TRADE',
+    'turnbox.endTurn': 'END TURN',
+
+    // Event card modal + turnbox fallback buttons.
+    'card.accept': 'ACCEPT',
+    'card.redraw': 'REDRAW',
+    'card.tagGood': 'FORTUNE',
+    'card.tagBad': 'HAZARD',
+    'card.tagNeutral': 'EVENT',
+
+    // Rent duel.
+    'duel.offer': '{name} — rent {rent}',
+    'duel.payRent': 'PAY RENT',
+    'duel.duel': 'DUEL!',
+    'duel.cooldown': 'Duel available in {n} turn(s)',
+    'duel.waitingResponse': 'WAITING FOR {name} TO RESPOND…',
+    'duel.challenged': '{owner}, you are challenged for {space}!',
+    'duel.stakes': 'Win: rent waived for {challenger}. Lose: pay {mult}&times; rent ({amount}).',
+    'duel.fight': 'FIGHT',
+    'duel.decline': 'DECLINE',
+    'duel.vs': 'vs',
+    'duel.wins': '{name} WINS ({outcome})',
+    'duel.outcomeWaived': 'rent waived',
+    'duel.outcomePaid': '{mult}&times; rent paid',
+
+    // Manage drawer.
+    'manage.title': 'MANAGE',
+    'manage.unmort': 'UNMORT ${v}',
+    'manage.mort': 'MORT ${v}',
+    'manage.sell': 'SELL',
+
+    // Event-log drawer header.
+    'log.title': 'EVENT LOG',
+
+    // Auction modal.
+    'auction.title': 'AUCTION',
+    'auction.listed': 'Listed ${price}',
+    'auction.currentBid': 'CURRENT BID',
+    'auction.toBid': 'TO BID: {name}',
+    'auction.stateLeads': 'LEADS',
+    'auction.stateIn': 'IN',
+    'auction.pass': 'PASS',
+    'auction.bid': 'BID',
+
+    // Trade: pending-proposal modal + builder modal.
+    'trade.proposalTitle': 'TRADE PROPOSAL',
+    'trade.nothing': 'Nothing',
+    'trade.cancel': 'CANCEL',
+    'trade.reject': 'REJECT',
+    'trade.accept': 'ACCEPT',
+    'trade.builderTitle': 'PROPOSE TRADE',
+    'trade.noDeeds': 'No deeds to offer',
+    'trade.cash': 'CASH',
+    'trade.with': 'TRADE WITH',
+    'trade.balance': 'BALANCE',
+    'trade.balPos': 'IN YOUR FAVOUR',
+    'trade.balNeg': 'FAVOURS RIVAL',
+    'trade.balEven': 'ROUGHLY EVEN',
+    'trade.send': 'PROPOSE',
+
+    // AI settings modal.
+    'aiset.title': 'AI CHARACTER SETTINGS',
+    'aiset.connected': 'CONNECTED',
+    'aiset.noKey': 'NO API KEY',
+    'aiset.apiKeyLabel': 'OpenAI API Key',
+    'aiset.keyHint': 'Stored locally in your browser. Sent only to OpenAI.',
+    'aiset.verbosityLabel': 'Response Verbosity',
+    'aiset.verbosityOff': 'Off (no AI responses)',
+    'aiset.verbosityMajor': 'Major events only (recommended)',
+    'aiset.verbosityAll': 'All events',
+    'aiset.verbosityHint': 'How often characters comment on game events.',
+    'aiset.cancel': 'CANCEL',
+    'aiset.save': 'SAVE',
+
+    // Chat panel + AI chatter strip.
+    'chat.title': 'CHAT',
+    'chat.start': 'Start a conversation with {name}',
+    'chat.you': 'YOU',
+    'chat.setKey': 'Set API key in AI settings',
+    'chat.typeMessage': 'Type a message…',
+    'chat.send': 'SEND',
+    'chat.noResponse': '(No response — check your API key in AI settings)',
+    'ai.thinking': 'Thinking…',
+    'ai.councilChatter': 'COUNCIL CHATTER',
+
+    // Lore modal section labels.
+    'lore.background': 'BACKGROUND',
+    'lore.noticed': 'WHY THE COUNCIL TOOK NOTICE',
+    'lore.joining': 'JOINING THE COUNCIL',
+    'lore.style': 'STYLE OF PLAY',
+    'lore.relationships': 'RELATIONSHIPS',
+    'lore.passive': 'PASSIVE',
+    'lore.startingCapital': 'STARTING CAPITAL',
+    'lore.close': 'CLOSE',
   },
 };
 

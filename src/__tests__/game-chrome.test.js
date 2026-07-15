@@ -1,4 +1,11 @@
 import { chipHtml, chipDetailHtml, drawerShellHtml, tokenVisual, tileDetailHtml, nodeGlow, NODE_GLOW_COLORS, legendHtml } from '../game-chrome';
+import { setLocale } from '../i18n';
+
+// Task 3 (i18n): game-chrome now renders its static labels through t(), whose
+// module default is 'zh'. Pin 'en' before every test so the pre-existing
+// English-literal assertions below stay locale-explicit rather than relying on
+// incidental module state (same convention as entry-ui.test.js).
+beforeEach(() => setLocale('en'));
 
 const P = { idx: 0, name: 'Hammurabi', title: 'The Lawgiver', color: '#e8a33d',
   money: '$3,085', portraitUrl: '/portraits/h.png', isCurrent: true, isBankrupt: false,
@@ -58,6 +65,16 @@ describe('chipHtml', () => {
     expect(chipHtml({ ...P, isBot: false })).not.toContain('pcard__bot');
     expect(chipHtml(P)).not.toContain('pcard__bot');
   });
+  // Task 3 (i18n): badges resolve through t() at build time.
+  test('zh locale: status badges render the zh labels', () => {
+    setLocale('zh');
+    const h = chipHtml({ ...P, isCurrent: true, isBankrupt: true, inJail: true, isBot: true });
+    expect(h).toContain('行动中'); // TURN
+    expect(h).toContain('出局');   // OUT
+    expect(h).toContain('入狱');   // JAIL
+    expect(h).toContain('BOT');    // acronym, same in both locales
+    expect(h).not.toContain('TURN');
+  });
 });
 
 describe('tokenVisual', () => {
@@ -100,6 +117,17 @@ describe('drawerShellHtml', () => {
   test('LOG tab button carries a hidden unread dot placeholder', () => {
     const h = drawerShellHtml();
     expect(h).toMatch(/data-tab="log">LOG<span class="drawer-tabs__dot" hidden><\/span>/);
+  });
+  // Task 3 (i18n): tab labels + exit-foot resolve through t() at build time —
+  // App.js's onLocaleChange hook rebuilds the tab rail from this builder.
+  test('zh locale: tab labels and exit-foot are zh; dot placeholder survives', () => {
+    setLocale('zh');
+    const h = drawerShellHtml();
+    expect(h).toMatch(/data-tab="log">日志<span class="drawer-tabs__dot" hidden><\/span>/);
+    expect(h).toContain('data-tab="chat">聊天');
+    expect(h).toContain('data-tab="manage">管理');
+    expect(h).toContain('退出至主菜单');
+    expect(h).not.toContain('EXIT TO MENU');
   });
 });
 
@@ -233,6 +261,22 @@ describe('tileDetailHtml', () => {
     const h = tileDetailHtml(OWNED);
     expect(h).toContain('<span class="propchip">Sibling A</span>');
   });
+
+  // Task 3 (i18n): static labels (UNOWNED/MORTGAGED/RENT/POP/GDP/FAME) route
+  // through t(); the DATA fields around them (name, rentText value, stats
+  // values) stay untranslated pass-throughs.
+  test('zh locale: static labels flip, data fields stay verbatim', () => {
+    setLocale('zh');
+    const h = tileDetailHtml({ ...OWNED, ownerName: null, ownerPortraitUrl: null, mortgaged: true });
+    expect(h).toContain('无主');       // UNOWNED
+    expect(h).toContain('已抵押');     // MORTGAGED
+    expect(h).toContain('租金 $120'); // RENT {rent} — value untouched
+    expect(h).toContain('人口 600K'); // POP {v}
+    expect(h).toContain('声望 82');   // FAME {v}
+    expect(h).toContain('Stuttgart Fracture'); // name = data
+    expect(h).not.toContain('UNOWNED');
+    expect(h).not.toContain('MORTGAGED');
+  });
 });
 
 // R1c: node glow chooser — color + BLOOM_CONTEXTS key per space type/ownership
@@ -283,5 +327,13 @@ describe('legendHtml', () => {
     expect(h).toContain('legend__title');
     expect(h).toContain('legend__row--player');
     expect(h).toContain('legend__row--neutral');
+  });
+  // Task 3 (i18n): the reskin's bilingual cartouche title is the ZH value;
+  // en gets the plain-EN half. Row labels arrive pre-localized from App.
+  test('title localizes: en plain LEGEND, zh keeps the bilingual cartouche', () => {
+    expect(legendHtml(ROWS)).toContain('>LEGEND<'); // en (pinned) — no 图例
+    expect(legendHtml(ROWS)).not.toContain('图例');
+    setLocale('zh');
+    expect(legendHtml(ROWS)).toContain('LEGEND · 图例');
   });
 });

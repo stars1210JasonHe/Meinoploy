@@ -431,12 +431,12 @@ class MonopolyBoard {
             <div id="game-area" class="screen screen--game" style="display:none;">
               <div class="game__chips"><div id="player-info"></div></div>
               <div class="game__center">
-                <div id="route-banner">CHOOSE YOUR ROUTE — CLICK A HIGHLIGHTED CITY</div>
+                <div id="route-banner">${t('turnbox.chooseRoute')}</div>
                 <div id="board" class="board"></div>
                 <div id="dice-overlay" style="display:none;"><span class="bigdie" data-die="1"></span><span class="bigdie" data-die="2"></span></div>
                 <div id="drawer-tabs"></div>
               </div>
-              <div class="game__actionbar wr-panel wr-notch"><div id="turnbox"></div><button id="btn-fs" class="pix-btn pix-btn--default">FULL</button></div>
+              <div class="game__actionbar wr-panel wr-notch"><div id="turnbox"></div><button id="btn-fs" class="pix-btn pix-btn--default">${t('topbar.full')}</button></div>
             </div>
             <div id="drawer" class="drawer" hidden></div>
           </div>
@@ -692,6 +692,31 @@ class MonopolyBoard {
       this.exitBtnEl.textContent = t('topbar.exit');
       if (this._paintMute) this._paintMute();
       if (this._paintFs) this._paintFs();
+      // Task 3: in-game chrome that is stamped ONCE in createLayout (not per-update)
+      // needs its own repaint here — the update()/screen-renderer re-render below
+      // rebuilds everything else, but not these three:
+      //  - the route banner (static template text, CSS-toggled visibility only);
+      //  - the drawer TAB RAIL (drawerShellHtml runs once; innerHTML rebuild is safe —
+      //    the tab click handler is DELEGATED on the persistent #drawer-tabs container —
+      //    but it resets the active-highlight and unread-dot state, so both are re-applied
+      //    right after);
+      //  - #btn-exit-foot (its onclick was wired once in createLayout, so only its LABEL
+      //    is repainted — never its node, or the wiring would be lost).
+      const routeBannerEl = document.getElementById('route-banner');
+      if (routeBannerEl) routeBannerEl.textContent = t('turnbox.chooseRoute');
+      if (this.drawerTabsEl) {
+        const rebuilt = document.createElement('div');
+        rebuilt.innerHTML = drawerShellHtml();
+        this.drawerTabsEl.innerHTML = rebuilt.querySelector('.drawer-tabs').innerHTML;
+        if (this._drawerOpen && this._drawerTab) {
+          this.drawerTabsEl.querySelectorAll('.drawer-tabs__btn').forEach(b => {
+            b.classList.toggle('drawer-tabs__btn--active', b.dataset.tab === this._drawerTab);
+          });
+        }
+        this._updateLogUnread();
+      }
+      const exitFootEl = document.getElementById('btn-exit-foot');
+      if (exitFootEl) exitFootEl.textContent = t('drawer.exitToMenu');
       // T1-review Finding 1: update()'s first line unconditionally clears this._rolling
       // (the dice-tumble animation lock — see the "Release the dice-roll lock" comment at
       // the top of update()), which must only happen on a REAL post-roll state tick. A LANG
@@ -1648,11 +1673,21 @@ class MonopolyBoard {
     const season = SEASONS[G.seasonIndex];
     const interval = RULES.seasons.changeInterval;
     const cycle = (G.totalTurns % interval) + 1;
+    // Season NAMES: the summer/autumn/winter/spring cycle is an engine constant
+    // (identical `seasons.list` ids in every mod today), so the DISPLAY name is a
+    // UI-layer lookup keyed by season id (localization brief: seasons are engine
+    // constants, not mod flavor). A custom future season id has no season.name.*
+    // key — t() then returns the key itself, which the !== check below catches to
+    // fall back to the mod's own season.name DATA (t()'s once-per-session missing-
+    // key warn doubles as the "this mod ships an unnamed custom season" dev hint).
+    const seasonNameKey = 'season.name.' + season.id;
+    const seasonNameLookup = t(seasonNameKey);
+    const seasonName = seasonNameLookup === seasonNameKey ? season.name : seasonNameLookup;
     let fx = '';
-    if (season.priceMod !== 1.0) fx += `<span>PRICE ${season.priceMod > 1 ? '+' : ''}${Math.round((season.priceMod - 1) * 100)}%</span>`;
-    if (season.rentMod !== 1.0) fx += `<span>RENT +${Math.round((season.rentMod - 1) * 100)}%</span>`;
-    if (season.taxMod !== 1.0) fx += `<span>TAX x${season.taxMod}</span>`;
-    if (RULES.core.freeParkingPot && G.freeParkingPot > 0) fx += `<span>POT $${G.freeParkingPot}</span>`;
+    if (season.priceMod !== 1.0) fx += `<span>${t('season.fxPrice', { v: (season.priceMod > 1 ? '+' : '') + Math.round((season.priceMod - 1) * 100) })}</span>`;
+    if (season.rentMod !== 1.0) fx += `<span>${t('season.fxRent', { v: Math.round((season.rentMod - 1) * 100) })}</span>`;
+    if (season.taxMod !== 1.0) fx += `<span>${t('season.fxTax', { v: season.taxMod })}</span>`;
+    if (RULES.core.freeParkingPot && G.freeParkingPot > 0) fx += `<span>${t('season.fxPot', { v: G.freeParkingPot })}</span>`;
 
     return `
       <div class="board__logo">
@@ -1660,9 +1695,9 @@ class MonopolyBoard {
         <span class="board__logo-sub">${esc(this.mapData.theme.logoSubtitle || 'DOMINION · COUNCIL OF WORLDS')}</span>
       </div>
       <div class="board__season">
-        <span class="board__season-label">SEASON</span>
-        <span class="board__season-val">${esc(season.name)}</span>
-        <span class="board__season-turns">Cycle ${cycle}/${interval}${RULES.core.maxTurns > 0 ? ' · T' + G.totalTurns + '/' + RULES.core.maxTurns : ' · Turn ' + G.totalTurns}</span>
+        <span class="board__season-label">${t('season.label')}</span>
+        <span class="board__season-val">${esc(seasonName)}</span>
+        <span class="board__season-turns">${t('season.cycle', { c: cycle, i: interval })}${RULES.core.maxTurns > 0 ? ' · ' + t('season.turnOf', { n: G.totalTurns, max: RULES.core.maxTurns }) : ' · ' + t('season.turn', { n: G.totalTurns })}</span>
         ${fx ? `<div class="board__season-fx">${fx}</div>` : ''}
       </div>
       <div class="board__centerslot">${this._centerSlotHtml(G, ctx)}</div>
@@ -1676,7 +1711,7 @@ class MonopolyBoard {
     const diceHtml = d
       ? `${dieHtml(d.d1)}${dieHtml(d.d2)}`
       : `${dieHtml(0)}${dieHtml(0)}`;
-    const total = d ? `<div class="centerslot__total">TOTAL ${d.total}${d.isDoubles ? ` · DOUBLES x${G.doublesCount}` : ''}</div>` : '';
+    const total = d ? `<div class="centerslot__total">${t('turnbox.total', { n: d.total })}${d.isDoubles ? ' · ' + t('turnbox.doubles', { n: G.doublesCount }) : ''}</div>` : '';
 
     let body = '';
     if (G.turnPhase === 'duel' && G.duel) {
@@ -1689,20 +1724,20 @@ class MonopolyBoard {
           <div class="cp__name">${esc(space.name)}</div>
           <div class="cp__price">${money(price)}</div>
           <div class="cp__btns">
-            <button class="pix-btn pix-btn--success pix-btn--sm" id="btn-buy">BUY</button>
-            <button class="pix-btn pix-btn--ghost pix-btn--sm" id="btn-pass">${RULES.auction.enabled && RULES.auction.auctionOnPass ? 'AUCTION' : 'PASS'}</button>
+            <button class="pix-btn pix-btn--success pix-btn--sm" id="btn-buy">${t('turnbox.buy')}</button>
+            <button class="pix-btn pix-btn--ghost pix-btn--sm" id="btn-pass">${RULES.auction.enabled && RULES.auction.auctionOnPass ? t('turnbox.auction') : t('turnbox.pass')}</button>
           </div>
         </div>`;
     } else {
       let hint = '';
-      if (!isMyTurn) hint = 'WAITING…';
-      else if (G.awaitingRoute) hint = 'CHOOSE YOUR ROUTE — CLICK A HIGHLIGHTED CITY';
-      else if (player.inJail && !G.hasRolled) hint = 'PAY FINE OR ROLL FOR DOUBLES';
-      else if (!G.hasRolled) hint = 'ROLL TO MOVE';
-      else if (G.pendingCard) hint = 'RESOLVE YOUR CARD';
-      else if (G.auction) hint = 'AUCTION IN PROGRESS';
-      else if (G.trade) hint = 'TRADE PENDING';
-      else hint = 'END TURN WHEN READY';
+      if (!isMyTurn) hint = t('turnbox.waiting');
+      else if (G.awaitingRoute) hint = t('turnbox.chooseRoute');
+      else if (player.inJail && !G.hasRolled) hint = t('turnbox.payFineOrRoll');
+      else if (!G.hasRolled) hint = t('turnbox.rollToMove');
+      else if (G.pendingCard) hint = t('turnbox.resolveCard');
+      else if (G.auction) hint = t('turnbox.auctionInProgress');
+      else if (G.trade) hint = t('turnbox.tradePending');
+      else hint = t('turnbox.endWhenReady');
       body = `<div class="centerslot__hint">${hint}</div>`;
     }
 
@@ -1728,11 +1763,11 @@ class MonopolyBoard {
     const space = this.boardSpaces[duel.propertyId];
     const challenger = G.players[duel.challengerId];
     const owner = G.players[duel.ownerId];
-    const challengerName = challenger.character ? challenger.character.name : `Player ${parseInt(duel.challengerId) + 1}`;
-    const ownerName = owner.character ? owner.character.name : `Player ${parseInt(duel.ownerId) + 1}`;
+    const challengerName = challenger.character ? challenger.character.name : t('game.playerFallback', { n: parseInt(duel.challengerId) + 1 });
+    const ownerName = owner.character ? owner.character.name : t('game.playerFallback', { n: parseInt(duel.ownerId) + 1 });
 
     if (duel.phase === 'offer') {
-      if (!isChallengerTurn) return `<div class="centerslot__hint">WAITING…</div>`;
+      if (!isChallengerTurn) return `<div class="centerslot__hint">${t('turnbox.waiting')}</div>`;
       // blocked via the shared helper (final-review Fix 3 — de-triplication);
       // `cd`/`last` stay local, only needed here for the "N turn(s)" tooltip
       // countdown, which isDuelCooldownBlocked doesn't compute.
@@ -1742,10 +1777,10 @@ class MonopolyBoard {
       const remaining = blocked ? cd - (G.totalTurns - last) : 0;
       return `
         <div class="centerslot__prompt">
-          <div class="cp__name">${esc(space.name)} — rent ${money(duel.rent)}</div>
+          <div class="cp__name">${t('duel.offer', { name: esc(space.name), rent: money(duel.rent) })}</div>
           <div class="cp__btns">
-            <button class="pix-btn pix-btn--success pix-btn--sm" id="btn-payrent">PAY RENT</button>
-            <button class="pix-btn pix-btn--danger pix-btn--sm" id="btn-duel" ${blocked ? `disabled title="Duel available in ${remaining} turn(s)"` : ''}>DUEL!</button>
+            <button class="pix-btn pix-btn--success pix-btn--sm" id="btn-payrent">${t('duel.payRent')}</button>
+            <button class="pix-btn pix-btn--danger pix-btn--sm" id="btn-duel" ${blocked ? `disabled title="${t('duel.cooldown', { n: remaining })}"` : ''}>${t('duel.duel')}</button>
           </div>
         </div>`;
     }
@@ -1753,16 +1788,16 @@ class MonopolyBoard {
     // phase === 'response'
     const isOwnerSeat = !G.enforceSeats || !this.onlinePlayerID || String(this.onlinePlayerID) === String(duel.ownerId);
     if (!isOwnerSeat) {
-      return `<div class="centerslot__hint">WAITING FOR ${esc(ownerName)} TO RESPOND…</div>`;
+      return `<div class="centerslot__hint">${t('duel.waitingResponse', { name: esc(ownerName) })}</div>`;
     }
     const loseAmount = Math.round(RULES.duel.loseMultiplier * duel.rent);
     return `
       <div class="centerslot__prompt">
-        <div class="cp__name">${esc(ownerName)}, you are challenged for ${esc(space.name)}!</div>
-        <div class="cp__info">Win: rent waived for ${esc(challengerName)}. Lose: pay ${RULES.duel.loseMultiplier}&times; rent (${money(loseAmount)}).</div>
+        <div class="cp__name">${t('duel.challenged', { owner: esc(ownerName), space: esc(space.name) })}</div>
+        <div class="cp__info">${t('duel.stakes', { challenger: esc(challengerName), mult: RULES.duel.loseMultiplier, amount: money(loseAmount) })}</div>
         <div class="cp__btns">
-          <button class="pix-btn pix-btn--danger pix-btn--sm" id="btn-fight">FIGHT</button>
-          <button class="pix-btn pix-btn--ghost pix-btn--sm" id="btn-decline">DECLINE</button>
+          <button class="pix-btn pix-btn--danger pix-btn--sm" id="btn-fight">${t('duel.fight')}</button>
+          <button class="pix-btn pix-btn--ghost pix-btn--sm" id="btn-decline">${t('duel.decline')}</button>
         </div>
       </div>`;
   }
@@ -1787,16 +1822,16 @@ class MonopolyBoard {
     const challenger = G.players[challengerId];
     const owner = G.players[ownerId];
     const winner = G.players[winnerId];
-    const challengerName = challenger.character ? challenger.character.name : `Player ${parseInt(challengerId) + 1}`;
-    const ownerName = owner.character ? owner.character.name : `Player ${parseInt(ownerId) + 1}`;
-    const winnerName = winner.character ? winner.character.name : `Player ${parseInt(winnerId) + 1}`;
+    const challengerName = challenger.character ? challenger.character.name : t('game.playerFallback', { n: parseInt(challengerId) + 1 });
+    const ownerName = owner.character ? owner.character.name : t('game.playerFallback', { n: parseInt(ownerId) + 1 });
+    const winnerName = winner.character ? winner.character.name : t('game.playerFallback', { n: parseInt(winnerId) + 1 });
     const cBonus = cr.stamina + cr.luckBonus;
     const dBonus = dr.stamina + dr.luckBonus;
-    const outcomeText = outcome === 'waived' ? 'rent waived' : `${RULES.duel.loseMultiplier}&times; rent paid`;
+    const outcomeText = outcome === 'waived' ? t('duel.outcomeWaived') : t('duel.outcomePaid', { mult: RULES.duel.loseMultiplier });
     return `
       <div class="turnbox__slot">
-        <div class="cp__info">${esc(challengerName)} [${cr.dice[0]}][${cr.dice[1]}]+${cBonus} = ${cr.total} &nbsp;vs&nbsp; ${esc(ownerName)} [${dr.dice[0]}][${dr.dice[1]}]+${dBonus} = ${dr.total}</div>
-        <div class="cp__info">${esc(winnerName)} WINS (${outcomeText})</div>
+        <div class="cp__info">${esc(challengerName)} [${cr.dice[0]}][${cr.dice[1]}]+${cBonus} = ${cr.total} &nbsp;${t('duel.vs')}&nbsp; ${esc(ownerName)} [${dr.dice[0]}][${dr.dice[1]}]+${dBonus} = ${dr.total}</div>
+        <div class="cp__info">${t('duel.wins', { name: esc(winnerName), outcome: outcomeText })}</div>
       </div>`;
   }
 
@@ -1864,16 +1899,17 @@ class MonopolyBoard {
   // or atlas worlds (world-loader.js ROLE_TO_TYPE) can produce.
   _tileTypeLabel(space) {
     switch (space.type) {
-      case 'go': return 'GO';
-      case 'property': return 'PROPERTY';
-      case 'railroad': return 'RAILROAD';
-      case 'utility': return 'UTILITY';
-      case 'tax': return 'TAX';
-      case 'chance': return 'CHANCE';
-      case 'community': return 'COMMUNITY CHEST';
-      case 'jail': return 'JAIL';
-      case 'goToJail': return 'GO TO JAIL';
-      case 'parking': return 'FREE PARKING';
+      case 'go': return t('tile.type.go');
+      case 'property': return t('tile.type.property');
+      case 'railroad': return t('tile.type.railroad');
+      case 'utility': return t('tile.type.utility');
+      case 'tax': return t('tile.type.tax');
+      case 'chance': return t('tile.type.chance');
+      case 'community': return t('tile.type.community');
+      case 'jail': return t('tile.type.jail');
+      case 'goToJail': return t('tile.type.goToJail');
+      case 'parking': return t('tile.type.parking');
+      // Unknown types stay RAW DATA (a mod-authored type string), not a t() key.
       default: return String(space.type || '').toUpperCase();
     }
   }
@@ -1887,13 +1923,13 @@ class MonopolyBoard {
   // same field, different meaning, pre-existing convention, not introduced here).
   _tileFlavorText(space) {
     switch (space.type) {
-      case 'go': return 'Collect on every pass around the board.';
-      case 'jail': return 'Just visiting — or serving time.';
-      case 'goToJail': return 'Go directly to jail. Do not pass GO.';
-      case 'chance': return 'Draw a Chance card.';
-      case 'community': return 'Draw a Community Chest card.';
-      case 'tax': return `Pay $${space.rent || 0} to the treasury.`;
-      case 'parking': return RULES.core.freeParkingPot ? 'Free Parking — collects the accumulated pot.' : 'Free Parking. Take a breather.';
+      case 'go': return t('tile.flavor.go');
+      case 'jail': return t('tile.flavor.jail');
+      case 'goToJail': return t('tile.flavor.goToJail');
+      case 'chance': return t('tile.flavor.chance');
+      case 'community': return t('tile.flavor.community');
+      case 'tax': return t('tile.flavor.tax', { amount: space.rent || 0 });
+      case 'parking': return RULES.core.freeParkingPot ? t('tile.flavor.parkingPot') : t('tile.flavor.parking');
       default: return null;
     }
   }
@@ -1934,7 +1970,7 @@ class MonopolyBoard {
       const ownerPlayer = G.players[Number(owner)];
       const ochar = ownerPlayer && ownerPlayer.character;
       const cchar = ochar && this._clientChar(ochar);
-      ownerName = ochar ? ochar.name : `Player ${Number(owner) + 1}`;
+      ownerName = ochar ? ochar.name : t('game.playerFallback', { n: Number(owner) + 1 });
       ownerPortraitUrl = (cchar && cchar.portrait) || null;
     }
 
@@ -1960,7 +1996,7 @@ class MonopolyBoard {
     let rentText = null;
     if (hasOwner) {
       if (space.type === 'utility') {
-        rentText = 'varies by dice'; // calculateRent's utility branch multiplies by diceTotal — a nominal total here would mislead
+        rentText = t('tile.rentVaries'); // calculateRent's utility branch multiplies by diceTotal — a nominal total here would mislead
       } else {
         // Intentional (per brief, task-3-report.md): rent is computed for the
         // CURRENT PLAYER as the hypothetical visitor, not the tile's owner —
@@ -2033,14 +2069,14 @@ class MonopolyBoard {
   _renderLegend(G, ctx) {
     const el = document.getElementById('board-legend');
     if (!el) return;
-    const rows = [{ color: NODE_GLOW_COLORS.neutral, label: '中立 NEUTRAL', kind: 'neutral' }];
+    const rows = [{ color: NODE_GLOW_COLORS.neutral, label: t('legend.neutral'), kind: 'neutral' }];
     G.players.forEach((p, i) => {
       if (p.bankrupt) return;
-      const name = p.character ? p.character.name : `PLAYER ${i + 1}`;
-      rows.push({ color: this._playerColor(G, i), label: `领地 · ${name}`, kind: 'player' });
+      const name = p.character ? p.character.name : t('game.playerFallback', { n: i + 1 });
+      rows.push({ color: this._playerColor(G, i), label: t('legend.territory', { name }), kind: 'player' });
     });
-    rows.push({ color: NODE_GLOW_COLORS.tax, label: '税赋 TAX', kind: 'tax' });
-    rows.push({ color: NODE_GLOW_COLORS.chance, label: '机变 CHANCE', kind: 'chance' });
+    rows.push({ color: NODE_GLOW_COLORS.tax, label: t('legend.tax'), kind: 'tax' });
+    rows.push({ color: NODE_GLOW_COLORS.chance, label: t('legend.chance'), kind: 'chance' });
     el.innerHTML = legendHtml(rows);
   }
 
@@ -2767,7 +2803,7 @@ class MonopolyBoard {
       const char = player.character;
       const cchar = this._clientChar(char); // portrait-bearing client character (see _clientChar doc comment)
       const color = this._playerColor(G, i);
-      const name = char ? char.name : `Player ${i + 1}`;
+      const name = char ? char.name : t('game.playerFallback', { n: i + 1 });
 
       const isOphelia = char && char.passive.id === 'shadow';
       const hideMoney = isOphelia && !isCurrent;
@@ -2782,9 +2818,9 @@ class MonopolyBoard {
 
       let abilities = [];
       if (char) {
-        if (player.rerollsLeft > 0) abilities.push(`REROLL ${player.rerollsLeft}`);
-        if (player.luckRedraws > 0) abilities.push(`REDRAW ${player.luckRedraws}`);
-        if (player.regulatedProperty !== null && player.regulatedProperty !== undefined) abilities.push(`REG: ${this.boardSpaces[player.regulatedProperty].name}`);
+        if (player.rerollsLeft > 0) abilities.push(t('chip.abilityReroll', { n: player.rerollsLeft }));
+        if (player.luckRedraws > 0) abilities.push(t('chip.abilityRedraw', { n: player.luckRedraws }));
+        if (player.regulatedProperty !== null && player.regulatedProperty !== undefined) abilities.push(t('chip.abilityReg', { name: this.boardSpaces[player.regulatedProperty].name }));
       }
 
       html += chipHtml({
@@ -2820,7 +2856,7 @@ class MonopolyBoard {
     const player = G.players[ctx.currentPlayer];
     const char = player.character;
     const color = this._playerColor(G, ctx.currentPlayer);
-    const name = char ? char.name : `Player ${parseInt(ctx.currentPlayer) + 1}`;
+    const name = char ? char.name : t('game.playerFallback', { n: parseInt(ctx.currentPlayer) + 1 });
     const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
 
     // Horizontal action bar (layout-rebuild Task 4): who-chip carries a real
@@ -2857,7 +2893,7 @@ class MonopolyBoard {
     // either so no button row (jail/roll/card/duel/trade/end-turn) can ever render
     // for a bot seat; humans' turns are completely unaffected by this branch.
     if (this._isBotSeat(deriveActingSeat(G, ctx))) {
-      html += `<div class="turnbox__waiting">BOT 思考中…</div></div>`;
+      html += `<div class="turnbox__waiting">${t('turnbox.botThinking')}</div></div>`;
       this.turnboxEl.innerHTML = html;
       return;
     }
@@ -2869,7 +2905,7 @@ class MonopolyBoard {
     }
 
     if (!isMyTurn) {
-      html += `<div class="turnbox__waiting">WAITING FOR<br/>${esc(name)}…</div></div>`;
+      html += `<div class="turnbox__waiting">${t('turnbox.waitingFor', { name: esc(name) })}</div></div>`;
       this.turnboxEl.innerHTML = html;
       return;
     }
@@ -2889,20 +2925,20 @@ class MonopolyBoard {
     // only the width:100% modifier is removed (no E2E asserts this class —
     // grepped tests/e2e before removing).
     if (player.inJail && !G.hasRolled) {
-      html += `<button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-roll">ROLL FOR DOUBLES</button>`;
-      html += `<button class="pix-btn pix-btn--default" id="btn-jail">PAY $${RULES.core.jailFine} FINE</button>`;
+      html += `<button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-roll">${t('turnbox.rollForDoubles')}</button>`;
+      html += `<button class="pix-btn pix-btn--default" id="btn-jail">${t('turnbox.payFine', { fine: RULES.core.jailFine })}</button>`;
     } else if (!G.hasRolled && G.turnPhase === 'roll') {
-      html += `<button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-roll">ROLL DICE</button>`;
+      html += `<button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-roll">${t('turnbox.rollDice')}</button>`;
     }
 
     // Card accept/redraw (also surfaced in modal; keep buttons here as fallback)
     if (G.pendingCard) {
-      html += `<div class="turnbox__btnrow"><button class="pix-btn pix-btn--success" id="btn-accept-card">ACCEPT</button><button class="pix-btn pix-btn--default" id="btn-redraw-card">REDRAW</button></div>`;
+      html += `<div class="turnbox__btnrow"><button class="pix-btn pix-btn--success" id="btn-accept-card">${t('card.accept')}</button><button class="pix-btn pix-btn--default" id="btn-redraw-card">${t('card.redraw')}</button></div>`;
     }
 
     // Reroll
     if (G.hasRolled && player.rerollsLeft > 0 && !G.canBuy && !G.pendingCard && G.turnPhase === 'done') {
-      html += `<button class="pix-btn pix-btn--default" id="btn-reroll">REROLL (${player.rerollsLeft})</button>`;
+      html += `<button class="pix-btn pix-btn--default" id="btn-reroll">${t('turnbox.reroll', { n: player.rerollsLeft })}</button>`;
     }
 
     // Duel resolution result strip (review fix — see _duelResultStripHtml doc
@@ -2922,8 +2958,8 @@ class MonopolyBoard {
       && G.players.filter(p => p.id !== ctx.currentPlayer && !p.bankrupt).length > 0 && player.properties.length > 0;
     const canEnd = G.hasRolled && !G.canBuy && !G.pendingCard && !G.trade && !G.auction && G.turnPhase === 'done';
     html += `<div class="turnbox__btnrow">`;
-    if (canTrade) html += `<button class="pix-btn pix-btn--default" id="btn-propose-trade">交易 TRADE</button>`;
-    html += `<button class="pix-btn pix-btn--primary" id="btn-end" ${canEnd ? '' : 'disabled'}>结束回合 END TURN &#9656;</button>`;
+    if (canTrade) html += `<button class="pix-btn pix-btn--default" id="btn-propose-trade">${t('turnbox.trade')}</button>`;
+    html += `<button class="pix-btn pix-btn--primary" id="btn-end" ${canEnd ? '' : 'disabled'}>${t('turnbox.endTurn')} &#9656;</button>`;
     html += `</div>`;
 
     html += `</div>`;
@@ -2949,7 +2985,7 @@ class MonopolyBoard {
 
       if (mortgaged) {
         const cost = Math.floor(space.price * RULES.core.unmortgageRate);
-        actions += `<button class="pix-btn pix-btn--default pix-btn--sm btn-unmortgage" data-pid="${pid}">UNMORT $${cost}</button>`;
+        actions += `<button class="pix-btn pix-btn--default pix-btn--sm btn-unmortgage" data-pid="${pid}">${t('manage.unmort', { v: cost })}</button>`;
       } else {
         if (space.type === 'property' && gk && this.colorGroups[gk]) {
           const groupIds = this.colorGroups[gk];
@@ -2967,7 +3003,7 @@ class MonopolyBoard {
             const maxLevel = Math.max(...this.colorGroups[gk].map(id => G.buildings[id] || 0));
             if (level < maxLevel) canSell = false;
           }
-          if (canSell) actions += `<button class="pix-btn pix-btn--default pix-btn--sm btn-sell" data-pid="${pid}">SELL</button>`;
+          if (canSell) actions += `<button class="pix-btn pix-btn--default pix-btn--sm btn-sell" data-pid="${pid}">${t('manage.sell')}</button>`;
         }
         let canMortgage = true;
         if (gk && this.colorGroups[gk]) {
@@ -2975,14 +3011,14 @@ class MonopolyBoard {
         }
         if (canMortgage && level === 0) {
           const val = Math.floor(space.price * RULES.core.mortgageRate);
-          actions += `<button class="pix-btn pix-btn--default pix-btn--sm btn-mortgage" data-pid="${pid}">MORT $${val}</button>`;
+          actions += `<button class="pix-btn pix-btn--default pix-btn--sm btn-mortgage" data-pid="${pid}">${t('manage.mort', { v: val })}</button>`;
         }
       }
 
       rows += `<div class="manage__row"><span class="manage__name" style="border-left-color:${space.color || 'var(--line)'}">${esc(space.name)}${level > 0 ? ' ·' + level : ''}${mortgaged ? ' (M)' : ''}</span><span class="manage__actions">${actions}</span></div>`;
     });
 
-    this.manageEl.innerHTML = `<div class="pix-panel"><div class="pix-panel__titlebar"><span class="pix-panel__title">MANAGE</span></div><div class="pix-panel__body manage">${rows}</div></div>`;
+    this.manageEl.innerHTML = `<div class="pix-panel"><div class="pix-panel__titlebar"><span class="pix-panel__title">${t('manage.title')}</span></div><div class="pix-panel__body manage">${rows}</div></div>`;
   }
 
   renderMessages(G) {
@@ -2993,7 +3029,9 @@ class MonopolyBoard {
       else if (/(pay|paid|rent|tax|fine|bankrupt|jail|lost|-\$)/.test(lo)) kind = 'bad';
       return `<div class="logline logline--${kind}">${esc(m)}</div>`;
     }).reverse().join('');
-    this.messagesEl.innerHTML = `<div class="logbox"><div class="logbox__title">EVENT LOG</div><div class="logbox__list">${lines}</div></div>`;
+    // Drawer HEADER only — the log LINES themselves (G.messages) are engine-side EN
+    // and localize via the event-driven renderer in Task 4, not here.
+    this.messagesEl.innerHTML = `<div class="logbox"><div class="logbox__title">${t('log.title')}</div><div class="logbox__list">${lines}</div></div>`;
   }
 
   // ─────────────────────────────────────────────────────────
@@ -3079,13 +3117,13 @@ class MonopolyBoard {
       const canRedraw = (player.rerollsLeft >= 0); // redraw availability handled by engine; show both
       this.stateModalBoxEl.innerHTML = `
         <div class="evcard evcard--${kind}">
-          <div class="evcard__deck">${deck === 'chance' ? 'CHANCE' : 'COMMUNITY CHEST'}</div>
+          <div class="evcard__deck">${deck === 'chance' ? t('tile.type.chance') : t('tile.type.community')}</div>
           <div class="evcard__glyph">${glyphHtml(deck === 'chance' ? 'q' : 'chest')}</div>
           <div class="evcard__text">${esc(card.text)}</div>
-          <div class="evcard__tag evcard__tag--${kind}">${kind === 'good' ? 'FORTUNE' : kind === 'bad' ? 'HAZARD' : 'EVENT'}</div>
+          <div class="evcard__tag evcard__tag--${kind}">${kind === 'good' ? t('card.tagGood') : kind === 'bad' ? t('card.tagBad') : t('card.tagNeutral')}</div>
           <div class="evcard__btns">
-            <button class="pix-btn pix-btn--primary" id="ev-accept">ACCEPT</button>
-            <button class="pix-btn pix-btn--default" id="ev-redraw">REDRAW</button>
+            <button class="pix-btn pix-btn--primary" id="ev-accept">${t('card.accept')}</button>
+            <button class="pix-btn pix-btn--default" id="ev-redraw">${t('card.redraw')}</button>
           </div>
         </div>`;
       this.stateModalEl.classList.add('open');
@@ -3102,30 +3140,30 @@ class MonopolyBoard {
       const leaderId = a.currentBidder;
       const biddersHtml = a.bidders.map(b => {
         const p = G.players[b.playerId];
-        const nm = p.character ? p.character.name : `Player ${parseInt(b.playerId) + 1}`;
+        const nm = p.character ? p.character.name : t('game.playerFallback', { n: parseInt(b.playerId) + 1 });
         const isLead = leaderId !== null && String(leaderId) === String(b.playerId);
-        const state = b.passed ? 'PASS' : (isLead ? 'LEADS' : 'IN');
+        const state = b.passed ? t('auction.pass') : (isLead ? t('auction.stateLeads') : t('auction.stateIn'));
         return `<div class="auction__bidder ${b.passed ? 'out' : ''} ${isLead ? 'lead' : ''}">${tokenHtml(this._playerColor(G, b.playerId), p.character ? p.character.name[0] : parseInt(b.playerId) + 1, true)}<span>${esc(nm)}</span><span class="auction__bstate">${state}</span></div>`;
       }).join('');
-      const curName = G.players[currentBidder.playerId].character ? G.players[currentBidder.playerId].character.name : `Player ${parseInt(currentBidder.playerId) + 1}`;
+      const curName = G.players[currentBidder.playerId].character ? G.players[currentBidder.playerId].character.name : t('game.playerFallback', { n: parseInt(currentBidder.playerId) + 1 });
       this.stateModalBoxEl.innerHTML = `
         <div class="auction">
-          <div class="auction__head">AUCTION</div>
+          <div class="auction__head">${t('auction.title')}</div>
           <div class="auction__lot">
             <span class="auction__bar" style="background:${space.color || 'var(--accent)'}"></span>
             <div class="auction__lotname">${esc(space.name)}</div>
-            <div class="auction__listed">Listed $${space.price}</div>
+            <div class="auction__listed">${t('auction.listed', { price: space.price })}</div>
           </div>
           <div class="auction__bidbox">
-            <span class="auction__bidlabel">CURRENT BID</span>
+            <span class="auction__bidlabel">${t('auction.currentBid')}</span>
             <span class="auction__bidval">$${a.currentBid || 0}</span>
-            <span class="auction__leader">TO BID: ${esc(curName)}</span>
+            <span class="auction__leader">${t('auction.toBid', { name: esc(curName) })}</span>
           </div>
           <div class="auction__bidders">${biddersHtml}</div>
           <div class="auction__bidctl"><input type="number" id="bid-amount" min="${minBid}" value="${minBid}" step="${RULES.auction.minimumIncrement}" /></div>
           <div class="auction__actions">
-            <button class="pix-btn pix-btn--ghost" id="btn-pass-auction">PASS</button>
-            <button class="pix-btn pix-btn--primary" id="btn-bid">BID</button>
+            <button class="pix-btn pix-btn--ghost" id="btn-pass-auction">${t('auction.pass')}</button>
+            <button class="pix-btn pix-btn--primary" id="btn-bid">${t('auction.bid')}</button>
           </div>
         </div>`;
       this.stateModalEl.classList.add('open');
@@ -3138,34 +3176,34 @@ class MonopolyBoard {
     }
 
     if (G.trade && G.turnPhase === 'trade') {
-      const t = G.trade;
-      const proposer = G.players[t.proposerId];
-      const target = G.players[t.targetPlayerId];
-      const pName = proposer.character ? proposer.character.name : `Player ${parseInt(t.proposerId) + 1}`;
-      const tName = target.character ? target.character.name : `Player ${parseInt(t.targetPlayerId) + 1}`;
+      const tr = G.trade; // NOT `t` — that would shadow i18n's t() for this whole block
+      const proposer = G.players[tr.proposerId];
+      const target = G.players[tr.targetPlayerId];
+      const pName = proposer.character ? proposer.character.name : t('game.playerFallback', { n: parseInt(tr.proposerId) + 1 });
+      const tName = target.character ? target.character.name : t('game.playerFallback', { n: parseInt(tr.targetPlayerId) + 1 });
       const propList = (ids, mny) => {
         let h = ids.map(pid => `<div class="trade__prop"><span class="trade__propbar" style="background:${this.boardSpaces[pid].color || 'var(--ink-dim)'}"></span><span class="trade__propname">${esc(this.boardSpaces[pid].name)}</span></div>`).join('');
         if (mny > 0) h += `<div class="trade__prop"><span class="trade__propname">${money(mny)}</span></div>`;
-        return h || '<div class="trade__empty">Nothing</div>';
+        return h || `<div class="trade__empty">${t('trade.nothing')}</div>`;
       };
       this.stateModalBoxEl.innerHTML = `
         <div class="trade">
-          <div class="trade__head">TRADE PROPOSAL</div>
+          <div class="trade__head">${t('trade.proposalTitle')}</div>
           <div class="trade__cols">
             <div class="trade__side">
-              <div class="trade__sidehead">${tokenHtml(this._playerColor(G, t.proposerId), proposer.character ? proposer.character.name[0] : parseInt(t.proposerId) + 1, true)}<span style="color:${this._playerColor(G, t.proposerId)}">${esc(pName)}</span></div>
-              <div class="trade__proplist">${propList(t.offeredProperties, t.offeredMoney)}</div>
+              <div class="trade__sidehead">${tokenHtml(this._playerColor(G, tr.proposerId), proposer.character ? proposer.character.name[0] : parseInt(tr.proposerId) + 1, true)}<span style="color:${this._playerColor(G, tr.proposerId)}">${esc(pName)}</span></div>
+              <div class="trade__proplist">${propList(tr.offeredProperties, tr.offeredMoney)}</div>
             </div>
             <div class="trade__swap">${glyphHtml('swap')}</div>
             <div class="trade__side">
-              <div class="trade__sidehead">${tokenHtml(this._playerColor(G, t.targetPlayerId), target.character ? target.character.name[0] : parseInt(t.targetPlayerId) + 1, true)}<span style="color:${this._playerColor(G, t.targetPlayerId)}">${esc(tName)}</span></div>
-              <div class="trade__proplist">${propList(t.requestedProperties, t.requestedMoney)}</div>
+              <div class="trade__sidehead">${tokenHtml(this._playerColor(G, tr.targetPlayerId), target.character ? target.character.name[0] : parseInt(tr.targetPlayerId) + 1, true)}<span style="color:${this._playerColor(G, tr.targetPlayerId)}">${esc(tName)}</span></div>
+              <div class="trade__proplist">${propList(tr.requestedProperties, tr.requestedMoney)}</div>
             </div>
           </div>
           <div class="trade__actions">
-            <button class="pix-btn pix-btn--ghost" id="btn-cancel-trade">CANCEL</button>
-            <button class="pix-btn pix-btn--danger" id="btn-reject-trade">REJECT</button>
-            <button class="pix-btn pix-btn--success" id="btn-accept-trade">ACCEPT</button>
+            <button class="pix-btn pix-btn--ghost" id="btn-cancel-trade">${t('trade.cancel')}</button>
+            <button class="pix-btn pix-btn--danger" id="btn-reject-trade">${t('trade.reject')}</button>
+            <button class="pix-btn pix-btn--success" id="btn-accept-trade">${t('trade.accept')}</button>
           </div>
         </div>`;
       this.stateModalEl.classList.add('open');
@@ -3192,7 +3230,7 @@ class MonopolyBoard {
     const winnerEntry = standings.find(s => String(s.id) === winnerId) || standings[0];
     const wIdx = parseInt(winnerEntry.id);
     const wChar = G.players[wIdx].character;
-    const wName = wChar ? wChar.name : t('results.playerFallback', { n: wIdx + 1 });
+    const wName = wChar ? wChar.name : t('game.playerFallback', { n: wIdx + 1 });
     const wColor = this._playerColor(G, wIdx);
 
     let reason;
@@ -3204,7 +3242,7 @@ class MonopolyBoard {
     const rows = standings.map((s, idx) => {
       const i = parseInt(s.id);
       const ch = G.players[i].character;
-      const nm = ch ? ch.name : t('results.playerFallback', { n: i + 1 });
+      const nm = ch ? ch.name : t('game.playerFallback', { n: i + 1 });
       const col = this._playerColor(G, i);
       return `<div class="standrow">
         <span class="standrow__rank">${idx + 1}</span>
@@ -3250,15 +3288,16 @@ class MonopolyBoard {
     const char = this.activeMod.characters.find(c => c.id === charId);
     const lore = this.activeMod.getLoreById(charId);
     if (!char || !lore) return;
+    // Section LABELS are UI copy (t()); the lore TEXT itself is mod data, untouched.
     const sections = `
-      <div class="lore__sectlabel">背景故事</div>
+      <div class="lore__sectlabel">${t('lore.background')}</div>
       <div class="lore__body">${renderLoreText(lore.background)}</div>
-      ${lore.noticed ? `<div class="lore__sectlabel">被议会注意到的原因</div><div class="lore__body">${renderLoreText(lore.noticed)}</div>` : ''}
-      <div class="lore__sectlabel">加入维度议会</div>
+      ${lore.noticed ? `<div class="lore__sectlabel">${t('lore.noticed')}</div><div class="lore__body">${renderLoreText(lore.noticed)}</div>` : ''}
+      <div class="lore__sectlabel">${t('lore.joining')}</div>
       <div class="lore__body">${renderLoreText(lore.joining)}</div>
-      <div class="lore__sectlabel">行事风格</div>
+      <div class="lore__sectlabel">${t('lore.style')}</div>
       <div class="lore__body">${lore.styleIntro ? renderLoreText(lore.styleIntro) : ''}<ol>${lore.style.map(s => `<li>${s.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</li>`).join('')}</ol>${lore.styleOutro ? renderLoreText(lore.styleOutro) : ''}</div>
-      <div class="lore__sectlabel">与其他代理人的关系</div>
+      <div class="lore__sectlabel">${t('lore.relationships')}</div>
       <div class="lore__body"><ul>${lore.relationships.map(r => `<li><strong>${esc(r.target)}</strong>：${esc(r.description)}</li>`).join('')}</ul></div>
       <div class="lore__body"><blockquote>${lore.themeSummary.replace(/\n/g, '<br/>')}</blockquote></div>
     `;
@@ -3272,12 +3311,12 @@ class MonopolyBoard {
           <div class="lore__stats">${statRowsHtml(char.stats, char.color)}</div>
         </div>
         <div class="lore__right">
-          <div class="lore__sectlabel">PASSIVE · ${esc(char.passive.name)}</div>
+          <div class="lore__sectlabel">${t('lore.passive')} · ${esc(char.passive.name)}</div>
           <div class="lore__passive">${esc(char.passive.description)}</div>
-          <div class="lore__sectlabel">STARTING CAPITAL</div>
+          <div class="lore__sectlabel">${t('lore.startingCapital')}</div>
           <div class="lore__money">${money(startMoney)}</div>
           ${sections}
-          <div class="lore__close"><button class="pix-btn pix-btn--primary" id="btn-lore-close">CLOSE</button></div>
+          <div class="lore__close"><button class="pix-btn pix-btn--primary" id="btn-lore-close">${t('lore.close')}</button></div>
         </div>
       </div>`, true);
     document.getElementById('btn-lore-close').onclick = () => this.closeUiModal();
@@ -3287,25 +3326,25 @@ class MonopolyBoard {
     const connected = !!this.characterAI.apiKey;
     this.openUiModal(`
       <div class="aiset">
-        <div class="aiset__head">AI CHARACTER SETTINGS</div>
-        <div class="aiset__status ${connected ? 'on' : 'off'}">${connected ? 'CONNECTED' : 'NO API KEY'}</div>
+        <div class="aiset__head">${t('aiset.title')}</div>
+        <div class="aiset__status ${connected ? 'on' : 'off'}">${connected ? t('aiset.connected') : t('aiset.noKey')}</div>
         <div class="aiset__field">
-          <span class="aiset__label">OpenAI API Key</span>
+          <span class="aiset__label">${t('aiset.apiKeyLabel')}</span>
           <input type="password" id="ai-key-input" placeholder="sk-..." value="${esc(this.characterAI.apiKey)}" />
-          <span class="aiset__hint">Stored locally in your browser. Sent only to OpenAI.</span>
+          <span class="aiset__hint">${t('aiset.keyHint')}</span>
         </div>
         <div class="aiset__field">
-          <span class="aiset__label">Response Verbosity</span>
+          <span class="aiset__label">${t('aiset.verbosityLabel')}</span>
           <select id="ai-verbosity-select">
-            <option value="off">Off (no AI responses)</option>
-            <option value="major">Major events only (recommended)</option>
-            <option value="all">All events</option>
+            <option value="off">${t('aiset.verbosityOff')}</option>
+            <option value="major">${t('aiset.verbosityMajor')}</option>
+            <option value="all">${t('aiset.verbosityAll')}</option>
           </select>
-          <span class="aiset__hint">How often characters comment on game events.</span>
+          <span class="aiset__hint">${t('aiset.verbosityHint')}</span>
         </div>
         <div class="aiset__actions">
-          <button class="pix-btn pix-btn--ghost" id="btn-ai-cancel">CANCEL</button>
-          <button class="pix-btn pix-btn--primary" id="btn-ai-save">SAVE</button>
+          <button class="pix-btn pix-btn--ghost" id="btn-ai-cancel">${t('aiset.cancel')}</button>
+          <button class="pix-btn pix-btn--primary" id="btn-ai-save">${t('aiset.save')}</button>
         </div>
       </div>`);
     document.getElementById('ai-verbosity-select').value = this.characterAI.verbosity;
@@ -3367,30 +3406,30 @@ class MonopolyBoard {
       .map(pid => this.boardSpaces[pid]);
     const myProps = tradeable(player);
     const targetProps = tradeable(target);
-    const pName = player.character ? player.character.name : `Player ${parseInt(ctx.currentPlayer) + 1}`;
-    const tName = target.character ? target.character.name : `Player ${parseInt(target.id) + 1}`;
+    const pName = player.character ? player.character.name : t('game.playerFallback', { n: parseInt(ctx.currentPlayer) + 1 });
+    const tName = target.character ? target.character.name : t('game.playerFallback', { n: parseInt(target.id) + 1 });
     const pColor = this._playerColor(G, ctx.currentPlayer);
     const tColor = this._playerColor(G, target.id);
 
     const sideHtml = (props, picks, who) => {
-      if (props.length === 0) return '<div class="trade__empty">No deeds to offer</div>';
+      if (props.length === 0) return `<div class="trade__empty">${t('trade.noDeeds')}</div>`;
       return props.map(sp => `<button class="trade__prop ${picks.includes(sp.id) ? 'on' : ''}" data-side="${who}" data-pid="${sp.id}"><span class="trade__propbar" style="background:${sp.color || 'var(--ink-dim)'}"></span><span class="trade__propname">${esc(sp.name)}</span><span class="trade__propprice">$${sp.price}</span></button>`).join('');
     };
     const cashHtml = (who, val) => RULES.trading.allowMoneyInTrade
-      ? `<div class="trade__cash"><span>CASH</span><div class="trade__cashctl"><button data-cash="${who}" data-d="-50">−</button><span class="trade__cashval">$${val}</span><button data-cash="${who}" data-d="50">+</button></div></div>`
+      ? `<div class="trade__cash"><span>${t('trade.cash')}</span><div class="trade__cashctl"><button data-cash="${who}" data-d="-50">−</button><span class="trade__cashval">$${val}</span><button data-cash="${who}" data-d="50">+</button></div></div>`
       : '';
 
     const fair = s.myPicks.length + s.myCash / 100 - s.oppPicks.length - s.oppCash / 100;
     const balCls = fair > 0.5 ? 'pos' : fair < -0.5 ? 'neg' : 'even';
-    const balTxt = fair > 0.5 ? 'IN YOUR FAVOUR' : fair < -0.5 ? 'FAVOURS RIVAL' : 'ROUGHLY EVEN';
+    const balTxt = fair > 0.5 ? t('trade.balPos') : fair < -0.5 ? t('trade.balNeg') : t('trade.balEven');
 
     const targetSelector = opponents.length > 1
-      ? `<div class="trade__target">TRADE WITH <select id="trade-target-select">${opponents.map((o, i) => `<option value="${i}" ${i === selectedIndex ? 'selected' : ''}>${esc(o.character ? o.character.name : 'Player ' + (parseInt(o.id) + 1))}</option>`).join('')}</select></div>`
+      ? `<div class="trade__target">${t('trade.with')} <select id="trade-target-select">${opponents.map((o, i) => `<option value="${i}" ${i === selectedIndex ? 'selected' : ''}>${esc(o.character ? o.character.name : t('game.playerFallback', { n: parseInt(o.id) + 1 }))}</option>`).join('')}</select></div>`
       : '';
 
     this.openUiModal(`
       <div class="trade">
-        <div class="trade__head">PROPOSE TRADE</div>
+        <div class="trade__head">${t('trade.builderTitle')}</div>
         ${targetSelector}
         <div class="trade__cols">
           <div class="trade__side">
@@ -3405,10 +3444,10 @@ class MonopolyBoard {
             ${cashHtml('opp', s.oppCash)}
           </div>
         </div>
-        <div class="trade__bal"><span>BALANCE</span><span class="trade__balval ${balCls}">${balTxt}</span></div>
+        <div class="trade__bal"><span>${t('trade.balance')}</span><span class="trade__balval ${balCls}">${balTxt}</span></div>
         <div class="trade__actions">
-          <button class="pix-btn pix-btn--ghost" id="btn-trade-cancel">CANCEL</button>
-          <button class="pix-btn pix-btn--primary" id="btn-trade-send">PROPOSE &#9656;</button>
+          <button class="pix-btn pix-btn--ghost" id="btn-trade-cancel">${t('trade.cancel')}</button>
+          <button class="pix-btn pix-btn--primary" id="btn-trade-send">${t('trade.send')} &#9656;</button>
         </div>
       </div>`, true);
 
@@ -3506,11 +3545,11 @@ class MonopolyBoard {
         ? `<div class="aibubble__av"><img src="${r.portrait}" alt="" /></div>`
         : `<div class="aibubble__av aibubble__avph" style="background:${r.charColor}">${esc(r.charName[0])}</div>`;
       const textHtml = r.text === null
-        ? '<div class="aibubble__loading">Thinking…</div>'
+        ? `<div class="aibubble__loading">${t('ai.thinking')}</div>`
         : `<div class="aibubble__text">${esc(r.text)}</div>`;
       items += `<div class="aibubble">${avatar}<div class="aibubble__body"><div class="aibubble__name" style="color:${readableNameColor(r.charColor)}">${esc(r.charName)}</div>${textHtml}</div></div>`;
     });
-    this.aiResponsesEl.innerHTML = `<div class="airesp"><div class="airesp__title">COUNCIL CHATTER</div><div class="airesp__list">${items}</div></div>`;
+    this.aiResponsesEl.innerHTML = `<div class="airesp"><div class="airesp__title">${t('ai.councilChatter')}</div><div class="airesp__list">${items}</div></div>`;
   }
 
   _escapeHtml(text) { return esc(text); }
@@ -3532,23 +3571,24 @@ class MonopolyBoard {
 
     let msgs;
     if (history.length === 0) {
-      msgs = `<div class="chat__empty">Start a conversation with ${esc(activeChar.name)}</div>`;
+      msgs = `<div class="chat__empty">${t('chat.start', { name: esc(activeChar.name) })}</div>`;
     } else {
+      // AI REPLY content (m.content) is OpenAI output — data, never localized.
       msgs = history.map(m => m.role === 'user'
-        ? `<div class="chat__msg user"><div class="chat__sender">YOU</div>${esc(m.content)}</div>`
+        ? `<div class="chat__msg user"><div class="chat__sender">${t('chat.you')}</div>${esc(m.content)}</div>`
         : `<div class="chat__msg ai"><div class="chat__sender" style="color:${readableNameColor(activeChar.color)}">${esc(activeChar.name)}</div>${esc(m.content)}</div>`).join('');
     }
 
     const disabled = !this.characterAI.apiKey ? 'disabled' : '';
-    const placeholder = !this.characterAI.apiKey ? 'Set API key in AI settings' : 'Type a message…';
+    const placeholder = !this.characterAI.apiKey ? t('chat.setKey') : t('chat.typeMessage');
     this.chatPanelEl.innerHTML = `
       <div class="chat">
-        <div class="chat__title">CHAT</div>
+        <div class="chat__title">${t('chat.title')}</div>
         <div class="chat__tabs">${tabs}</div>
         <div class="chat__msgs" id="chat-scroll">${msgs}</div>
         <div class="chat__inputrow">
           <input type="text" id="chat-input" placeholder="${placeholder}" ${disabled} />
-          <button class="pix-btn pix-btn--primary pix-btn--sm" id="btn-chat-send" ${disabled}>SEND</button>
+          <button class="pix-btn pix-btn--primary pix-btn--sm" id="btn-chat-send" ${disabled}>${t('chat.send')}</button>
         </div>
       </div>`;
 
@@ -3593,7 +3633,9 @@ class MonopolyBoard {
     };
 
     const response = await this.characterAI.chat(char, lore, userMessage, history.slice(0, -1), gameState);
-    history.push({ role: 'assistant', content: response || '(No response — check your API key in AI settings)' });
+    // Localized at PUSH time (stored in history) — a later LANG flip won't retranslate
+    // this one line; acceptable, it's transient client-local feedback, not wire data.
+    history.push({ role: 'assistant', content: response || t('chat.noResponse') });
     this.renderChatPanel(G, ctx);
   }
 
@@ -3603,7 +3645,7 @@ class MonopolyBoard {
     if (!char) return;
     const lore = this.activeMod.getLoreById(charId);
     const chatEl = document.getElementById('char-chat-' + charId);
-    if (chatEl) { chatEl.style.display = 'block'; chatEl.innerHTML = '<div class="charcard__intro">Thinking…</div>'; }
+    if (chatEl) { chatEl.style.display = 'block'; chatEl.innerHTML = `<div class="charcard__intro">${t('ai.thinking')}</div>`; }
     const text = await this.characterAI.introduce(char, lore);
     const el = document.getElementById('char-chat-' + charId);
     if (el) el.innerHTML = text ? `<div class="charcard__intro">"${esc(text)}"</div>` : '';
@@ -3666,7 +3708,7 @@ class MonopolyBoard {
     if (this._rolling) {
       if (this.saveBtnEl) {
         const prev = this.saveBtnEl.textContent;
-        this.saveBtnEl.textContent = 'ROLLING…';
+        this.saveBtnEl.textContent = t('topbar.rolling');
         setTimeout(() => { if (this.saveBtnEl) this.saveBtnEl.textContent = prev; }, 1000);
       }
       return;
@@ -3679,7 +3721,7 @@ class MonopolyBoard {
     // G is boardgame.io's frozen live state — never mutate it here. Confirm via the button.
     if (this.saveBtnEl) {
       const prev = this.saveBtnEl.textContent;
-      this.saveBtnEl.textContent = 'SAVED ✓';
+      this.saveBtnEl.textContent = t('topbar.saved');
       setTimeout(() => { if (this.saveBtnEl) this.saveBtnEl.textContent = prev; }, 1200);
     }
   }

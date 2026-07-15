@@ -2,6 +2,10 @@
 // (top chip strip / bottom action bar / right drawer), spec 2026-07-12.
 // entry-ui.js precedent: pure string builders, unit-tested without DOM.
 // This module must NOT import DOM, App.js, images, or boardgame.io.
+// i18n's t() IS allowed (localization spec §2: pure lookup, same convention
+// as esc() below — imported directly rather than threaded through params).
+
+import { t } from './i18n';
 
 function esc(text) {
   return String(text == null ? '' : text)
@@ -29,10 +33,10 @@ export function chipHtml(p) {
       <span class="pcard__name" style="color:${esc(p.color)}">${esc(p.name)}</span>
       <span class="pcard__money">${p.money}</span>
       <span class="chip__deeds">${p.deeds}D</span>
-      ${p.isCurrent ? '<span class="pcard__turn">TURN</span>' : ''}
-      ${p.isBankrupt ? '<span class="pcard__bankrupt">OUT</span>' : ''}
-      ${p.inJail ? '<span class="pcard__jail">JAIL</span>' : ''}
-      ${p.isBot ? '<span class="pcard__bot">BOT</span>' : ''}
+      ${p.isCurrent ? `<span class="pcard__turn">${t('chip.turn')}</span>` : ''}
+      ${p.isBankrupt ? `<span class="pcard__bankrupt">${t('chip.out')}</span>` : ''}
+      ${p.inJail ? `<span class="pcard__jail">${t('chip.jail')}</span>` : ''}
+      ${p.isBot ? `<span class="pcard__bot">${t('chip.bot')}</span>` : ''}
     </div>`;
 }
 
@@ -58,15 +62,15 @@ export function chipDetailHtml(d) {
           <span class="pcard__name" style="color:${esc(d.color)}">${esc(d.name)}</span>
           ${d.title ? `<span class="pcard__title">${esc(d.title)}</span>` : ''}
         </div>
-        ${d.isCurrent ? '<span class="pcard__turn">TURN</span>' : ''}
-        ${d.isBankrupt ? '<span class="pcard__bankrupt">OUT</span>' : ''}
+        ${d.isCurrent ? `<span class="pcard__turn">${t('chip.turn')}</span>` : ''}
+        ${d.isBankrupt ? `<span class="pcard__bankrupt">${t('chip.out')}</span>` : ''}
       </div>
       <div class="pcard__money">${d.moneyHtml || ''}</div>
       <div class="pcard__meta">
-        <span>${d.deeds} DEEDS</span>
+        <span>${t('chip.deeds', { n: d.deeds })}</span>
         ${d.passiveName ? `<span class="pcard__passive" title="${esc(d.passiveDesc || '')}">${esc(d.passiveName)}</span>` : ''}
       </div>
-      ${d.inJail ? '<div class="pcard__jail">IN JAIL</div>' : ''}
+      ${d.inJail ? `<div class="pcard__jail">${t('chip.inJail')}</div>` : ''}
       ${abilities.length ? `<div class="pcard__abilities">${abilities.map(esc).join(' · ')}</div>` : ''}
       ${d.propsHtml ? `<div class="pcard__props">${d.propsHtml}</div>` : ''}
       ${
@@ -103,7 +107,7 @@ export function tileDetailHtml(d) {
         : '';
       ownerHtml = `<div class="tile-detail__owner">${face}<span class="tile-detail__owner-name" style="color:${esc(d.ownerColor)}">${esc(d.ownerName)}</span></div>`;
     } else {
-      ownerHtml = '<div class="tile-detail__owner tile-detail__owner--unowned">UNOWNED</div>';
+      ownerHtml = `<div class="tile-detail__owner tile-detail__owner--unowned">${t('tile.unowned')}</div>`;
     }
   }
 
@@ -115,16 +119,16 @@ export function tileDetailHtml(d) {
     pipsHtml = `<div class="tile-detail__level">${pips}</div>`;
   }
 
-  const mortgagedHtml = (isOwnable && d.mortgaged) ? '<div class="tile-detail__mortgaged">MORTGAGED</div>' : '';
+  const mortgagedHtml = (isOwnable && d.mortgaged) ? `<div class="tile-detail__mortgaged">${t('tile.mortgaged')}</div>` : '';
 
-  const rentHtml = d.rentText ? `<div class="tile-detail__rent">RENT ${esc(d.rentText)}</div>` : '';
+  const rentHtml = d.rentText ? `<div class="tile-detail__rent">${t('tile.rent', { rent: esc(d.rentText) })}</div>` : '';
 
   const stats = d.placeStats;
   const statsHtml = stats
     ? `<div class="tile-detail__stats">
-        <span class="tile-detail__stat">POP ${esc(stats.population)}</span>
-        <span class="tile-detail__stat">GDP ${esc(stats.gdp)}</span>
-        <span class="tile-detail__stat">FAME ${esc(stats.fame)}</span>
+        <span class="tile-detail__stat">${t('tile.pop', { v: esc(stats.population) })}</span>
+        <span class="tile-detail__stat">${t('tile.gdp', { v: esc(stats.gdp) })}</span>
+        <span class="tile-detail__stat">${t('tile.fame', { v: esc(stats.fame) })}</span>
       </div>`
     : '';
 
@@ -172,9 +176,9 @@ export function tileDetailHtml(d) {
 export function drawerShellHtml() {
   return `
     <div class="drawer-tabs">
-      <button class="drawer-tabs__btn" data-tab="log">LOG<span class="drawer-tabs__dot" hidden></span></button>
-      <button class="drawer-tabs__btn" data-tab="chat">CHAT</button>
-      <button class="drawer-tabs__btn" data-tab="manage">MANAGE</button>
+      <button class="drawer-tabs__btn" data-tab="log">${t('drawer.log')}<span class="drawer-tabs__dot" hidden></span></button>
+      <button class="drawer-tabs__btn" data-tab="chat">${t('drawer.chat')}</button>
+      <button class="drawer-tabs__btn" data-tab="manage">${t('drawer.manage')}</button>
     </div>
     <div class="drawer" id="drawer">
       <div id="manage"></div>
@@ -182,7 +186,7 @@ export function drawerShellHtml() {
       <div id="chat-panel"></div>
       <div id="log"></div>
       <div class="drawer__foot">
-        <button id="btn-exit-foot" class="pix-btn pix-btn--ghost pix-btn--full pix-btn--sm">EXIT TO MENU</button>
+        <button id="btn-exit-foot" class="pix-btn pix-btn--ghost pix-btn--full pix-btn--sm">${t('drawer.exitToMenu')}</button>
       </div>
     </div>`;
 }
@@ -227,7 +231,7 @@ export function legendHtml(rows) {
     `<div class="legend__row legend__row--${esc(r.kind)}" style="--dot:${esc(r.color)}">
        <span class="legend__dot"></span><span class="legend__label">${esc(r.label)}</span>
      </div>`).join('');
-  return `<div class="legend__title">LEGEND · 图例</div>${body}`;
+  return `<div class="legend__title">${t('legend.title')}</div>${body}`;
 }
 
 export function nodeGlow(space, ownerColor) {
