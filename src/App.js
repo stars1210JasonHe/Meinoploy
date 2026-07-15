@@ -15,6 +15,7 @@ import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
 import { isDuelCooldownBlocked } from './events';
 import { createAnimator, DICE_TUMBLE_MS } from './anim';
 import { createAudio } from './audio';
+import { initLocale, getLocale, setLocale, onLocaleChange, t } from './i18n';
 import { chipHtml, chipDetailHtml, tileDetailHtml, drawerShellHtml, tokenVisual, nodeGlow, legendHtml, NODE_GLOW_COLORS } from './game-chrome';
 import { resolveBoardBg, starfieldDataUri } from './board-bg';
 import { bloomSprite } from './wr-bloom';
@@ -208,6 +209,17 @@ function renderLoreText(text) {
 
 class MonopolyBoard {
   constructor(rootElement) {
+    // Locale must be resolved before createLayout() below paints the topbar's first
+    // frame (its button labels are t()-driven) — earliest possible point in boot.
+    initLocale();
+    // The menu-screen renderer to re-invoke on a locale change (LANG toggle):
+    // menu screens aren't client-state-driven, so onLocaleChange can't just re-run
+    // update() for them — see the onLocaleChange registration in createLayout() for
+    // the full re-render hook (menu re-invoke vs. in-game update() dispatch). Each
+    // show*() menu-screen method below overwrites this with itself; defaulted here
+    // so a locale flip before the first showModeSelect() call (impossible today,
+    // future-proofing) never dereferences null.
+    this._currentScreenRenderer = () => this.showModeSelect();
     this.rootElement = rootElement;
     this.mode = null; // 'local' or 'online'
     this.onlinePlayerID = null;
@@ -400,12 +412,13 @@ class MonopolyBoard {
     this.rootElement.innerHTML = `
       <div class="app" id="app-root">
         <div class="topbar">
-          <button id="btn-save" class="pix-btn pix-btn--default" style="display:none;">SAVE</button>
-          <button id="btn-load-menu" class="pix-btn pix-btn--default">LOAD</button>
-          <button id="btn-ai-settings" class="pix-btn pix-btn--default">AI</button>
-          <button id="btn-mute" class="pix-btn pix-btn--default">SND</button>
-          <button id="btn-exit-game" class="pix-btn pix-btn--danger" style="display:none;">EXIT</button>
-          <button id="btn-fs-top" class="pix-btn pix-btn--default">FULL</button>
+          <button id="btn-lang" class="pix-btn pix-btn--default">${t('topbar.lang')}</button>
+          <button id="btn-save" class="pix-btn pix-btn--default" style="display:none;">${t('topbar.save')}</button>
+          <button id="btn-load-menu" class="pix-btn pix-btn--default">${t('topbar.load')}</button>
+          <button id="btn-ai-settings" class="pix-btn pix-btn--default">${t('topbar.ai')}</button>
+          <button id="btn-mute" class="pix-btn pix-btn--default">${t('topbar.snd')}</button>
+          <button id="btn-exit-game" class="pix-btn pix-btn--danger" style="display:none;">${t('topbar.exit')}</button>
+          <button id="btn-fs-top" class="pix-btn pix-btn--default">${t('topbar.full')}</button>
         </div>
         <div id="topbar-hotzone"></div>
 
@@ -572,11 +585,18 @@ class MonopolyBoard {
     document.getElementById('btn-load-menu').onclick = () => this.showSavesModal();
     document.getElementById('btn-ai-settings').onclick = () => this.showAISettings();
 
+    // LANG toggle (spec 2026-07-15-localization-design.md §1): the button always shows
+    // the locale it will SWITCH TO (t('topbar.lang') is written that way per-locale — see
+    // src/i18n.js). Click flips the locale; the actual repaint + re-render happens via the
+    // onLocaleChange registration below, same as every other locale-driven listener would.
+    this.langBtnEl = document.getElementById('btn-lang');
+    this.langBtnEl.onclick = () => setLocale(getLocale() === 'zh' ? 'en' : 'zh');
+
     // Mute toggle (this.audio is constructed in the constructor, before createLayout runs).
     const muteBtn = document.getElementById('btn-mute');
-    const paintMute = () => { muteBtn.textContent = this.audio && this.audio.isMuted() ? 'MUTED' : 'SND'; };
-    muteBtn.onclick = () => { this.audio.setMuted(!this.audio.isMuted()); paintMute(); };
-    paintMute();
+    this._paintMute = () => { muteBtn.textContent = this.audio && this.audio.isMuted() ? t('topbar.muted') : t('topbar.snd'); };
+    muteBtn.onclick = () => { this.audio.setMuted(!this.audio.isMuted()); this._paintMute(); };
+    this._paintMute();
 
     // GB themes + CRT retired in the B2 reskin (R1a): one :root palette in
     // index.html; stale meinopoly_theme/meinopoly_crt localStorage keys are inert.
@@ -625,10 +645,11 @@ class MonopolyBoard {
       this.fsBtnTopEl.style.display = 'none';
     } else {
       const paintFs = () => {
-        const label = document.fullscreenElement ? 'EXIT FS' : 'FULL';
+        const label = document.fullscreenElement ? t('topbar.fullExit') : t('topbar.full');
         this.fsBtnEl.textContent = label;
         this.fsBtnTopEl.textContent = label;
       };
+      this._paintFs = paintFs;
       const toggleFs = () => {
         // Final fix wave, Fix 2: requestFullscreen/exitFullscreen return promises
         // that reject on denial (permissions-policy, iframe embed without the
@@ -645,6 +666,35 @@ class MonopolyBoard {
       document.addEventListener('fullscreenchange', paintFs);
       paintFs();
     }
+
+    // Locale-change re-render hook (spec 2026-07-15-localization-design.md §1). Two parts,
+    // both needed on every setLocale() (LANG click or, later, any other caller):
+    //  1. Repaint the topbar's own labels — the static ones directly (LOAD/AI/SAVE/EXIT
+    //     have no other paint path), the toggle-state ones (SND/MUTED, FULL/EXIT FS) via
+    //     their existing paint* functions so they keep reflecting the CURRENT toggle state,
+    //     not just the current locale.
+    //  2. Re-render whatever's on screen. There's no single "current state" App keeps for
+    //     this: boardgame.io-driven screens (characterSelect/game/results) are fully
+    //     rebuilt by update(state) already — re-invoking it with client.getState() is the
+    //     existing, correct repaint path (see the client.subscribe wiring below). Menu
+    //     screens (hero/mod-select/map-select/setup/online-lobby) build their DOM directly
+    //     in a show*() method with no backing client yet — those re-invoke themselves via
+    //     this._currentScreenRenderer, which each show*() method points at itself on entry
+    //     (see showModeSelect() etc.). This.client is null exactly when a menu screen is
+    //     active (_stopClient() nulls it; every menu entry point runs after that), so
+    //     checking it first is a reliable, already-existing signal for which path applies —
+    //     no separate screen-name flag needed.
+    onLocaleChange(() => {
+      this.langBtnEl.textContent = t('topbar.lang');
+      this.saveBtnEl.textContent = t('topbar.save');
+      document.getElementById('btn-load-menu').textContent = t('topbar.load');
+      document.getElementById('btn-ai-settings').textContent = t('topbar.ai');
+      this.exitBtnEl.textContent = t('topbar.exit');
+      if (this._paintMute) this._paintMute();
+      if (this._paintFs) this._paintFs();
+      if (this.client) this.update(this.client.getState());
+      else if (this._currentScreenRenderer) this._currentScreenRenderer();
+    });
 
     // Final fix wave, Fix 1: the board sizes off dvw/dvh (index.html, `.app--game
     // .board`), which recomputes INSTANTLY on any viewport resize — including a
@@ -747,6 +797,7 @@ class MonopolyBoard {
   // Menu screens
   // ─────────────────────────────────────────────────────────
   showModeSelect() {
+    this._currentScreenRenderer = () => this.showModeSelect();
     this._showScreen('menu');
     this.menuEl.className = 'screen screen--hero';
     const totalMaps = MODS.reduce((n, m) => n + m.maps.length + m.worlds.length, 0);
@@ -775,6 +826,7 @@ class MonopolyBoard {
       this.showMapSelect();
       return;
     }
+    this._currentScreenRenderer = () => this.showModSelect();
     this._showScreen('menu');
     this.menuEl.className = 'screen screen--menu';
     let cards = '';
@@ -827,6 +879,7 @@ class MonopolyBoard {
   }
 
   showMapSelect() {
+    this._currentScreenRenderer = () => this.showMapSelect();
     this._showScreen('menu');
     this.menuEl.className = 'screen screen--menu';
     let cards = '';
@@ -931,6 +984,7 @@ class MonopolyBoard {
   // the map it was built for: a same-map re-entry (e.g. a breadcrumb jump-back) keeps the user's
   // picks; a different map re-derives victory defaults (groups/turns are map-specific).
   showSetup(playerCount) {
+    this._currentScreenRenderer = () => this.showSetup(playerCount);
     this._showScreen('menu');
     const mapId = this.mapData.id;
     const prev = this._setupSel;
@@ -1048,6 +1102,7 @@ class MonopolyBoard {
     // and the server runs the default mod). If a prior local game switched mods, reset the
     // engine RULES singleton + activeMod back to Dominion before joining an online match.
     if (this.activeMod !== MODS[0]) this.selectMod(MODS[0]);
+    this._currentScreenRenderer = () => this.showOnlineLobby();
     this._showScreen('lobby');
     this.lobbyEl.className = 'screen screen--menu';
     const serverUrl = window.location.protocol + '//' + window.location.hostname + ':8088';
