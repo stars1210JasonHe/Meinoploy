@@ -1,5 +1,13 @@
 const { test, expect } = require('@playwright/test');
 
+// Locale pin (localization task 5): this spec's own assertions target mod NAMES
+// (data, never localized — spec 2026-07-15-localization-design.md §2), so they're
+// locale-independent already. Pinned 'en' anyway for consistency with every other
+// spec in this suite (this file had no addInitScript before — added fresh).
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => { window.localStorage.setItem('meinopoly_locale', 'en'); });
+});
+
 // The generated mods must appear in mod-select. This is the only automated gate that
 // exercises the generated Tier-B bundle.client.js through a real Parcel build.
 test.describe('Create-Mod generated mods', () => {

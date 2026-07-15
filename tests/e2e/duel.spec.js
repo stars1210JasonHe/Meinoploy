@@ -11,8 +11,15 @@ const { test, expect } = require('@playwright/test');
 // cycle as gameplay.spec.js's "Atlas World" tests, not the classic board-center flow.
 
 test.beforeEach(async ({ page }) => {
-  // Fast-roll flag: skip the ~0.9s dice tumble animation (gameplay.spec.js convention).
-  await page.addInitScript(() => { window.__MP_FAST_ROLL = true; });
+  // Locale pin (localization task 5): this file's assertions are text-locked to the
+  // pre-i18n EN literals ('you are challenged for', 'WINS', 'Duel!' logline substring
+  // — see gameplay.spec.js's identical comment for the full rationale). Set before the
+  // app boots, alongside the existing fast-roll flag.
+  await page.addInitScript(() => {
+    window.localStorage.setItem('meinopoly_locale', 'en');
+    // Fast-roll flag: skip the ~0.9s dice tumble animation (gameplay.spec.js convention).
+    window.__MP_FAST_ROLL = true;
+  });
 });
 
 // ─────────────────────────────────────────────────────────────

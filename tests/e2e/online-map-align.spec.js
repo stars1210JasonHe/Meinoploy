@@ -39,6 +39,14 @@ test.beforeAll(async () => {
 
 test.afterAll(() => { if (serverProc) serverProc.kill(); });
 
+// Locale pin (localization task 5): this spec's `getByText('ONLINE GAME', ...)` click
+// below is text-locked to the pre-i18n EN literal — DEFAULT locale is now zh
+// ('在线游戏', menu.onlineGame), which would break this lookup unpinned. Set before the
+// app boots (addInitScript, same as every other spec's convention).
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => { window.localStorage.setItem('meinopoly_locale', 'en'); });
+});
+
 test('online client aligns to the server mod (terra-titans atlas)', async ({ page }) => {
   await page.goto('/');
   await page.getByText('ONLINE GAME', { exact: false }).click();

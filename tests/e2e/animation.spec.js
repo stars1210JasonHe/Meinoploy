@@ -61,6 +61,16 @@ async function pickAndConfirm(page) {
   await confirm.click();
 }
 
+// Locale pin (localization task 5): this file's assertions don't read any locale
+// string directly, but it shares gameplay.spec.js's navigation flow verbatim (see
+// the header comment) — pin 'en' for consistency with every other spec and so a
+// future text-locked assertion added here doesn't silently depend on the DEFAULT
+// locale. Deliberately does NOT set __MP_FAST_ROLL (this file's whole point is the
+// real, un-skipped animation pipeline — see the header comment).
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => { window.localStorage.setItem('meinopoly_locale', 'en'); });
+});
+
 async function selectCharacters(page) {
   await gotoCharSelect(page);
 

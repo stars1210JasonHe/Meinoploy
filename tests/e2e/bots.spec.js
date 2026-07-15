@@ -156,8 +156,17 @@ async function playUntilBotTurnsObserved(page, minBotTurns, maxIterations) {
 // (App.js's _animateRollThenMove reads this flag and skips the ~0.9s tumble).
 // Registered per-test via addInitScript, which re-applies on every navigation
 // within the test, including the page.reload() this spec does for save/load.
+//
+// Locale pin (localization task 5): this file's own "BOT 思考中…" hint check
+// (line ~188 below) targets the substring 'BOT', which — per the T3/T4 review —
+// is common to BOTH locales ('BOT 思考中…' zh / 'BOT thinking…' en), so it needs
+// no retargeting; pinning 'en' here is purely for consistency with every other
+// spec (this file otherwise has no other text-locked assertion).
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => { window.__MP_FAST_ROLL = true; });
+  await page.addInitScript(() => {
+    window.localStorage.setItem('meinopoly_locale', 'en');
+    window.__MP_FAST_ROLL = true;
+  });
 });
 
 test.describe('Local bots — unattended play', () => {

@@ -121,12 +121,48 @@ async function completeTurn(page, { buy = false } = {}) {
   }
 }
 
+// Drawer-state audit (localization task 5): the LOG only renders its `.logline`
+// elements while the drawer is OPEN on the log tab (T4 perf gate — src/App.js
+// renderMessages early-returns and marks itself stale while hidden). Two
+// `.logline` count assertions below used to read whatever the AMBIENT drawer
+// state happened to be at that point — which currently passes only because
+// wide-viewport gutter mode (App.js _syncGutterMode) auto-opens the drawer on
+// the log tab already at this suite's default (unpinned) viewport; a narrower
+// run, or any future shift in the gutter threshold, would silently start
+// reading zero lines from a closed drawer. Made explicit and robust to BOTH
+// starting states — same "only click if not already open" guard duel.spec.js/
+// layout.spec.js's explicit-open calls don't need (they run at viewports where
+// the drawer reliably starts closed) but a shared helper here does, since a
+// second click on an already-open tab is intercepted by the open panel itself
+// (documented in layout.spec.js's "Wide-screen gutter mode" describe block).
+async function ensureLogDrawerOpen(page) {
+  const logTabBtn = page.locator('#drawer-tabs .drawer-tabs__btn[data-tab="log"]');
+  // Defensive: the 20-turn "Full Game Process" caller can end on the RESULTS
+  // screen (an early victory), which has no drawer/tab rail at all — nothing
+  // to open there, and .logline naturally stays 0, same as it always has.
+  const tabExists = await logTabBtn.isVisible({ timeout: 2000 }).catch(() => false);
+  if (!tabExists) return;
+  const drawerOpen = await page.locator('#drawer').evaluate(el => !el.hidden).catch(() => false);
+  const tabActive = await logTabBtn.evaluate(el => el.classList.contains('drawer-tabs__btn--active')).catch(() => false);
+  if (!(drawerOpen && tabActive)) {
+    await logTabBtn.click();
+  }
+}
+
 // Make the dice roll INSTANT in E2E: the ~0.9s tumble animation (great UX in real play)
 // otherwise makes long game tests slow + flaky (a full 40-turn game ran ~128s). addInitScript
 // runs before every page load, so App.js's _animateRollThenMove reads the flag and skips the
 // animation, dispatching the move immediately. Visual-only behaviour; no test asserts the tumble.
+// Locale pin (localization task 5, spec §4): every existing spec's assertions are
+// text-locked to the pre-i18n EN literals (button labels, headings, log substrings).
+// Since Task 1 flipped the DEFAULT locale to zh, pin 'en' here — set BEFORE the app
+// boots (addInitScript runs pre-load, same timing guarantee as __MP_FAST_ROLL below) —
+// so every text-locked assertion in this file keeps matching without retargeting.
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => { window.__MP_FAST_ROLL = true; });
+  await page.addInitScript(() => {
+    window.localStorage.setItem('meinopoly_locale', 'en');
+    window.__MP_FAST_ROLL = true;
+  });
 });
 
 // ─── CHARACTER SELECTION ────────────────────────────────
@@ -249,6 +285,7 @@ test.describe('Basic Gameplay', () => {
   test('event log updates after rolling', async ({ page }) => {
     await page.click('#btn-roll');
     await page.waitForTimeout(1100); // roll plays a ~0.9s dice animation before dispatching
+    await ensureLogDrawerOpen(page); // T4 perf gate: lines only render while the drawer is open
     const lineCount = await page.locator('.logline').count();
     expect(lineCount).toBeGreaterThanOrEqual(2);
   });
@@ -514,6 +551,7 @@ test.describe('Full Game Process', () => {
     expect(turnsPlayed).toBeGreaterThan(0);
     expect(propertiesBought).toBeGreaterThan(0);
 
+    await ensureLogDrawerOpen(page); // T4 perf gate: lines only render while the drawer is open
     const lineCount = await page.locator('.logline').count();
     expect(lineCount).toBeGreaterThan(0);
 

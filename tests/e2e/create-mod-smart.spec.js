@@ -1,5 +1,12 @@
 const { test, expect } = require('@playwright/test');
 
+// Locale pin (localization task 5): see create-mod.spec.js's identical comment —
+// this spec's assertions target mod NAMES (data, never localized), so they're
+// locale-independent already; pinned 'en' for consistency with every other spec.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => { window.localStorage.setItem('meinopoly_locale', 'en'); });
+});
+
 // The two smart-built mods must appear on mod-select — proves the facts -> --smart ->
 // build pipeline end-to-end (mirrors tests/e2e/create-mod.spec.js for the SP1 mods).
 test.describe('Smart-built mods', () => {

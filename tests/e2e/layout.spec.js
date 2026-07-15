@@ -15,13 +15,21 @@ const { test, expect } = require('@playwright/test');
 test.use({ viewport: { width: 1400, height: 900 } });
 
 test.beforeEach(async ({ page }) => {
+  // Locale pin (localization task 5): this file's assertions are text-locked to
+  // pre-i18n EN literals (e.g. 'Mediterranean Ave', '$60', 'CHOOSE YOUR ROUTE' —
+  // see gameplay.spec.js's identical comment for the full rationale). Set before
+  // the app boots, alongside the existing fast-roll flag.
+  //
   // Fast-roll flag (gameplay.spec.js convention): skips App.js's own ~0.9s
   // PRE-DISPATCH tumble (a different element, `.centerslot__dice`) so multi-turn
   // loops stay fast. It does NOT gate anim.js's post-move `#dice-overlay` job —
   // that's driven off G.events (`dice_rolled`) and only skipped by a separate
   // flag (`window.__MEINO_NO_ANIM`, unset here) — so step (e) below still gets a
   // real dice-overlay tumble to assert against.
-  await page.addInitScript(() => { window.__MP_FAST_ROLL = true; });
+  await page.addInitScript(() => {
+    window.localStorage.setItem('meinopoly_locale', 'en');
+    window.__MP_FAST_ROLL = true;
+  });
 });
 
 // ─── Setup helpers, duplicated from gameplay.spec.js ───
