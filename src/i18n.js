@@ -116,16 +116,27 @@ function _interpolate(str, params) {
 // (never blank). `params` interpolates `{name}` placeholders. Warns once per missing key
 // per session regardless of whether the EN fallback resolved it — a zh gap is worth
 // flagging even though the user never sees a blank string.
+//
+// T1-review Finding 2: a table value of '' (empty string) is treated exactly like a
+// missing key, not just `undefined`. The original fallback chain only triggered on
+// `undefined`, so a plausible copy-paste gap during the 400-key migration (a key present
+// in the table but accidentally seeded with '') would render silently blank with no warn —
+// violating the "never blank" guarantee just as badly as a missing key would. `_isBlank`
+// is factored out so both the current-locale lookup and the EN-fallback lookup apply the
+// same undefined-or-empty test.
+function _isBlank(v) {
+  return v === undefined || v === '';
+}
 export function t(key, params) {
   const table = STRINGS[_locale] || {};
   let str = table[key];
-  if (str === undefined) {
+  if (_isBlank(str)) {
     if (!_warned.has(key)) {
       _warned.add(key);
       console.warn(`[i18n] missing key "${key}" for locale "${_locale}"`);
     }
     const enStr = STRINGS.en && STRINGS.en[key];
-    str = enStr !== undefined ? enStr : key;
+    str = !_isBlank(enStr) ? enStr : key;
   }
   return _interpolate(str, params);
 }

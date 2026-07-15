@@ -692,7 +692,18 @@ class MonopolyBoard {
       this.exitBtnEl.textContent = t('topbar.exit');
       if (this._paintMute) this._paintMute();
       if (this._paintFs) this._paintFs();
-      if (this.client) this.update(this.client.getState());
+      // T1-review Finding 1: update()'s first line unconditionally clears this._rolling
+      // (the dice-tumble animation lock — see the "Release the dice-roll lock" comment at
+      // the top of update()), which must only happen on a REAL post-roll state tick. A LANG
+      // click landing mid-tumble (_animateRollThenMove, ~0.9s) would otherwise race that
+      // clear here, re-enabling #btn-roll and letting a second click stack a spurious second
+      // tumble on top of the first. So THIS handler only, skip the full re-render while a
+      // roll is in flight — the topbar labels above are already repainted, and the HUD
+      // (board/turnbox/etc.) catches up on the next real client.subscribe tick once the roll
+      // actually lands (a sub-second stale window, not a correctness issue). update() itself
+      // is intentionally left unchanged; its unconditional clear is correct for every other
+      // caller (the real post-roll subscribe tick).
+      if (this.client) { if (!this._rolling) this.update(this.client.getState()); }
       else if (this._currentScreenRenderer) this._currentScreenRenderer();
     });
 

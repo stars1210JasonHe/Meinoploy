@@ -74,6 +74,25 @@ describe('i18n', () => {
     expect(i18n.t('test.totallyMissing')).toBe('test.totallyMissing');
   });
 
+  // T1-review Finding 2: an empty-string table value ('' — a plausible copy-paste gap
+  // during the 400-key migration) must be treated exactly like a missing key, not silently
+  // rendered as a blank string.
+  test('empty-string zh value falls back to the en table (and still warns)', () => {
+    i18n.STRINGS.zh['test.emptyZh'] = '';
+    i18n.STRINGS.en['test.emptyZh'] = 'english fallback';
+    i18n.setLocale('zh');
+    expect(i18n.t('test.emptyZh')).toBe('english fallback');
+    expect(console.warn).toHaveBeenCalledTimes(1);
+  });
+
+  test('empty-string value in both tables falls back to the literal key (never blank)', () => {
+    i18n.STRINGS.zh['test.emptyBoth'] = '';
+    i18n.STRINGS.en['test.emptyBoth'] = '';
+    i18n.setLocale('zh');
+    expect(i18n.t('test.emptyBoth')).toBe('test.emptyBoth');
+    expect(console.warn).toHaveBeenCalledTimes(1);
+  });
+
   test('warns once per missing key per session, not on every call', () => {
     i18n.setLocale('zh');
     i18n.t('test.warnOnce');
@@ -153,7 +172,12 @@ describe('i18n', () => {
     try {
       expect(() => i18n.setLocale('en')).not.toThrow();
       expect(i18n.getLocale()).toBe('en');
+      // Strengthened per T1-review (minor finding): a throwing read must not just avoid
+      // throwing — it must actually fall back to the documented default ('zh'), not leave
+      // getLocale() returning something undefined/stale. _readPersistedLocale() catches the
+      // getItem throw and returns null, so initLocale() should land on DEFAULT_LOCALE.
       expect(() => i18n.initLocale()).not.toThrow();
+      expect(i18n.getLocale()).toBe('zh');
     } finally {
       window.localStorage.__proto__.setItem.mockRestore();
       window.localStorage.__proto__.getItem.mockRestore();
