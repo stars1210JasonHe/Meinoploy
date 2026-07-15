@@ -776,6 +776,8 @@ class MonopolyBoard {
     // Task 4: counts message-producing G.events entries (renderLogLines'
     // output length), not G.messages.length — see _updateLogUnread.
     if (tab === 'log') this._logSeenCount = this._lastG ? renderLogLines(this._lastG.events, getLocale(), this._lastG).length : 0;
+    // T4 perf gate: rebuilds skipped while hidden — render the pending content now.
+    if (tab === 'log' && this._logStale && this._lastG) this.renderMessages(this._lastG);
     this._updateLogUnread(); // clear the dot immediately, don't wait for the next state push
     const target = tab === 'log' ? this.messagesEl : tab === 'chat' ? this.chatPanelEl : this.manageEl;
     if (target && target.scrollIntoView) target.scrollIntoView({ block: 'nearest' });
@@ -3046,6 +3048,15 @@ class MonopolyBoard {
   // history in the new language (renderLogLines re-derives every line from
   // event data on every call, never from a cached string).
   renderMessages(G) {
+    // T4 review Important #2 (perf): the log source is now up to 200 events per
+    // rebuild, and update() calls this every state tick — skip the DOM rebuild
+    // while the log isn't visible. Unread counting is independent
+    // (_updateLogUnread), and _openDrawer('log') re-renders on reveal below.
+    if (!(this._drawerOpen && this._drawerTab === 'log')) {
+      this._logStale = true;
+      return;
+    }
+    this._logStale = false;
     const lines = renderLogLines(G.events, getLocale(), G).map(({ kind, text }) => (
       `<div class="logline logline--${kind}">${esc(text)}</div>`
     )).reverse().join('');
