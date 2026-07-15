@@ -40,6 +40,7 @@ export const STRINGS = {
     'menu.pressStart': '按 START 键开始',
     'menu.modsWord': '个模组',
     'menu.tradeAuction': '交易与拍卖',
+    'menu.heroAlt': 'Meinopoly：Dominion 主视觉',
 
     // Mod select (showModSelect).
     'mod.heading': '选择模组',
@@ -53,6 +54,7 @@ export const STRINGS = {
     'map.places': '个地点',
     'map.spaces': '格',
     'map.previewFallback': '地图',
+    'map.layoutAtlas': '图集',
 
     // Game setup (showSetup / _renderSetup).
     'setup.heading': '游戏设置',
@@ -123,7 +125,6 @@ export const STRINGS = {
     'lobby.joined': '已加入',
     'lobby.join': '加入',
     'lobby.full': '已满',
-    'lobby.playerFallback': '玩家 {n}',
 
     // entry-ui.js: breadcrumb step labels (breadcrumbSteps).
     'breadcrumb.mode': '模式',
@@ -159,6 +160,7 @@ export const STRINGS = {
     'menu.pressStart': 'PRESS START',
     'menu.modsWord': 'MODS',
     'menu.tradeAuction': 'TRADE &amp; AUCTION',
+    'menu.heroAlt': 'Meinopoly: Dominion',
 
     // Mod select (showModSelect).
     'mod.heading': 'SELECT MOD',
@@ -172,6 +174,7 @@ export const STRINGS = {
     'map.places': 'PLACES',
     'map.spaces': 'SPACES',
     'map.previewFallback': 'MAP',
+    'map.layoutAtlas': 'ATLAS',
 
     // Game setup (showSetup / _renderSetup).
     'setup.heading': 'GAME SETUP',
@@ -242,7 +245,6 @@ export const STRINGS = {
     'lobby.joined': 'joined',
     'lobby.join': 'JOIN',
     'lobby.full': 'FULL',
-    'lobby.playerFallback': 'Player {n}',
 
     // entry-ui.js: breadcrumb step labels (breadcrumbSteps).
     'breadcrumb.mode': 'MODE',

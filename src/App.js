@@ -813,7 +813,7 @@ class MonopolyBoard {
     this.menuEl.className = 'screen screen--hero';
     const totalMaps = MODS.reduce((n, m) => n + m.maps.length + m.worlds.length, 0);
     this.menuEl.innerHTML = `
-      <img class="hero-art" src="${this.activeMod.keyArt}" alt="Meinopoly: Dominion" draggable="false" />
+      <img class="hero-art" src="${this.activeMod.keyArt}" alt="${t('menu.heroAlt')}" draggable="false" />
       <div class="hero-overlay">
         <div class="mode-grid">
           <button class="pix-btn pix-btn--primary pix-btn--lg mode-btn" id="btn-mode-local">${t('menu.localGame')}</button>
@@ -896,7 +896,7 @@ class MonopolyBoard {
     let cards = '';
     this.availableMaps.forEach((mapJson, idx) => {
       const isWorld = mapJson.movementMode === 'atlas';
-      const layoutLabel = isWorld ? 'ATLAS' : mapJson.layout.type;
+      const layoutLabel = isWorld ? t('map.layoutAtlas') : mapJson.layout.type;
       const spaceLabel = isWorld ? (mapJson.places.length + ' ' + t('map.places')) : (mapJson.spaceCount + ' ' + t('map.spaces'));
       const catLabel = isWorld
         ? (mapJson.winPaths || []).join(' / ').toUpperCase()

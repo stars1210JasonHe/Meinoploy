@@ -45,7 +45,13 @@ export class Lobby {
   }
 
   async joinMatch(matchID, playerID) {
-    const name = this.playerName || t('lobby.playerFallback', { n: parseInt(playerID) + 1 });
+    // Wire default: boardgame.io persists playerName into shared match metadata that every
+    // client renders — this value is DATA, not UI copy, so locale must never cross the
+    // client boundary here (a zh-default client would otherwise mint "玩家 1" into state
+    // that an en client then has to display). Keep this a fixed English string, not t().
+    // The input placeholder below (~line 101 originally) stays localized — that's UI-local,
+    // never sent over the wire.
+    const name = this.playerName || `Player ${parseInt(playerID) + 1}`;
     try {
       const res = await fetch(`${this.serverUrl}/games/monopoly/${matchID}/join`, {
         method: 'POST',
