@@ -3781,6 +3781,10 @@ class MonopolyBoard {
     // the entire saved log as fresh AI chatter or carry over stale chat history.
     this.aiResponses = [];
     this.chatHistories = {};
+    // Final-review Minor #2: a long game's seen-count would suppress a shorter
+    // loaded game's unread dot (amplified by T4's full-history counting) —
+    // exitToMenu resets this; the direct-load path must too.
+    this._logSeenCount = 0;
     this.activeChatCharId = null;
     this._lastEventSeq = undefined;
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';

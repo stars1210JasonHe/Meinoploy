@@ -44,7 +44,12 @@ function deckLabelZh(deck) {
 }
 
 function seasonNameZh(season) {
-  return t('season.name.' + season.id);
+  // Final-review Minor #1: a future mod's custom season id has no i18n entry —
+  // t() then echoes the key back; fall back to the mod's own name (same
+  // key-echo detection App.js's _centerHtml uses for the season box).
+  const key = 'season.name.' + season.id;
+  const name = t(key);
+  return name === key ? season.name : name;
 }
 
 // ── zh formatter table (one entry per events.js TYPE_LIST member) ─────────
