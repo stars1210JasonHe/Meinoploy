@@ -216,9 +216,16 @@ Decomposed 2026-07-06 into: SP1 foundation (events+seats) → SP2 duel/对战 �
 > --portraits).
 
 ## Near-term (owner 2026-07-12): Localization 汉化
-Owner wants Chinese localization — EXPLICITLY not necessarily in wave 4; schedule as its own
-wave (Phase 9 already lists "Localization (English + Chinese)"). UI strings are scattered inline
-(templates in App.js/game-chrome/entry-ui) — needs a small string-table design first.
+> **DONE 2026-07-15 (feat/localization, 10 commits, SDD, 1392 unit + 45 E2E).** EN/中文
+> toggle (topbar LANG, localStorage, DEFAULT 中文): src/i18n.js flat tables (~250 keys/locale,
+> native-quality zh — 设定/设置, 支付/缴纳 register distinctions held through 3 reviews) across
+> all entry screens, in-game HUD, modals, lobby. Game LOG: event-driven rendering
+> (src/i18n-log.js) — en path delegates to the engine's own formatEventMessage (byte-parity
+> proven per-step against all 10 golden scenarios), zh covers all 42 event types; a LANG flip
+> re-renders the entire history live. ZERO engine/golden/MCP changes. E2E pinned en + a zh
+> smoke spec. Behavior change shipped with owner sign-off pending at acceptance: the log now
+> shows the full (200-cap) game history instead of resetting每 roll. Post-merge minors in
+> ledger (lobby LANG-flip name-input loss, unread double-render nit, t-shadow renames).
 
 ## Near-term (owner 2026-07-12): mod balance simulator (standalone)
 > **DONE 2026-07-14.** `npm run sim -- --mod <id>` runs any registered mod on its REAL board
