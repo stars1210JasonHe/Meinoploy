@@ -16,6 +16,7 @@ import { isDuelCooldownBlocked } from './events';
 import { createAnimator, DICE_TUMBLE_MS } from './anim';
 import { createAudio } from './audio';
 import { initLocale, getLocale, setLocale, onLocaleChange, t } from './i18n';
+import { renderLogLines } from './i18n-log';
 import { chipHtml, chipDetailHtml, tileDetailHtml, drawerShellHtml, tokenVisual, nodeGlow, legendHtml, NODE_GLOW_COLORS } from './game-chrome';
 import { resolveBoardBg, starfieldDataUri } from './board-bg';
 import { bloomSprite } from './wr-bloom';
@@ -553,7 +554,7 @@ class MonopolyBoard {
     this.drawerTabsEl = document.getElementById('drawer-tabs');
     this._drawerOpen = false;
     this._drawerTab = null;
-    this._logSeenCount = 0; // q2: G.messages.length last seen while the LOG tab was open/visible
+    this._logSeenCount = 0; // q2: message-producing-event count last seen while the LOG tab was open/visible (Task 4: was G.messages.length, now counts G.events entries that render a line — see _updateLogUnread)
     this.drawerTabsEl.addEventListener('click', (e) => {
       const btn = e.target.closest('.drawer-tabs__btn');
       if (!btn) return;
@@ -772,7 +773,9 @@ class MonopolyBoard {
     // q2: opening the LOG tab marks everything logged so far as "seen" —
     // this._lastG is the freshest G (renderTokens caches it every update(),
     // ahead of renderPlayerInfo/renderMessages); fall back to 0 pre-first-render.
-    if (tab === 'log') this._logSeenCount = this._lastG ? this._lastG.messages.length : 0;
+    // Task 4: counts message-producing G.events entries (renderLogLines'
+    // output length), not G.messages.length — see _updateLogUnread.
+    if (tab === 'log') this._logSeenCount = this._lastG ? renderLogLines(this._lastG.events, getLocale(), this._lastG).length : 0;
     this._updateLogUnread(); // clear the dot immediately, don't wait for the next state push
     const target = tab === 'log' ? this.messagesEl : tab === 'chat' ? this.chatPanelEl : this.manageEl;
     if (target && target.scrollIntoView) target.scrollIntoView({ block: 'nearest' });
@@ -785,18 +788,33 @@ class MonopolyBoard {
     if (this.drawerTabsEl) this.drawerTabsEl.querySelectorAll('.drawer-tabs__btn').forEach(b => b.classList.remove('drawer-tabs__btn--active'));
   }
 
-  // q2: LOG tab unread dot. Compares G.messages.length against the count last
-  // seen while the LOG tab was open/visible (this._logSeenCount). While the
-  // tab is actively open (viewingLog), the seen-count is kept in sync on every
-  // render so new lines arriving while the user is looking never flag unread;
-  // the moment the drawer closes or the tab switches away, that count freezes
-  // and anything appended after it lights the dot on the next render.
+  // q2: LOG tab unread dot. Compares the message-producing G.events count
+  // against the count last seen while the LOG tab was open/visible
+  // (this._logSeenCount). While the tab is actively open (viewingLog), the
+  // seen-count is kept in sync on every render so new lines arriving while
+  // the user is looking never flag unread; the moment the drawer closes or
+  // the tab switches away, that count freezes and anything appended after it
+  // lights the dot on the next render.
+  //
+  // Task 4: source moved from G.messages.length (a per-turn RESET buffer —
+  // its length could go DOWN between renders, e.g. right after a fresh roll,
+  // which would have made `count > this._logSeenCount` spuriously false and
+  // silently swallowed an unread flag EVERY turn) to G.events, which is
+  // append-only and monotonically grows for the life of a match except at
+  // the far edge of its cap (events.js EVENT_LOG_CAP_FALLBACK/
+  // RULES.core.eventLogCap — ~200 events; oldest entries are evicted once
+  // hit). That residual edge case is strictly rarer than the old buffer's
+  // every-single-turn reset, so this is a strict improvement, not a
+  // complete fix. renderLogLines' locale param doesn't change the COUNT
+  // (every type is null in the exact same conditions in every locale — see
+  // i18n-log.js's null-parity guarantee), only the text, so which locale is
+  // passed here is immaterial to correctness.
   _updateLogUnread(G) {
     if (!this.drawerTabsEl) return;
     const btn = this.drawerTabsEl.querySelector('.drawer-tabs__btn[data-tab="log"]');
     if (!btn) return;
     const g = G || this._lastG;
-    const count = g && g.messages ? g.messages.length : 0;
+    const count = g && g.events ? renderLogLines(g.events, getLocale(), g).length : 0;
     const viewingLog = this._drawerOpen && this._drawerTab === 'log';
     if (viewingLog) this._logSeenCount = count;
     const unread = !viewingLog && count > this._logSeenCount;
@@ -3021,16 +3039,16 @@ class MonopolyBoard {
     this.manageEl.innerHTML = `<div class="pix-panel"><div class="pix-panel__titlebar"><span class="pix-panel__title">${t('manage.title')}</span></div><div class="pix-panel__body manage">${rows}</div></div>`;
   }
 
+  // Event-driven, locale-aware (spec 2026-07-15-localization-design.md §3):
+  // source is G.events (append-only, never reset), not G.messages (a
+  // per-turn reset buffer the earlier implementation read) — the log now
+  // shows the WHOLE game history, and a LANG flip re-renders that entire
+  // history in the new language (renderLogLines re-derives every line from
+  // event data on every call, never from a cached string).
   renderMessages(G) {
-    const lines = G.messages.map(m => {
-      const lo = m.toLowerCase();
-      let kind = 'neutral';
-      if (/(collect|bought|wins|received|\+\$|salary|dividend|matures|inherit|refund)/.test(lo)) kind = 'good';
-      else if (/(pay|paid|rent|tax|fine|bankrupt|jail|lost|-\$)/.test(lo)) kind = 'bad';
-      return `<div class="logline logline--${kind}">${esc(m)}</div>`;
-    }).reverse().join('');
-    // Drawer HEADER only — the log LINES themselves (G.messages) are engine-side EN
-    // and localize via the event-driven renderer in Task 4, not here.
+    const lines = renderLogLines(G.events, getLocale(), G).map(({ kind, text }) => (
+      `<div class="logline logline--${kind}">${esc(text)}</div>`
+    )).reverse().join('');
     this.messagesEl.innerHTML = `<div class="logbox"><div class="logbox__title">${t('log.title')}</div><div class="logbox__list">${lines}</div></div>`;
   }
 
