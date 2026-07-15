@@ -1,20 +1,29 @@
 // Pure, dependency-light helpers for the pre-game entry UI. Jest-safe: this module
 // must NOT import images, the globe lib, or boardgame.io. App.js imports from here.
-// map-loader is the ONLY allowed import (it is itself Jest-safe — no image/globe imports).
+// map-loader and i18n are the only allowed imports (both Jest-safe — no image/globe
+// imports; i18n's localStorage access is guarded for the node test environment).
 
 import { generatePositions } from './map-loader';
+import { t } from './i18n';
 
+// Locale-aware count + word (spec 2026-07-15-localization-design.md §2, Task 2). Chinese
+// has no plural 's', so the zh table collapses .one/.other to the same string; English
+// keeps the singular/plural split so the legacy '1 MAP' / '4 MAPS' output survives byte-
+// for-byte through t(). `word` is lowercased to match the STRINGS key ('MAP' -> 'map').
 function pluralize(n, word) {
-  return n + ' ' + word + (n === 1 ? '' : 'S');
+  var key = 'entry.plural.' + word.toLowerCase() + (n === 1 ? '.one' : '.other');
+  return t(key, { n: n });
 }
 
 // Ordered entry steps. 'mod' is dropped when only one mod is registered (auto-skip).
+// Labels resolve via t() at breadcrumbSteps() call time (not here at module load) so a
+// LANG toggle after the module is first imported still repaints them correctly.
 var STEP_ORDER = [
-  { key: 'mode', label: 'MODE' },
-  { key: 'mod', label: 'MOD' },
-  { key: 'map', label: 'MAP' },
-  { key: 'setup', label: 'SETUP' },
-  { key: 'character', label: 'CHARACTER' },
+  { key: 'mode', tKey: 'breadcrumb.mode' },
+  { key: 'mod', tKey: 'breadcrumb.mod' },
+  { key: 'map', tKey: 'breadcrumb.map' },
+  { key: 'setup', tKey: 'breadcrumb.setup' },
+  { key: 'character', tKey: 'breadcrumb.character' },
 ];
 
 function breadcrumbSteps(opts) {
@@ -27,7 +36,7 @@ function breadcrumbSteps(opts) {
     var state = i < curIdx ? 'done' : (i === curIdx ? 'current' : 'future');
     return {
       key: s.key,
-      label: s.label,
+      label: t(s.tKey),
       value: state === 'future' ? '' : (picks[s.key] || ''),
       state: state,
       interactive: state === 'done',
@@ -93,7 +102,7 @@ function miniMapSvg(mapJson) {
   var pts = mapPreviewPoints(mapJson);
   var isAtlas = mapJson && mapJson.movementMode === 'atlas';
   if (!pts.length) {
-    var label = (mapJson && mapJson.layout && mapJson.layout.type ? mapJson.layout.type : 'MAP').toUpperCase();
+    var label = (mapJson && mapJson.layout && mapJson.layout.type ? mapJson.layout.type : t('map.previewFallback')).toUpperCase();
     return open +
       '<rect x="6" y="6" width="88" height="88" rx="6" fill="none" stroke="var(--accent)" stroke-opacity="0.5" stroke-width="2"/>' +
       '<text x="50" y="54" text-anchor="middle" font-size="12" fill="var(--accent)" opacity="0.7">' + label + '</text></svg>';

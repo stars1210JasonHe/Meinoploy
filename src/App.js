@@ -816,11 +816,11 @@ class MonopolyBoard {
       <img class="hero-art" src="${this.activeMod.keyArt}" alt="Meinopoly: Dominion" draggable="false" />
       <div class="hero-overlay">
         <div class="mode-grid">
-          <button class="pix-btn pix-btn--primary pix-btn--lg mode-btn" id="btn-mode-local">LOCAL GAME</button>
-          <button class="pix-btn pix-btn--default pix-btn--lg mode-btn" id="btn-mode-online">ONLINE GAME</button>
+          <button class="pix-btn pix-btn--primary pix-btn--lg mode-btn" id="btn-mode-local">${t('menu.localGame')}</button>
+          <button class="pix-btn pix-btn--default pix-btn--lg mode-btn" id="btn-mode-online">${t('menu.onlineGame')}</button>
         </div>
-        <div class="title__press"><span class="glyph glyph--arrow"></span> PRESS START</div>
-        <div class="title__foot">v0.4 · ${MODS.length} MODS · ${pluralize(totalMaps, 'MAP')} · TRADE &amp; AUCTION</div>
+        <div class="title__press"><span class="glyph glyph--arrow"></span> ${t('menu.pressStart')}</div>
+        <div class="title__foot">v0.4 · ${MODS.length} ${t('menu.modsWord')} · ${pluralize(totalMaps, 'MAP')} · ${t('menu.tradeAuction')}</div>
       </div>
     `;
     document.getElementById('btn-mode-local').onclick = () => { this.mode = 'local'; this.showModSelect(); };
@@ -861,9 +861,9 @@ class MonopolyBoard {
     });
     this.menuEl.innerHTML = `
       ${this._breadcrumb('mod')}
-      <div><div class="menu__heading">SELECT MOD</div><div class="menu__sub">Choose the game world to play</div></div>
+      <div><div class="menu__heading">${t('mod.heading')}</div><div class="menu__sub">${t('mod.subheading')}</div></div>
       <div class="map-grid">${cards}</div>
-      <button class="pix-btn pix-btn--ghost" id="btn-back-mode-mods"><span class="glyph glyph--arrow-back"></span> BACK</button>
+      <button class="pix-btn pix-btn--ghost" id="btn-back-mode-mods"><span class="glyph glyph--arrow-back"></span> ${t('mod.back')}</button>
     `;
     this.menuEl.querySelectorAll('.map-card').forEach(card => {
       card.onclick = () => {
@@ -897,7 +897,7 @@ class MonopolyBoard {
     this.availableMaps.forEach((mapJson, idx) => {
       const isWorld = mapJson.movementMode === 'atlas';
       const layoutLabel = isWorld ? 'ATLAS' : mapJson.layout.type;
-      const spaceLabel = isWorld ? (mapJson.places.length + ' PLACES') : (mapJson.spaceCount + ' SPACES');
+      const spaceLabel = isWorld ? (mapJson.places.length + ' ' + t('map.places')) : (mapJson.spaceCount + ' ' + t('map.spaces'));
       const catLabel = isWorld
         ? (mapJson.winPaths || []).join(' / ').toUpperCase()
         : ((mapJson.world && mapJson.world.category) || '');
@@ -922,9 +922,9 @@ class MonopolyBoard {
     });
     this.menuEl.innerHTML = `
       ${this._breadcrumb('map')}
-      <div><div class="menu__heading">SELECT MAP</div><div class="menu__sub">Choose the board you want to play on</div></div>
+      <div><div class="menu__heading">${t('map.heading')}</div><div class="menu__sub">${t('map.subheading')}</div></div>
       <div class="map-grid">${cards}</div>
-      <button class="pix-btn pix-btn--ghost" id="btn-back-mode"><span class="glyph glyph--arrow-back"></span> BACK</button>
+      <button class="pix-btn pix-btn--ghost" id="btn-back-mode"><span class="glyph glyph--arrow-back"></span> ${t('map.back')}</button>
     `;
     this.menuEl.querySelectorAll('.map-card').forEach(card => {
       card.onclick = () => {
@@ -1036,38 +1036,38 @@ class MonopolyBoard {
       botBtns += `<button class="pix-btn ${this.pendingBots === n ? 'pix-btn--primary' : 'pix-btn--default'} bot-btn" data-bots="${n}">${n}</button>`;
     }
     const MODES = [
-      { id: 'survival', label: 'LAST STANDING', desc: 'Last player not bankrupt wins. Classic elimination.' },
-      { id: 'wealth', label: 'TIMED · RICHEST', desc: 'After a set number of turns, the highest net worth wins.' },
-      { id: 'monopoly', label: 'DOMINION', desc: 'First to control a set number of full color groups wins instantly.' },
+      { id: 'survival', label: t('setup.modeSurvivalLabel'), desc: t('setup.modeSurvivalDesc') },
+      { id: 'wealth', label: t('setup.modeWealthLabel'), desc: t('setup.modeWealthDesc') },
+      { id: 'monopoly', label: t('setup.modeMonopolyLabel'), desc: t('setup.modeMonopolyDesc') },
     ];
     const cards = MODES.map(m => `
       <div class="pix-panel map-card vic-card ${s.primary === m.id ? 'vic-card--sel' : ''}" data-mode="${m.id}">
         <div class="pix-panel__body">
           <div class="map-card__title">${m.label}</div>
           <div class="map-card__desc">${m.desc}</div>
-          ${s.primary === m.id ? '<div class="charcard__seltag">SELECTED</div>' : ''}
+          ${s.primary === m.id ? `<div class="charcard__seltag">${t('setup.selected')}</div>` : ''}
         </div>
       </div>`).join('');
 
     let param = '';
     if (s.primary === 'wealth') {
-      param = `<div class="vic-param"><span class="aiset__label">TURN LIMIT</span>
+      param = `<div class="vic-param"><span class="aiset__label">${t('setup.turnLimit')}</span>
         <div class="trade__cashctl"><button id="vic-mt-dec">−</button><span class="trade__cashval">${s.maxTurns}</span><button id="vic-mt-inc">+</button></div></div>`;
     } else if (s.primary === 'monopoly') {
-      param = `<div class="vic-param"><span class="aiset__label">GROUPS TO WIN</span>
+      param = `<div class="vic-param"><span class="aiset__label">${t('setup.groupsToWin')}</span>
         <div class="trade__cashctl"><button id="vic-gw-dec">−</button><span class="trade__cashval">${s.groupsToWin}</span><button id="vic-gw-inc">+</button></div></div>`;
     }
 
     this.menuEl.innerHTML = `
       ${this._breadcrumb('setup')}
-      <div><div class="menu__heading">GAME SETUP</div><div class="menu__sub">Players &amp; victory condition</div></div>
-      <div class="setup__count"><span class="aiset__label">PLAYERS</span><div class="count-grid">${counts}</div></div>
-      <div class="setup__count" id="setup-bots-row"><span class="aiset__label">BOTS</span><div class="count-grid">${botBtns}</div></div>
+      <div><div class="menu__heading">${t('setup.heading')}</div><div class="menu__sub">${t('setup.subheading')}</div></div>
+      <div class="setup__count"><span class="aiset__label">${t('setup.players')}</span><div class="count-grid">${counts}</div></div>
+      <div class="setup__count" id="setup-bots-row"><span class="aiset__label">${t('setup.bots')}</span><div class="count-grid">${botBtns}</div></div>
       <div class="vic-grid">${cards}</div>
       <div class="vic-paramrow">${param}</div>
       <div class="vic-actions">
-        <button class="pix-btn pix-btn--ghost" id="btn-vic-back"><span class="glyph glyph--arrow-back"></span> BACK</button>
-        <button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-vic-start">START GAME <span class="glyph glyph--arrow"></span></button>
+        <button class="pix-btn pix-btn--ghost" id="btn-vic-back"><span class="glyph glyph--arrow-back"></span> ${t('setup.back')}</button>
+        <button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-vic-start">${t('setup.start')} <span class="glyph glyph--arrow"></span></button>
       </div>
     `;
 
@@ -1579,7 +1579,7 @@ class MonopolyBoard {
             <div class="charcard__id">
               <span class="charcard__name" style="color:${readableNameColor(char.color)}">${esc(char.name)}</span>
               <span class="charcard__title">${esc(char.title)}</span>
-              <span class="charcard__money">START ${money(startMoney)}</span>
+              <span class="charcard__money">${t('charselect.startMoney')} ${money(startMoney)}</span>
             </div>
           </div>
           <div class="charcard__stats">${statRowsHtml(char.stats, char.color)}</div>
@@ -1588,9 +1588,9 @@ class MonopolyBoard {
             <span class="charcard__passive-desc">${esc(char.passive.description)}</span>
           </div>
           <div class="charcard__foot">
-            <button class="charcard__lore" data-char-id="${char.id}">VIEW LORE</button>
-            ${this.characterAI.apiKey ? `<button class="charcard__ai" data-char-id="${char.id}">ASK AI</button>` : ''}
-            ${taken ? '<span class="charcard__takentag">TAKEN</span>' : (selected ? '<span class="charcard__seltag">SELECTED</span>' : '')}
+            <button class="charcard__lore" data-char-id="${char.id}">${t('charselect.viewLore')}</button>
+            ${this.characterAI.apiKey ? `<button class="charcard__ai" data-char-id="${char.id}">${t('charselect.askAI')}</button>` : ''}
+            ${taken ? `<span class="charcard__takentag">${t('charselect.taken')}</span>` : (selected ? `<span class="charcard__seltag">${t('charselect.selected')}</span>` : '')}
           </div>
           <div id="char-chat-${char.id}" style="display:none;"></div>
         </div>`;
@@ -1599,22 +1599,22 @@ class MonopolyBoard {
     const picked = this._pendingCharId ? this.activeMod.characters.find(c => c.id === this._pendingCharId) : null;
     const chosenHtml = picked
       ? `${portraitHtml(picked, 40, false)}<span style="color:${readableNameColor(picked.color)}">${esc(picked.name)}</span><span class="select__chosen-title">${esc(picked.title)}</span>`
-      : '<span class="select__chosen-empty">Select a councillor to continue</span>';
+      : `<span class="select__chosen-empty">${t('charselect.selectPrompt')}</span>`;
 
     this.charSelectEl.innerHTML = `
       ${this._breadcrumb('character')}
       <div class="select__head">
         <div class="select__heading">
-          <span class="select__p">${actingIsBot ? 'BOT 选择中…' : 'PLAYER ' + playerNo}</span>
-          <span class="select__h">CHOOSE YOUR CHARACTER</span>
+          <span class="select__p">${actingIsBot ? t('charselect.botPicking') : t('charselect.player', { n: playerNo })}</span>
+          <span class="select__h">${t('charselect.heading')}</span>
         </div>
-        <div class="select__sub">Each councillor carries unique stats and a passive edge.</div>
+        <div class="select__sub">${t('charselect.subheading')}</div>
       </div>
       <div class="select__grid">${cards}</div>
       <div class="select__bar">
-        <button class="pix-btn pix-btn--ghost" id="btn-select-back"><span class="glyph glyph--arrow-back"></span> BACK</button>
+        <button class="pix-btn pix-btn--ghost" id="btn-select-back"><span class="glyph glyph--arrow-back"></span> ${t('charselect.back')}</button>
         <div class="select__chosen">${chosenHtml}</div>
-        <button class="pix-btn pix-btn--primary" id="btn-select-confirm" ${picked ? '' : 'disabled'}>${isLast ? 'BEGIN GAME <span class="glyph glyph--arrow"></span>' : 'NEXT PLAYER <span class="glyph glyph--arrow"></span>'}</button>
+        <button class="pix-btn pix-btn--primary" id="btn-select-confirm" ${picked ? '' : 'disabled'}>${isLast ? t('charselect.beginGame') + ' <span class="glyph glyph--arrow"></span>' : t('charselect.nextPlayer') + ' <span class="glyph glyph--arrow"></span>'}</button>
       </div>
     `;
 
@@ -3192,25 +3192,25 @@ class MonopolyBoard {
     const winnerEntry = standings.find(s => String(s.id) === winnerId) || standings[0];
     const wIdx = parseInt(winnerEntry.id);
     const wChar = G.players[wIdx].character;
-    const wName = wChar ? wChar.name : `Player ${wIdx + 1}`;
+    const wName = wChar ? wChar.name : t('results.playerFallback', { n: wIdx + 1 });
     const wColor = this._playerColor(G, wIdx);
 
     let reason;
-    if (ctx.gameover.reason === 'dominion') reason = `${wName} controls ${winnerEntry.groups} color groups.`;
-    else if (ctx.gameover.reason === 'maxTurns') reason = `Turn limit reached — richest wins.`;
-    else if (ctx.gameover.reason === 'survival') reason = `${wName} is the last one standing.`;
-    else reason = `${wName} controls the Council.`;
+    if (ctx.gameover.reason === 'dominion') reason = t('results.reasonDominion', { name: wName, groups: winnerEntry.groups });
+    else if (ctx.gameover.reason === 'maxTurns') reason = t('results.reasonMaxTurns');
+    else if (ctx.gameover.reason === 'survival') reason = t('results.reasonSurvival', { name: wName });
+    else reason = t('results.reasonDefault', { name: wName });
 
     const rows = standings.map((s, idx) => {
       const i = parseInt(s.id);
       const ch = G.players[i].character;
-      const nm = ch ? ch.name : `Player ${i + 1}`;
+      const nm = ch ? ch.name : t('results.playerFallback', { n: i + 1 });
       const col = this._playerColor(G, i);
       return `<div class="standrow">
         <span class="standrow__rank">${idx + 1}</span>
         ${tokenHtml(col, ch ? ch.name[0] : i + 1, true)}
         <span class="standrow__name" style="color:${col}">${esc(nm)}</span>
-        <span class="standrow__props">${s.props} PROPS</span>
+        <span class="standrow__props">${s.props} ${t('results.propsWord')}</span>
         <span class="standrow__net">${money(s.score)}</span>
       </div>`;
     }).join('');
@@ -3218,15 +3218,15 @@ class MonopolyBoard {
     this.resultsEl.className = 'screen screen--results';
     this.resultsEl.innerHTML = `
       <div class="results__crown">${glyphHtml('crown')}</div>
-      <div class="results__victory">VICTORY</div>
+      <div class="results__victory">${t('results.victory')}</div>
       ${portraitHtml(wChar, 120, true)}
       <div class="results__winner" style="color:${wColor}">${esc(wName)}</div>
       <div class="results__sub">${esc(reason)}</div>
       <div class="pix-panel results__table">
-        <div class="pix-panel__titlebar"><span class="pix-panel__title">FINAL STANDINGS</span></div>
+        <div class="pix-panel__titlebar"><span class="pix-panel__title">${t('results.finalStandings')}</span></div>
         <div class="pix-panel__body">${rows}</div>
       </div>
-      <button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-replay">PLAY AGAIN</button>
+      <button class="pix-btn pix-btn--primary pix-btn--lg" id="btn-replay">${t('results.playAgain')}</button>
     `;
     document.getElementById('btn-replay').onclick = () => this.exitToMenu();
   }
@@ -3326,17 +3326,17 @@ class MonopolyBoard {
     const entries = Object.entries(saves).sort((a, b) => b[1].timestamp - a[1].timestamp);
     let body;
     if (entries.length === 0) {
-      body = '<div class="saves__empty">No saved games. Save during play to see them here.</div>';
+      body = `<div class="saves__empty">${t('saves.empty')}</div>`;
     } else {
       body = entries.map(([name, data]) => {
         const date = new Date(data.timestamp).toLocaleString();
         return `<div class="saves__row">
-          <div><div class="saves__name">${esc(name.replace('meinopoly_save_', ''))}</div><div class="saves__meta">${data.numPlayers} players · Turn ${data.G.totalTurns} · ${esc(date)}</div></div>
-          <div class="saves__actions"><button class="pix-btn pix-btn--success pix-btn--sm btn-load-save" data-save="${esc(name)}">LOAD</button><button class="pix-btn pix-btn--danger pix-btn--sm btn-delete-save" data-save="${esc(name)}">DEL</button></div>
+          <div><div class="saves__name">${esc(name.replace('meinopoly_save_', ''))}</div><div class="saves__meta">${data.numPlayers} ${t('saves.playersWord')} · ${t('saves.turnWord')} ${data.G.totalTurns} · ${esc(date)}</div></div>
+          <div class="saves__actions"><button class="pix-btn pix-btn--success pix-btn--sm btn-load-save" data-save="${esc(name)}">${t('saves.load')}</button><button class="pix-btn pix-btn--danger pix-btn--sm btn-delete-save" data-save="${esc(name)}">${t('saves.delete')}</button></div>
         </div>`;
       }).join('');
     }
-    this.openUiModal(`<div class="saves"><div class="saves__head">SAVED GAMES</div>${body}<div class="aiset__actions"><button class="pix-btn pix-btn--ghost" id="btn-saves-close">CLOSE</button></div></div>`);
+    this.openUiModal(`<div class="saves"><div class="saves__head">${t('saves.heading')}</div>${body}<div class="aiset__actions"><button class="pix-btn pix-btn--ghost" id="btn-saves-close">${t('saves.close')}</button></div></div>`);
     document.getElementById('btn-saves-close').onclick = () => this.closeUiModal();
     this.uiModalBoxEl.querySelectorAll('.btn-load-save').forEach(btn => {
       btn.onclick = () => {

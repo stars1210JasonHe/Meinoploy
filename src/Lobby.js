@@ -1,6 +1,8 @@
 // Meinopoly — Online Lobby UI
 // Uses boardgame.io v0.45 REST API for match management
 
+import { t } from './i18n';
+
 export class Lobby {
   constructor(rootElement, serverUrl, onJoin) {
     this.rootElement = rootElement;
@@ -43,7 +45,7 @@ export class Lobby {
   }
 
   async joinMatch(matchID, playerID) {
-    const name = this.playerName || `Player ${parseInt(playerID) + 1}`;
+    const name = this.playerName || t('lobby.playerFallback', { n: parseInt(playerID) + 1 });
     try {
       const res = await fetch(`${this.serverUrl}/games/monopoly/${matchID}/join`, {
         method: 'POST',
@@ -65,7 +67,7 @@ export class Lobby {
   render() {
     let matchRows = '';
     if (!this.matches || this.matches.length === 0) {
-      matchRows = '<div class="lobby2__empty">No games available. Create one!</div>';
+      matchRows = `<div class="lobby2__empty">${t('lobby.noGames')}</div>`;
     } else {
       this.matches.forEach(match => {
         const joinedCount = match.players.filter(p => p.name).length;
@@ -75,42 +77,42 @@ export class Lobby {
         const seats = match.players.map(p =>
           p.name
             ? `<span class="lobby2__seat joined">${p.name}</span>`
-            : `<span class="lobby2__seat open">SLOT ${p.id}</span>`
+            : `<span class="lobby2__seat open">${t('lobby.slotWord')} ${p.id}</span>`
         ).join('');
         matchRows += `
           <div class="lobby2__matchrow">
             <div>
-              <div class="lobby2__matchid">GAME ${match.matchID.substring(0, 8)}</div>
-              <div class="lobby2__matchmeta">${joinedCount}/${totalPlayers} joined</div>
+              <div class="lobby2__matchid">${t('lobby.gameWord')} ${match.matchID.substring(0, 8)}</div>
+              <div class="lobby2__matchmeta">${joinedCount}/${totalPlayers} ${t('lobby.joined')}</div>
               <div class="lobby2__seats">${seats}</div>
             </div>
             ${!isFull && openSlots.length > 0
-              ? `<button class="pix-btn pix-btn--success pix-btn--sm btn-join-match" data-match="${match.matchID}" data-slot="${openSlots[0]}">JOIN</button>`
-              : '<span class="lobby2__seat">FULL</span>'}
+              ? `<button class="pix-btn pix-btn--success pix-btn--sm btn-join-match" data-match="${match.matchID}" data-slot="${openSlots[0]}">${t('lobby.join')}</button>`
+              : `<span class="lobby2__seat">${t('lobby.full')}</span>`}
           </div>`;
       });
     }
 
     const html = `
-      <div><div class="menu__heading">ONLINE LOBBY</div><div class="menu__sub">Create or join a networked match</div></div>
+      <div><div class="menu__heading">${t('lobby.heading')}</div><div class="menu__sub">${t('lobby.subheading')}</div></div>
       <div class="lobby2">
-        <div class="pix-panel"><div class="pix-panel__titlebar"><span class="pix-panel__title">YOUR NAME</span></div>
+        <div class="pix-panel"><div class="pix-panel__titlebar"><span class="pix-panel__title">${t('lobby.yourName')}</span></div>
           <div class="pix-panel__body lobby2__nameinput">
-            <input type="text" id="lobby-player-name" value="${this.playerName}" placeholder="Enter your name" />
+            <input type="text" id="lobby-player-name" value="${this.playerName}" placeholder="${t('lobby.namePlaceholder')}" />
           </div>
         </div>
-        <div class="pix-panel"><div class="pix-panel__titlebar"><span class="pix-panel__title">CREATE GAME</span></div>
+        <div class="pix-panel"><div class="pix-panel__titlebar"><span class="pix-panel__title">${t('lobby.createGame')}</span></div>
           <div class="pix-panel__body lobby2__createrow">
             <select id="lobby-player-count">
-              ${[2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<option value="${n}">${n} PLAYERS</option>`).join('')}
+              ${[2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<option value="${n}">${n} ${t('lobby.playersOption')}</option>`).join('')}
             </select>
-            <button id="btn-create-match" class="pix-btn pix-btn--primary">CREATE</button>
+            <button id="btn-create-match" class="pix-btn pix-btn--primary">${t('lobby.create')}</button>
           </div>
         </div>
-        <div class="pix-panel"><div class="pix-panel__titlebar"><span class="pix-panel__title">AVAILABLE GAMES</span><button id="btn-refresh" class="pix-panel__right" style="cursor:pointer;">REFRESH</button></div>
+        <div class="pix-panel"><div class="pix-panel__titlebar"><span class="pix-panel__title">${t('lobby.availableGames')}</span><button id="btn-refresh" class="pix-panel__right" style="cursor:pointer;">${t('lobby.refresh')}</button></div>
           <div class="pix-panel__body">${matchRows}</div>
         </div>
-        <button id="btn-lobby-back" class="pix-btn pix-btn--ghost">&#9666; BACK TO MENU</button>
+        <button id="btn-lobby-back" class="pix-btn pix-btn--ghost">&#9666; ${t('lobby.backToMenu')}</button>
       </div>`;
 
     this.rootElement.innerHTML = html;
