@@ -101,4 +101,37 @@ describe('stateDigest', () => {
     const over = stateDigest(G, { ...ctx, gameover: { winner: '0', reason: 'survival' } }, '0');
     expect(over.startsWith('GAME OVER')).toBe(true);
   });
+
+  // Ticket: the pendingCard DECISION line used to offer "acceptCard or
+  // redrawCard" unconditionally, regardless of whether the seat could
+  // actually redraw — mirrors Game.js's redrawCard guard (merchant passive =
+  // free unlimited redraws; otherwise player.luckRedraws > 0), same condition
+  // legal-moves.js already uses to decide whether to list the move at all.
+  test('pendingCard: redrawCard hint only offered when the seat can actually redraw', () => {
+    const client = startedClient();
+    const { G, ctx } = client.getState();
+    const seat = ctx.currentPlayer;
+    const withCard = (patch) => ({
+      ...G,
+      pendingCard: { card: { text: 'Test card' }, deck: 'chance' },
+      players: G.players.map(p => (p.id === seat ? { ...p, ...patch } : p)),
+    });
+
+    // No redraws left, not a merchant -> no redraw hint.
+    const ineligible = withCard({ luckRedraws: 0 });
+    const dIneligible = stateDigest(ineligible, ctx, seat);
+    expect(dIneligible).toContain('acceptCard.');
+    expect(dIneligible).not.toContain('redrawCard');
+
+    // luckRedraws > 0 -> redraw hint offered.
+    const eligible = withCard({ luckRedraws: 2 });
+    const dEligible = stateDigest(eligible, ctx, seat);
+    expect(dEligible).toContain('acceptCard or redrawCard.');
+
+    // Merchant passive -> redraw hint offered even with zero luckRedraws.
+    const merchantChar = { ...G.players.find(p => p.id === seat).character, passive: { id: 'merchant' } };
+    const merchant = withCard({ luckRedraws: 0, character: merchantChar });
+    const dMerchant = stateDigest(merchant, ctx, seat);
+    expect(dMerchant).toContain('acceptCard or redrawCard.');
+  });
 });

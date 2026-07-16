@@ -86,7 +86,15 @@ export function stateDigest(G, ctx, seat) {
     lines.push(`DECISION: you may buyProperty (${spaceName(G, G.players[Number(seat)].position)} for $${G.effectivePrice}) or passProperty (starts an auction).`);
   }
   if (G.pendingCard && ctx.currentPlayer === seat) {
-    lines.push(`DECISION: card drawn — "${G.pendingCard.card ? G.pendingCard.card.text : ''}" — acceptCard or redrawCard.`);
+    // Redraw eligibility mirror of Game.js's redrawCard guard (merchant passive
+    // = unlimited free redraws; otherwise player.luckRedraws > 0) — same
+    // condition legal-moves.js:269 uses to decide whether to list redrawCard at
+    // all. Ticket: this line previously offered "or redrawCard" unconditionally,
+    // even to a seat with zero redraws left and no merchant passive.
+    const p = G.players[Number(seat)];
+    const merchant = p && p.character && p.character.passive && p.character.passive.id === 'merchant';
+    const canRedraw = merchant || (p && p.luckRedraws > 0);
+    lines.push(`DECISION: card drawn — "${G.pendingCard.card ? G.pendingCard.card.text : ''}" — acceptCard${canRedraw ? ' or redrawCard' : ''}.`);
   }
   if (G.awaitingRoute && ctx.currentPlayer === seat) {
     lines.push('DECISION: choose a route — commitRoute(route) (see list_legal_moves for choices).');
