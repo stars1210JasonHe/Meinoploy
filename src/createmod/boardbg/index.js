@@ -48,3 +48,36 @@ export async function generateBoardBg(promptInput, opts, imagesClient, codec) {
   const quant = quantizeMedianCut(small, BG_COLORS);
   return { prompt, warnings, png: codec.encode(quant), usage };
 }
+
+// Idempotent string-patch of a freshly emitted bundle.client.js (see templates.js's
+// bundleClientJs — the plain template always emits `atlasAssets: {},` with no `mapAssets`
+// line unless `world.mapImage` was supplied at creation time). Wires a generated board
+// background (mods/<id>/backgrounds/<targetId>.png, from gen-boardbg) into atlasAssets
+// (world/atlas mods) or a new mapAssets entry (classic mods) — the exact shapes hand-wired
+// into mods/silk-road/bundle.client.js and mods/gilded-rails/bundle.client.js respectively.
+// Pure (string-in/out); the CLI does the fs existence check + read/write. Mirrors
+// registry-patch.js's check-then-patch idiom: safe to call on an already-wired file (no-op)
+// or on a hand-edited file that doesn't match the known template shape (no-op, never guesses).
+const GLOBE_IMPORT_LINE = "import { getGlobe } from '../dominion/atlas/globe-lib';\n";
+const ATLAS_EMPTY_LINE = '  atlasAssets: {},\n';
+
+export function patchBundleClientBoardBg(contents, target) {
+  const importLine = `import boardBg from './backgrounds/${target.targetId}.png';\n`;
+  if (contents.includes(importLine)) return { contents, changed: false }; // already wired
+
+  if (!contents.includes(GLOBE_IMPORT_LINE)) return { contents, changed: false }; // unrecognized shape
+  if (!contents.includes(ATLAS_EMPTY_LINE)) return { contents, changed: false }; // atlasAssets already non-empty (e.g. world.mapImage) or edited
+
+  const withImport = contents.replace(GLOBE_IMPORT_LINE, GLOBE_IMPORT_LINE + importLine);
+
+  if (target.kind === 'world') {
+    const wired = withImport.replace(ATLAS_EMPTY_LINE,
+      `  atlasAssets: { '${target.targetId}': { worldBg: boardBg, cityImages: {} } },\n`);
+    return { contents: wired, changed: true };
+  }
+  // classic (kind === 'map'): atlasAssets stays `{}`; add a sibling mapAssets entry.
+  if (withImport.includes('  mapAssets:')) return { contents, changed: false }; // already has one
+  const wired = withImport.replace(ATLAS_EMPTY_LINE,
+    ATLAS_EMPTY_LINE + `  mapAssets: { '${target.targetId}': { boardBg: boardBg } },\n`);
+  return { contents: wired, changed: true };
+}

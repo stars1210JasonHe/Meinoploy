@@ -43,7 +43,7 @@ function resolveName(dataJson, modDir, modId) {
 // portraits to wire yet) while leaving the actual portraits/*.png files on disk untouched; a
 // following gen-portraits run must not treat "all PNGs present" as "nothing to do" — the wiring
 // itself needs redoing even though no image needs regenerating.
-function rewireCharactersJs(dataJson, modDir, modId, roster) {
+export function rewireCharactersJs(dataJson, modDir, modId, roster) {
   const name = resolveName(dataJson, modDir, modId);
   const portraits = roster.map(c => ({ id: c.id, path: `portraits/${c.id}.png` }));
   fs.writeFileSync(path.join(modDir, 'characters.js'), charactersJs({ name, portraits }));

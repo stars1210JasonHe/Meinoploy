@@ -11,6 +11,7 @@ import path from 'path';
 import { validateModInput } from '../src/createmod/validate';
 import { emitMod } from '../src/createmod/emit';
 import { patchRegistries, unpatchRegistries } from '../src/createmod/registry-patch';
+import { boardBgTarget, patchBundleClientBoardBg } from '../src/createmod/boardbg';
 import { expandFacts } from '../src/createmod/smart/index';
 import { ARCHETYPES } from '../mods/dominion/atlas/archetypes';
 import { CHANCE_CARDS, COMMUNITY_CARDS } from '../mods/dominion/cards';
@@ -193,6 +194,53 @@ export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, forc
   fs.writeFileSync(indexPath, patched.indexSrc);
   fs.writeFileSync(appPath, patched.appSrc);
 
+  // Post-write REWIRE pass (ticket 2026-07-14: `create-mod --force` re-emits characters.js /
+  // bundle.client.js from the input, clobbering post-creation enrichments that don't round-trip
+  // through the input JSON — gen-portraits' portraits/*.png and gen-boardbg's backgrounds/*.png
+  // both survive on disk across a re-emit, but the wiring that points generated JS at them does
+  // not). This re-wires them back in when they're present. It never invents new art, never calls
+  // an API, and is idempotent — safe to run after every create-mod call, forced or not.
+  const rewire = { portraits: 0, boardBg: null };
+  const modDir = path.join(rootDir, 'mods', input.id);
+
+  // 1. Portraits — same allPresent check gen-portraits.js's runGenPortraits uses (a PNG on disk
+  // for every roster id). Reuses rewireCharactersJs (exported from gen-portraits.js) rather than
+  // re-deriving the PORTRAIT_MAP template here. Lazy require: mirrors chainPortraits below, so a
+  // unit test that never plants portraits never pulls in gen-portraits' network-capable deps.
+  const portraitsDir = path.join(modDir, 'portraits');
+  const wantedPortraits = (normalized.roster || []).map(c => `${c.id}.png`);
+  const existingPortraits = fs.existsSync(portraitsDir) ? fs.readdirSync(portraitsDir) : [];
+  const allPortraitsPresent = wantedPortraits.length > 0 && wantedPortraits.every(f => existingPortraits.includes(f));
+  if (allPortraitsPresent) {
+    const { rewireCharactersJs } = require('./gen-portraits');
+    rewireCharactersJs(normalized, modDir, input.id, normalized.roster);
+    rewire.portraits = wantedPortraits.length;
+    console.log(`[rewire] portraits: ${rewire.portraits} wired`);
+  }
+
+  // 2. Board background — mirrors boardBgTarget's own world/map resolution: targetId is the
+  // world id for atlas mods, the map id for classic mods (src/createmod/boardbg). If gen-boardbg
+  // already produced mods/<id>/backgrounds/<targetId>.png, string-patch the freshly emitted
+  // bundle.client.js to import + wire it. patchBundleClientBoardBg is idempotent (no-ops if
+  // already wired or the file doesn't match a known template shape).
+  try {
+    const target = boardBgTarget(normalized, { modName: normalized.name });
+    const bgPngPath = path.join(modDir, 'backgrounds', `${target.targetId}.png`);
+    if (fs.existsSync(bgPngPath)) {
+      const bundleClientPath = path.join(modDir, 'bundle.client.js');
+      const before = fs.readFileSync(bundleClientPath, 'utf8');
+      const patched2 = patchBundleClientBoardBg(before, target);
+      if (patched2.changed) {
+        fs.writeFileSync(bundleClientPath, patched2.contents);
+        rewire.boardBg = { kind: target.kind, targetId: target.targetId };
+        console.log(`[rewire] boardBg: ${target.kind === 'world' ? 'atlas' : 'map'} '${target.targetId}' wired`);
+      }
+    }
+  } catch (e) {
+    // Advisory only — a malformed/hand-edited data shape must never block mod creation.
+    warnings.push(`boardBg rewire skipped: ${e.message}`);
+  }
+
   // Persist the balance report beside the mod (spec §1 — the persist-for-later
   // pattern backgrounds/*.prompt.txt established). Written after the mod files
   // so a balance-report can never exist for a mod that failed to write.
@@ -213,7 +261,7 @@ export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, forc
     }));
     written.push(path.join('mods', input.id, 'balance-report.md'));
   }
-  return { ok: true, errors: [], warnings, id: input.id, written };
+  return { ok: true, errors: [], warnings, id: input.id, written, rewire };
 }
 
 export function removeMod({ id, rootDir = REPO_ROOT }) {
