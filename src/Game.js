@@ -1504,8 +1504,13 @@ export const Monopoly = {
       // only applyCard's card_applied event/message follows.
       applyCard(G, ctx, player, card, deck, cardIndex);
       // applyCard can chain a NEW pending card (atlas moveTo onto a card
-      // space) — don't clobber it or the card phase.
-      if (G.turnPhase !== 'card' && G.turnPhase !== 'duel') {
+      // space) — don't clobber it or the card phase. Chaining is detected by
+      // G.pendingCard, NOT by turnPhase: turnPhase is already 'card' from the
+      // original draw (handleLanding's prompt path), so most applyCard
+      // branches (pay/payPercent/downgrade/goToJail never touch turnPhase)
+      // leave it 'card' — the old turnPhase check misread that stale value as
+      // a chained card and left the turn permanently un-endable.
+      if (!G.pendingCard && G.turnPhase !== 'duel') {
         G.turnPhase = G.canBuy ? 'act' : 'done';
       }
     },
@@ -1527,9 +1532,10 @@ export const Monopoly = {
       const { card: newCard, index: cardIndex } = drawCard(ctx, deck);
       logEvent(G, 'card_redrawn', player.id, { deck: deckId, newText: newCard.text });
       applyCard(G, ctx, player, newCard, deckId, cardIndex);
-      // applyCard can chain a NEW pending card (atlas moveTo onto a card
-      // space) — don't clobber it or the card phase.
-      if (G.turnPhase !== 'card' && G.turnPhase !== 'duel') {
+      // Chained-card detection via G.pendingCard — same reasoning as
+      // acceptCard above (the old turnPhase check deadlocked the turn on
+      // every redraw into a non-chaining card).
+      if (!G.pendingCard && G.turnPhase !== 'duel') {
         G.turnPhase = G.canBuy ? 'act' : 'done';
       }
     },

@@ -1028,6 +1028,62 @@ describe('acceptCard / redrawCard', () => {
     expect(G.players[0].position).toBe(G.board.jail);
     expect(G.players[0].inJail).toBe(true);
   });
+
+  // Regression: the real draw path (handleLanding) sets turnPhase='card'
+  // BEFORE the player accepts/redraws. Card actions like goToJail/pay never
+  // touch turnPhase in applyCard, so the old chain-guard (`turnPhase !==
+  // 'card'`) misread the stale 'card' as a chained pending card and never
+  // restored 'done' — END TURN stayed disabled forever (E2E season-spec
+  // deadlock, reproduced with a live G dump: turnPhase 'card',
+  // pendingCard null).
+  test('acceptCard from the real card phase restores turnPhase (goToJail deadlock)', () => {
+    const G = Monopoly.setup({ numPlayers: 2, playOrder: ['0', '1'] });
+    G.phase = 'play';
+    G.hasRolled = true;
+    G.turnPhase = 'card'; // as handleLanding's prompt path leaves it
+    G.pendingCard = { card: { text: 'Busted!', action: 'goToJail' }, deck: 'chance' };
+    Monopoly.moves.acceptCard(G, { currentPlayer: '0', random: { Number: () => 0 }, events: { endTurn: () => {} } });
+    expect(G.pendingCard).toBeNull();
+    expect(G.players[0].inJail).toBe(true);
+    expect(G.turnPhase).toBe('done');
+  });
+
+  test('acceptCard from the real card phase restores turnPhase (pay card)', () => {
+    const G = freshG();
+    G.hasRolled = true;
+    G.turnPhase = 'card';
+    G.pendingCard = { card: { text: 'Pay $50', action: 'pay', value: 50 }, deck: 'chance' };
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+    expect(G.pendingCard).toBeNull();
+    expect(G.turnPhase).toBe('done');
+  });
+
+  test('redrawCard from the real card phase restores turnPhase', () => {
+    const G = freshG();
+    G.players[0].luckRedraws = 1;
+    G.hasRolled = true;
+    G.turnPhase = 'card';
+    G.pendingCard = { card: { text: 'Pay $50', action: 'pay', value: 50 }, deck: 'chance' };
+    Monopoly.moves.redrawCard(G, makeCtx('0', 1, 1));
+    expect(G.pendingCard).toBeNull();
+    expect(G.turnPhase).toBe('done');
+  });
+
+  test('acceptCard keeps the card phase when applyCard chains a NEW pending card', () => {
+    const G = Monopoly.setup({ numPlayers: 2, playOrder: ['0', '1'] });
+    G.phase = 'play';
+    G.hasRolled = true;
+    G.turnPhase = 'card';
+    G.players[0].luckRedraws = 1; // makes the chained negative card prompt again
+    // moveTo a chance space; the chained draw must offer a redraw-eligible
+    // card, so stub the deck to a single 'pay' card.
+    const chanceIdx = G.board.spaces.findIndex(s => s.type === 'chance');
+    G.board.chanceCards = [{ text: 'Pay $99', action: 'pay', value: 99 }];
+    G.pendingCard = { card: { text: 'Advance!', action: 'moveTo', value: chanceIdx }, deck: 'community' };
+    Monopoly.moves.acceptCard(G, { currentPlayer: '0', random: { Number: () => 0 }, events: { endTurn: () => {} } });
+    expect(G.pendingCard).not.toBeNull(); // chained card is pending
+    expect(G.turnPhase).toBe('card'); // phase preserved for the new prompt
+  });
 });
 
 // ─── UPGRADE PROPERTY ──────────────────────────────────
