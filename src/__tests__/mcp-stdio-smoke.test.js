@@ -78,7 +78,7 @@ function killTree(pid) {
 }
 
 describe('stdio smoke', () => {
-  let gamePort, gameProc, mcpProc, mcp, sessionFile;
+  let gamePort, gameProc, mcpProc, mcp, sessionFile, gameStderrBuf;
 
   beforeAll(async () => {
     try {
@@ -87,9 +87,22 @@ describe('stdio smoke', () => {
       console.warn('\n[mcp-stdio-smoke] SANDBOX BLOCKS PORTS — SKIPPING the whole-stack smoke test\n');
       gamePort = null; return;
     }
+    // Ticket (m10, final review): this was spawned with stdio:'ignore', so a
+    // boot failure inside the waitHttp() window below surfaced only as the
+    // generic "server not up" — no server-side diagnostic at all, asymmetric
+    // with McpStdio's own stderrBuf capture (used above in request()'s
+    // timeout message). Capture gameProc's stderr into a buffer and fold it
+    // into the waitHttp failure so a real boot error (e.g. a stack trace) is
+    // visible in the test failure output instead of just "not up".
+    gameStderrBuf = '';
     gameProc = spawn(process.execPath, ['-r', 'esm', 'server.js'],
-      { cwd: ROOT, env: { ...process.env, PORT: String(gamePort) }, stdio: 'ignore' });
-    await waitHttp(`http://127.0.0.1:${gamePort}/games/monopoly`, 20000);
+      { cwd: ROOT, env: { ...process.env, PORT: String(gamePort) }, stdio: ['ignore', 'ignore', 'pipe'] });
+    gameProc.stderr.on('data', (d) => { gameStderrBuf += d.toString(); });
+    try {
+      await waitHttp(`http://127.0.0.1:${gamePort}/games/monopoly`, 20000);
+    } catch (e) {
+      throw new Error(`${e.message} — gameProc stderr so far:\n${gameStderrBuf || '(empty)'}`);
+    }
     sessionFile = path.join(ROOT, '.superpowers', `mcp-smoke-${Date.now()}.json`);
     mcpProc = spawn(process.execPath, ['scripts/mcp-server.js'],
       { cwd: ROOT, env: { ...process.env, MEINOPOLY_SERVER_URL: `http://127.0.0.1:${gamePort}`,

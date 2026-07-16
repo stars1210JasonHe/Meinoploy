@@ -146,6 +146,54 @@ describe('join flows', () => {
   });
 });
 
+describe('onSync client-identity guard', () => {
+  // Ticket (final-review Minor-1): a stale LocalTransport broadcast from a
+  // client REPLACED by a later joinMatch (disconnect is a no-op on
+  // LocalTransport — the old subscription is never explicitly unsubscribed)
+  // used to still run through onSync unconditionally, including the
+  // unconditional `active.onState && active.onState(state)` call at the end
+  // — the exact slot makeMove installs its in-flight listener on. A late
+  // broadcast from a dead match could therefore have fed a wrong-match
+  // G/ctx into a live make_move's attribution logic. Captures the raw
+  // `(state) => onSync(client, state)` wrapper passed to the FIRST client's
+  // `subscribe()` call, replaces `active` via a second joinMatch, then
+  // replays that captured wrapper directly — the client-identity check
+  // (`active.client !== client`) must drop it before it reaches onState.
+  test('a stale broadcast from a replaced client never reaches the new active record\'s onState listener', async () => {
+    const h = makeHarness();
+    const capturedSubscribers = [];
+    const wrappedFactory = (args) => {
+      const c = h.clientFactory(args);
+      const origSubscribe = c.subscribe.bind(c);
+      c.subscribe = (fn) => { capturedSubscribers.push(fn); return origSubscribe(fn); };
+      return c;
+    };
+    const s = createSession({ serverUrl: 'http://x', fetchImpl: h.lobby.fetchImpl,
+      clientFactory: wrappedFactory, credStore: memoryCredStore(), setActiveModImpl: () => {} });
+
+    const m1 = await s.createMatch({ numPlayers: 2 });
+    await s.joinMatch({ matchID: m1.matchID, seat: '0' });
+    await flush();
+    const staleOnSync = capturedSubscribers[0]; // (state) => onSync(client1, state)
+    const client1 = s._active().client;
+
+    const m2 = await s.createMatch({ numPlayers: 2 });
+    await s.joinMatch({ matchID: m2.matchID, seat: '0' }); // replaces active — client1 is now stale
+    await flush();
+    expect(s._active().client).not.toBe(client1);
+
+    // Install a listener the way makeMove's in-flight handler does.
+    const spy = jest.fn();
+    s._active().onState = spy;
+
+    const fakeState = { G: { activeModId: 'dominion', events: [] }, ctx: {} };
+    staleOnSync(fakeState); // replay client1's captured (now-stale) subscription callback
+
+    expect(spy).not.toHaveBeenCalled(); // dropped — wrong client, must never reach the current active's listener
+    h.cleanup();
+  });
+});
+
 describe('event cursor (exclusive, sentinel -1)', () => {
   async function joined() {
     const h = makeHarness();

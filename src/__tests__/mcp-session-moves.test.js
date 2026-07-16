@@ -403,6 +403,41 @@ describe('wait_for_my_turn', () => {
     cleanup();
   }, 20000);
 
+  // Ticket (final-review Minor): waitForMyTurn's catch used to relabel ANY
+  // rejection from waitForState as 'timeout', trusting (without checking)
+  // that waitForState's only reject path is its own timeout McpToolError.
+  // Reuses (d)'s exact non-immediate setup (session seat 0 not the active
+  // bidder), then forces waitForState's SECOND getState() call — the one
+  // inside its own Promise executor, after waitForMyTurn's immediate check
+  // already consumed the first — to reject with a plain (non-McpToolError)
+  // Error, simulating a future contract change. Post-fix, that must propagate
+  // as a real rejection, not get silently reported as reason:'timeout'.
+  test('(d-variant) waitForMyTurn rethrows a non-timeout rejection instead of mislabeling it "timeout"', async () => {
+    const { session, driver, cleanup } = await harness({ seed: 3 });
+    await selectBoth(session, driver);
+    await session.makeMove({ move: 'rollDice' });
+    expect(session._current().G.canBuy).toBe(true);
+    await session.makeMove({ move: 'passProperty' });
+    const lm = session.listLegalMoves();
+    const pass = lm.find(e => e.move === 'passAuction');
+    await session.makeMove({ move: 'passAuction', expect: pass.expect });
+    expect(session._current().G.auction).toBeTruthy();
+
+    const client = session._active().client;
+    const realGetState = client.getState.bind(client);
+    let calls = 0;
+    client.getState = () => {
+      calls++;
+      if (calls === 1) return realGetState(); // requireSession()'s immediate-check read
+      throw new Error('boom: non-timeout rejection'); // waitForState's own getState() call
+    };
+
+    await expect(session.waitForMyTurn({ timeoutMs: 1000 })).rejects.toThrow('boom: non-timeout rejection');
+
+    client.getState = realGetState;
+    cleanup();
+  }, 20000);
+
   test('(gameover resolution) pending/at-join wait resolves with reason gameover', async () => {
     // patch seat 1 bankrupt -> endIf fires during match init -> a wait started
     // AFTER join still must resolve (immediately, since gameover already set)

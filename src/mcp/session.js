@@ -79,8 +79,16 @@ export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, 
     return state;
   }
 
-  function onSync(state) {
-    if (!state || !active) return;
+  // Ticket (final-review Minor-1): a stale LocalTransport broadcast from a
+  // PRIOR client (disconnect is a no-op on LocalTransport — see
+  // node_modules/boardgame.io's socketio shim) could otherwise still land
+  // here after closeActive()/a fresh joinMatch installed a NEW `active`
+  // record, mutating that new record's cursor/aligned off the wrong game.
+  // `client` is captured per-subscription (closure below) so a late callback
+  // from an old client is identifiable and dropped instead of touching
+  // whatever `active` currently points to.
+  function onSync(client, state) {
+    if (!state || !active || active.client !== client) return;
     // MCP-process mod alignment (spec §4): RULES-dependent projections must
     // evaluate under the match's mod, not this process's default (dominion).
     if (!active.aligned && state.G && state.G.activeModId) {
@@ -156,7 +164,7 @@ export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, 
       const client = clientFactory({ matchID, playerID: seat, credentials, numPlayers });
       active = { client, matchID, seat, cursor: undefined, aligned: false, onState: null };
       if (client.updateCredentials) client.updateCredentials(credentials);
-      client.subscribe(onSync);
+      client.subscribe((state) => onSync(client, state));
       client.start();
       // Await the FIRST real sync before reading phase (user-approved fix,
       // Task 8 review): Local()+InMemory syncs within the same tick, but a
@@ -338,7 +346,15 @@ export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, 
         const st = await waitForState(active.client, (s) => check(s.G, s.ctx) !== null, clamped);
         return check(st.G, st.ctx);
       } catch (e) {
-        return { yourTurn: false, reason: 'timeout' }; // waitForState only rejects on timeout
+        // Ticket (final-review Minor): waitForState's ONLY reject path is its
+        // own timeout (`new McpToolError(...)` in the setTimeout above) — true
+        // today, but this used to blindly relabel ANY rejection as 'timeout'.
+        // Assert the assumption instead of silently trusting it: rethrow
+        // anything that isn't the documented timeout shape so a future
+        // waitForState change (e.g. a predicate that can throw) surfaces as a
+        // real error instead of a misleading timeout.
+        if (e instanceof McpToolError) return { yourTurn: false, reason: 'timeout' };
+        throw e;
       }
     },
 
