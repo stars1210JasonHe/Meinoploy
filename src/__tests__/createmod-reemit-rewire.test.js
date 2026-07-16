@@ -174,6 +174,14 @@ export default xClient;
     expect(second.changed).toBe(false);
   });
 
+  test('non-kebab targetId is refused (never interpolated into generated source)', () => {
+    for (const bad of ["o'brien", 'a b', 'UPPER', '', "x'; alert(1); '"]) {
+      const r = patchBundleClientBoardBg(PLAIN_ATLAS, { kind: 'world', targetId: bad });
+      expect(r.changed).toBe(false);
+      expect(r.contents).toBe(PLAIN_ATLAS);
+    }
+  });
+
   test('tolerant: unrecognized/hand-edited shape (no getGlobe import) is left untouched', () => {
     const hostile = 'export default {};\n';
     const r = patchBundleClientBoardBg(hostile, { kind: 'world', targetId: 'x' });

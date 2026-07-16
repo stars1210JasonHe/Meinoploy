@@ -62,6 +62,10 @@ const GLOBE_IMPORT_LINE = "import { getGlobe } from '../dominion/atlas/globe-lib
 const ATLAS_EMPTY_LINE = '  atlasAssets: {},\n';
 
 export function patchBundleClientBoardBg(contents, target) {
+  // targetId comes from world.id/map.id, which world-loader/map-loader only check for
+  // non-empty string — unlike the kebab-case-validated top-level input.id. Guard before
+  // interpolating into generated source (same threat model as templates.js headerSafe).
+  if (!/^[a-z0-9-]+$/.test(target.targetId)) return { contents, changed: false };
   const importLine = `import boardBg from './backgrounds/${target.targetId}.png';\n`;
   if (contents.includes(importLine)) return { contents, changed: false }; // already wired
 
