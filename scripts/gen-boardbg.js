@@ -55,16 +55,26 @@ async function loadDominionTarget(mapId) {
   };
 }
 
-export async function runGenBoardBg(opts) {
+// imagesClient/codec are INJECTED (mirrors gen-portraits.js's runGenPortraits) so tests can
+// exercise the full fs + generation flow with a fake client and no network — the dry-run path
+// never touches either param, so callers may pass null/null when opts.dryRun is true.
+export async function runGenBoardBg(opts, imagesClient, codec) {
   const log = opts.log || console.log;
+  // rootDir defaults to the real repo (CLI usage) but MUST be honored when supplied — a prior
+  // version of this function ignored it and always resolved against REPO_ROOT, which made it
+  // impossible to test against an isolated tmp mod tree without touching the real mods/ dir.
+  const rootDir = opts.rootDir || REPO_ROOT;
   const modId = String(opts.modId || '');
   if (!KEBAB_ID.test(modId)) throw new Error(`mod id must match ${KEBAB_ID}: ${modId}`);
-  const modsRoot = path.resolve(REPO_ROOT, 'mods');
+  const modsRoot = path.resolve(rootDir, 'mods');
   const modDir = path.resolve(modsRoot, modId);
   if (!modDir.startsWith(modsRoot + path.sep)) throw new Error(`mod id escapes mods/: ${modId}`);
 
   let target;
   if (modId === 'dominion') {
+    // dominion is the hand-authored mod and always lives in the REAL repo tree, never a test
+    // tmp root (known limitation, ticketed — see spec Part B item 3: create-mod's --boardbg
+    // chain never targets "dominion", so this path is unaffected by the rootDir fix above).
     target = await loadDominionTarget(opts.map || 'classic');
   } else {
     const dataPath = path.join(modDir, `${modId}.data.json`);
@@ -76,15 +86,14 @@ export async function runGenBoardBg(opts) {
   const pngPath = path.join(bgDir, `${target.targetId}.png`);
   const promptPath = path.join(bgDir, `${target.targetId}.prompt.txt`);
   if (fs.existsSync(pngPath) && !opts.force && !opts.dryRun) {
-    log(`background exists: ${path.relative(REPO_ROOT, pngPath)} — use --force to regenerate`);
+    log(`background exists: ${path.relative(rootDir, pngPath)} — use --force to regenerate`);
     return { ok: true, written: [] };
   }
 
   const model = resolveBoardBgModel(opts);
-  const client = opts.dryRun ? null : createImagesClient({ apiKey: process.env.OPENAI_API_KEY, imageModel: model });
   log(`${modId} -> ${target.kind} "${target.targetId}" (1 image call, ${model}, 1536x1024, quality medium)`);
 
-  const r = await generateBoardBg(target.promptInput, { dryRun: opts.dryRun }, client, pngCodec);
+  const r = await generateBoardBg(target.promptInput, { dryRun: opts.dryRun }, imagesClient, codec);
   for (const w of r.warnings) log(`warning: ${w}`);
   if (opts.dryRun) {
     log('--- composed prompt ---');
@@ -96,7 +105,7 @@ export async function runGenBoardBg(opts) {
   fs.writeFileSync(pngPath, r.png);
   fs.writeFileSync(promptPath, r.prompt + '\n');
   if (r.usage) log(`usage: ${r.usage.input_tokens} in / ${r.usage.output_tokens} out / ${r.usage.total_tokens} total tokens`);
-  log(`wrote ${path.relative(REPO_ROOT, pngPath)} + prompt`);
+  log(`wrote ${path.relative(rootDir, pngPath)} + prompt`);
   const rel = `./backgrounds/${target.targetId}.png`;
   if (target.kind === 'world') {
     log(`wire it: import bg from '${rel}'; atlasAssets: { '${target.targetId}': { worldBg: bg, cityImages: {} } }`);
@@ -119,7 +128,8 @@ async function main() {
     process.exit(1);
   }
   try {
-    await runGenBoardBg(args);
+    const client = args.dryRun ? null : createImagesClient({ apiKey: process.env.OPENAI_API_KEY, imageModel: resolveBoardBgModel(args) });
+    await runGenBoardBg(args, client, pngCodec);
   } catch (e) {
     console.error('gen-boardbg failed:', redactSecrets(e && e.message ? e.message : e));
     process.exit(1);
