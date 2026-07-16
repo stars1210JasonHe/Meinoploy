@@ -70,6 +70,19 @@ export class Lobby {
     }
   }
 
+  // Locale-change re-render (App's onLocaleChange hook — post-merge localization ticket 1).
+  // App re-renders THIS instance in place rather than constructing a fresh Lobby, which used
+  // to silently drop this.playerName and the already-fetched this.matches on every LANG
+  // flip. The name <input> only commits to this.playerName on 'change' (blur/Enter — see the
+  // wiring at the bottom of render()), so text typed but not yet blurred lives only in the
+  // DOM; read it back here before render() rebuilds the input with the (possibly stale)
+  // instance field as its value.
+  refreshLocale() {
+    const nameInput = document.getElementById('lobby-player-name');
+    if (nameInput) this.playerName = nameInput.value;
+    this.render();
+  }
+
   render() {
     let matchRows = '';
     if (!this.matches || this.matches.length === 0) {

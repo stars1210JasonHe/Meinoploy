@@ -224,6 +224,12 @@ class MonopolyBoard {
     this.rootElement = rootElement;
     this.mode = null; // 'local' or 'online'
     this.onlinePlayerID = null;
+    // The live Lobby instance while the online-lobby screen is showing, null otherwise
+    // (cleared centrally in _showScreen — see the comment there). Lets onLocaleChange
+    // re-render THIS instance in place on a LANG flip instead of showOnlineLobby()
+    // constructing a brand-new Lobby, which used to silently drop the typed player name
+    // (and the already-fetched match list) on every flip — post-merge localization ticket 1.
+    this._lobbyInstance = null;
     this._pendingCharId = null; // local character-select preview
     // Local computer players (bots): botSeats is the LIVE set of bot-controlled seat
     // ids (String(i), matching Game.js's own id convention) for the CURRENT client
@@ -730,6 +736,16 @@ class MonopolyBoard {
       // is intentionally left unchanged; its unconditional clear is correct for every other
       // caller (the real post-roll subscribe tick).
       if (this.client) { if (!this._rolling) this.update(this.client.getState()); }
+      // Localization ticket 1: the online-lobby screen has no backing client, so it would
+      // otherwise fall to the generic _currentScreenRenderer() branch below, which for the
+      // lobby means showOnlineLobby() constructing a BRAND-NEW Lobby instance — discarding
+      // the old one along with this.playerName (even a value already committed via the name
+      // input's 'change' event) and the already-fetched match list. Re-render the SAME
+      // instance in place instead; refreshLocale() also reads the input's live DOM value
+      // first, so text typed but not yet blurred survives too (Lobby.js has the full
+      // rationale). Must come before the generic fallback, not after — _currentScreenRenderer
+      // still points at showOnlineLobby while this._lobbyInstance is set.
+      else if (this._lobbyInstance) this._lobbyInstance.refreshLocale();
       else if (this._currentScreenRenderer) this._currentScreenRenderer();
     });
 
@@ -847,6 +863,11 @@ class MonopolyBoard {
     // whenever we're leaving the 'game' screen (gameover -> 'results', loadGame -> 'select',
     // exitToMenu -> 'menu', etc.), not just on the one path exitToMenu happened to cover.
     if (name !== 'game' && this._closeDrawer) this._closeDrawer();
+    // Localization ticket 1: every screen transition routes through here (same reasoning
+    // as the drawer close above), so this is the one place that reliably knows we've left
+    // the lobby screen — clear the cached instance so onLocaleChange's lobby-reuse branch
+    // (below, in createLayout) never re-renders a Lobby that isn't actually on screen.
+    if (name !== 'lobby') this._lobbyInstance = null;
   }
 
   // ─────────────────────────────────────────────────────────
@@ -1166,6 +1187,7 @@ class MonopolyBoard {
       this.startOnlineGame(serverUrl, matchID, playerID, credentials, numPlayers);
     });
     lobby.onBack = () => this.showModeSelect();
+    this._lobbyInstance = lobby;
   }
 
   startOnlineGame(serverUrl, matchID, playerID, credentials, numPlayers) {
