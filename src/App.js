@@ -1,6 +1,6 @@
 import { Client } from 'boardgame.io/client';
 import { SocketIO } from 'boardgame.io/multiplayer';
-import { Monopoly, setActiveMap, setActiveMod, setVictoryConfig, calculateRent } from './Game';
+import { Monopoly, setActiveMap, setActiveMod, setVictoryConfig, calculateRent, rehydrateSavedG } from './Game';
 import { PLAYER_COLORS, BUILDING_ICONS, BUILDING_NAMES, UPGRADE_COST_MULTIPLIERS, RENT_MULTIPLIERS, SEASONS } from './constants';
 // RULES is the live engine singleton (mutated in place by setActiveMod) — NOT the Dominion
 // barrel. Mod CONTENT (characters/lore/maps/keyart/atlas) is read off `this.activeMod` (the
@@ -3833,7 +3833,9 @@ class MonopolyBoard {
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
     const savedG = saveData.G;
     // _resumeLoad: tells turn.onBegin to skip the turn/season bump on the first turn after load.
-    const LoadedGame = { ...Monopoly, setup: () => ({ ...savedG, events: savedG.events || [], eventSeq: savedG.eventSeq || 0, enforceSeats: savedG.enforceSeats || false, _resumeLoad: true }) };
+    // rehydrateSavedG (Game.js) backfills fields older saves predate (events/
+    // eventSeq/enforceSeats/player.luckRedraws) — single seam, unit tested there.
+    const LoadedGame = { ...Monopoly, setup: () => rehydrateSavedG(savedG) };
     this.client = Client({ game: LoadedGame, numPlayers: saveData.numPlayers, debug: false });
     this.client.start();
     // Restore bot seats (absent field -> empty set, e.g. pre-bots saves) and rebuild

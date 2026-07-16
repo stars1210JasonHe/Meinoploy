@@ -24,7 +24,7 @@ import fs from 'fs';
 import path from 'path';
 import { INVALID_MOVE } from 'boardgame.io/core';
 import { Client } from 'boardgame.io/client';
-import { Monopoly } from '../Game';
+import { Monopoly, rehydrateSavedG } from '../Game';
 import { getCharacterById, COLOR_GROUPS, RULES } from '../../mods/dominion';
 import { makeClient, playScript, ifCanBuy, ifPendingCard } from './helpers/drive';
 
@@ -1264,9 +1264,12 @@ describe('game_over (direct-invocation; no golden scenario reaches a victory con
 // backfill events: [], eventSeq: 0, enforceSeats: false so the game doesn't
 // crash when processing the first move after load. This test simulates an old
 // save by driving a short game, deleting the new fields, and reconstructing
-// via the loadGame stub pattern.
+// via the real rehydrateSavedG() helper (Game.js) — the exact function
+// App.js's loadGame calls, so this test can't drift from production behavior
+// the way a hand-copied literal could (final-review-noted drift gap, closed
+// by extracting the helper).
 
-describe('loadGame backfill for old saves (Task 7)', () => {
+describe('loadGame backfill for old saves (Task 7 + luckRedraws ticket)', () => {
   test('old save without events/eventSeq/enforceSeats backfills cleanly and emits seq 0 on first move', () => {
     // Drive a short game and serialize G
     const client = makeClient(2, 1);
@@ -1283,17 +1286,8 @@ describe('loadGame backfill for old saves (Task 7)', () => {
     delete savedG.eventSeq;
     delete savedG.enforceSeats;
 
-    // Reconstruct via the loadGame stub-setup pattern (mirrors App.js line 2403)
-    const LoadedGame = {
-      ...Monopoly,
-      setup: () => ({
-        ...savedG,
-        events: savedG.events || [],
-        eventSeq: savedG.eventSeq || 0,
-        enforceSeats: savedG.enforceSeats || false,
-        _resumeLoad: true,
-      }),
-    };
+    // Reconstruct via the real loadGame seam (App.js: `setup: () => rehydrateSavedG(savedG)`)
+    const LoadedGame = { ...Monopoly, setup: () => rehydrateSavedG(savedG) };
     const restoredClient = Client({ game: LoadedGame, numPlayers, debug: false });
     restoredClient.start();
 
@@ -1310,6 +1304,54 @@ describe('loadGame backfill for old saves (Task 7)', () => {
     const firstEvent = G2.events[0];
     expect(firstEvent.seq).toBe(0);
     expect(firstEvent.type).toBe('dice_rolled');
+  });
+
+  // Ticket: pre-stat-mechanics saves (2026-07-14) have no player.luckRedraws
+  // field at all — undefined on every player object. Every gate read site
+  // already fails safe (`undefined > 0` / `undefined <= 0` are both false),
+  // but redrawCard's `player.luckRedraws--` would mint NaN the moment that's
+  // reached while undefined. rehydrateSavedG backfills it to 0 (old saves
+  // predate the mechanic -> no outstanding redraws), matching the
+  // events/eventSeq/enforceSeats treatment above.
+  test('old save without player.luckRedraws backfills to 0, no NaN, no crash on redraw', () => {
+    const client = makeClient(2, 1);
+    playScript(client, [
+      ['selectCharacter', 'marcus-grayline'],
+      ['selectCharacter', 'sophia-ember'],
+    ]);
+    const savedG = JSON.parse(JSON.stringify(client.getState().G));
+    const numPlayers = 2;
+
+    // Simulate a pre-stat-mechanics save: the field is entirely absent.
+    savedG.players.forEach(p => { delete p.luckRedraws; });
+    expect(savedG.players.every(p => !('luckRedraws' in p))).toBe(true);
+
+    const rehydrated = rehydrateSavedG(savedG);
+    // Backfilled to a real number on every seat — never undefined/NaN.
+    rehydrated.players.forEach(p => expect(p.luckRedraws).toBe(0));
+
+    const LoadedGame = { ...Monopoly, setup: () => rehydrateSavedG(savedG) };
+    const restoredClient = Client({ game: LoadedGame, numPlayers, debug: false });
+    restoredClient.start();
+
+    const G = restoredClient.getState().G;
+    expect(G.players.every(p => p.luckRedraws === 0)).toBe(true);
+
+    // Force a pendingCard decision (direct move invocation, bypassing the
+    // normal offer gate — proving the redrawCard MOVE guard itself is robust,
+    // not just the offer check) and confirm it rejects cleanly instead of
+    // decrementing a (pre-fix, undefined) field into NaN. marcus-grayline's
+    // passive is 'operator', not 'merchant', so this exercises the
+    // luckRedraws<=0 branch, not the merchant bypass.
+    const seat = G.players[0].id;
+    const gWithCard = { ...G, pendingCard: { card: { text: 'Test', action: 'pay', value: 10 }, deck: 'chance' } };
+    const ctx = { currentPlayer: seat, playerID: seat };
+    const before = gWithCard.players[Number(seat)].luckRedraws;
+    expect(before).toBe(0); // confirms the backfill actually ran, not merely "not undefined"
+    const result = Monopoly.moves.redrawCard(gWithCard, ctx);
+    expect(result).toBe(INVALID_MOVE);
+    expect(gWithCard.players[Number(seat)].luckRedraws).toBe(0); // untouched, never NaN
+    expect(Number.isNaN(gWithCard.players[Number(seat)].luckRedraws)).toBe(false);
   });
 });
 

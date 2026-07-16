@@ -140,6 +140,32 @@ export function setVictoryConfig(cfg) {
   _victoryOverride = cfg || null;
 }
 
+// Rehydrate a saved G (App.js loadGame's setup() override) into a valid
+// resume payload. Single seam for "field added by a later engine feature is
+// missing on an older save" backfills — events/eventSeq/enforceSeats were
+// already handled here inline (MT2-SP1 Task 7); this adds player.luckRedraws
+// (stat-mechanics wave, 2026-07-14). Ticket: a save taken before that wave
+// has no luckRedraws field on any player object at all, so
+// `player.luckRedraws` reads `undefined` after load — every GATE read site
+// fails safe (`undefined > 0` / `undefined <= 0` are both false, so old-save
+// players are simply never offered/allowed a redraw), but redrawCard's
+// `player.luckRedraws--` would still mint a NaN the moment that field is
+// ever decremented while undefined. Old saves predate the redraw mechanic
+// entirely, so 0 (no outstanding redraws) is the correct backfill — the same
+// "the save predates this field -> safe default" treatment loadGame already
+// gives botSeats (defaults to an empty Set). Exported so this can be unit
+// tested without needing App.js/DOM.
+export function rehydrateSavedG(savedG) {
+  return {
+    ...savedG,
+    events: savedG.events || [],
+    eventSeq: savedG.eventSeq || 0,
+    enforceSeats: savedG.enforceSeats || false,
+    players: (savedG.players || []).map(p => (p.luckRedraws === undefined ? { ...p, luckRedraws: 0 } : p)),
+    _resumeLoad: true,
+  };
+}
+
 // Resolve the active victory config: session override > map config > rules defaults.
 // Stored into G.victory at setup() so scoring stays per-match (safe for concurrent games).
 function resolveVictory() {
