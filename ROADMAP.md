@@ -210,10 +210,14 @@ Decomposed 2026-07-06 into: SP1 foundation (events+seats) → SP2 duel/对战 �
 > - **R1d** classic ring material + legend cartouche (LIVE per-player territory rows).
 > - **R3** entry screens: `.pix-panel`/`.pix-btn`/`--bevel`/`--drop` primitives redefined to
 >   the B2 material — every entry screen converted wholesale; .modal unified.
-> **Remaining: R4 ambience** (light dust, node pulse, hover micro-motion, victory moments) —
-> anytime, additive-only. **Follow-up:** create-mod auto-wiring of generated boardBg
-> (gen-boardbg prints the wiring line today; integrate into the create-mod chain like
-> --portraits).
+> - **R4** ambience (2026-07-16, feat/reskin-r4, 1392 unit + 45 E2E): 7-mote board dust
+>   drift, tile-halo breathe, hover lifts (buttons/chips only — tiles glow instead, they
+>   carry positioning transforms), results crown/winner steps() pop + staggered standings —
+>   ALL behind prefers-reduced-motion. Duel flash CUT (renderTurnbox rewrites innerHTML per
+>   tick → strobe; ticket: keyed turnbox rendering first). **RESKIN INITIATIVE COMPLETE**
+>   pending R4 owner acceptance (branch unmerged until then).
+> **Follow-up:** create-mod auto-wiring of generated boardBg (gen-boardbg prints the wiring
+> line today; integrate into the create-mod chain like --portraits).
 
 ## Near-term (owner 2026-07-12): Localization 汉化
 > **DONE 2026-07-15 (feat/localization, 10 commits, SDD, 1392 unit + 45 E2E).** EN/中文
@@ -265,9 +269,34 @@ Touches the LLM extraction schema + emit pass-through + validateWorld optional-f
 > budget-capped) that swaps tuned stats into the emit; honest stall messaging points at the
 > rules-override pattern. Engine: additive `setActiveModObject` (unregistered rosters through
 > the reducer). Live proof: ancient-empires 40/33/27 zero flags → correct no-op.
-> **NEW TICKET — --force re-emit clobbers post-creation enrichments**: portrait wiring
-> (gen-portraits has a rewire path), R2 boardBg wiring, and position-derivation drift all
-> regress on re-emit; needs a preserve/rewire chain before --force is safe on enriched mods.
+> **TICKET CLOSED 2026-07-16 (feat/reemit-preserve merged)** — --force re-emit now runs a
+> post-write rewire pass: PORTRAIT_MAP rewired when every roster id has a PNG (reuses
+> gen-portraits' rewireCharactersJs), boardBg import + atlasAssets/mapAssets entry
+> string-patched back when backgrounds/<target>.png exists (idempotent, kebab-guarded
+> targetId, unrecognized bundles left untouched). Review follow-up tickets: dominion
+> special-case bypasses the generic target resolver (rewire no-ops); roster ADDITION without
+> a new portrait un-wires the whole roster (all-or-nothing gate inherited); mapImage-vs-
+> generated-boardBg precedence is silent (mapImage wins).
+
+## Ticket sweep (2026-07-16, autonomous)
+> **Localization minors ×4 MERGED (feat/loc-minors)**: lobby LANG-flip now preserves typed
+> name + fetched matches (cached instance + Lobby.refreshLocale, was full reconstruction);
+> unread badge no longer recomputes renderLogLines a second time per tick; zh log formatters
+> use the locale formatLogLine was CALLED with (t() gained optional localeOverride — additive);
+> t-shadow locals renamed. Review READY TO MERGE; follow-up ticket: online-connect handshake
+> window (client set, first sync pending) leaves lobby body un-relocalized on LANG flip —
+> pre-existing, self-heals on first sync.
+> **ENGINE DEADLOCK FIXED (fix/card-phase-deadlock)** — accepting/redrawing ANY prompted
+> card (pay/payPercent/downgrade/goToJail) left turnPhase stuck at 'card' (the chain-guard
+> misread the stale draw-time phase as a chained card): END TURN permanently disabled.
+> Latent since stat-mechanics made redraw prompts roster-wide; WAS the intermittent E2E
+> "season flake". Reproduced via live-G probe pre-fix; guard now keys on G.pendingCard.
+> 4 regression tests; 1415 unit + 45 E2E green, season spec 3×3 isolated passes.
+> **Environment note**: system nvm switched to node 22.12 mid-day (not by tooling here) —
+> breaks server.js's `-r esm` loader (native require(ESM) preempts the shim → directory-
+> import error) and the MCP stdio smoke suite. Gates now run with node 20.19 pinned
+> per-process via PATH. If node 22 becomes the machine default, server.js needs a loader
+> migration (ticket).
 1. Near-term: entry-UI polish (small, visible).
 2. Then pick ONE major task to design first. Task 1 (create-mod engine) compounds content velocity;
    Task 2 (API/MCP + dialogue) deepens the play experience. Each gets its own design pass (likely a
