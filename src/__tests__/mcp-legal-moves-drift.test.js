@@ -3,21 +3,45 @@
 // dispatch acceptance. Hot-seat sync Clients (no async timing). Any future
 // guard change not mirrored in legal-moves fails here loudly.
 import { Client } from 'boardgame.io/client';
-import { Monopoly, setActiveMap } from '../Game';
+import { Monopoly, setActiveMap, setActiveMod } from '../Game';
 import { loadMap } from '../map-loader';
 import classicMapJson from '../../mods/dominion/maps/classic/map.json';
 import { getLegalMoves } from '../mcp/legal-moves';
+import { resolveModMap } from '../mod-map-select';
 import { MODS } from '../../mods/index';
 
 const CHAR_IDS = MODS.dominion.characters.map(c => c.id);
+
 // Moves whose ACCEPTANCE needs args we can't synthesize blind — these are
 // checked in the LISTED direction only (listed => dispatch accepts with the
 // argsHint's own suggestion), not the rejected direction.
 const ARG_MOVES = new Set(['selectCharacter', 'placeBid', 'proposeTrade', 'commitRoute',
   'upgradeProperty', 'mortgageProperty', 'unmortgageProperty', 'sellBuilding', 'regulateProperty', 'rollDice']);
 
+afterAll(() => {
+  // Restore the module-scope active mod/map to dominion/classic — hygiene,
+  // mirrors mod-map-select.test.js's afterAll (this file's terra-titans/atlas
+  // test switches the shared RULES/board singleton via resolveModMap).
+  setActiveMod('dominion');
+  setActiveMap(loadMap(classicMapJson));
+});
+
 function freshClient(numPlayers, seed) {
   setActiveMap(loadMap(classicMapJson));
+  const game = Object.assign({}, Monopoly, { seed: String(seed) });
+  const client = Client({ game, numPlayers, debug: false });
+  client.start();
+  return client;
+}
+
+// Ticket (T1, final review "atlas drift coverage"): the drift oracle above
+// only ever ran classic (movementMode 'square'/loop) games — the route/
+// commitRoute path (legal-moves.js's awaitingRoute branch) only ever fires
+// on an atlas board, so it had ZERO coverage here (final-review m7). Mirrors
+// freshClient exactly, but resolves terra-titans' default (atlas) world
+// instead of loading the classic map.json.
+function freshAtlasClient(numPlayers, seed) {
+  resolveModMap('terra-titans'); // installs RULES + roster + the atlas world board
   const game = Object.assign({}, Monopoly, { seed: String(seed) });
   const client = Client({ game, numPlayers, debug: false });
   client.start();
@@ -89,6 +113,27 @@ test.each([1, 7, 8, 21])('drift: full game agreement, seed %i', (seed) => {
       // (shouldn't happen: getLegalMoves must always list SOMETHING for the
       // acting seat mid-game, or the game is stuck — that itself is a bug).
       throw new Error(`DRIFT: no legal move listed for acting seat at step ${steps}`);
+    }
+    steps++;
+  }
+  expect(steps).toBeGreaterThan(20); // the game genuinely progressed
+});
+
+test.each([2, 9])('drift: full game agreement, atlas board (terra-titans), seed %i', (seed) => {
+  const client = freshAtlasClient(2, seed);
+  // Same walk as the classic-board oracle above — checkStep/sampleArgs are
+  // movementMode-agnostic (rollDice auto-routes on atlas; commitRoute
+  // dispatches argless and the engine auto-routes on omission), and
+  // terra-titans additionally enables duel mode (RULES.duel.enabled), so this
+  // run also exercises the payRent/initiateDuel/respondDuel/declineDuel
+  // quartet the classic-only oracle never reaches (dominion has duels off).
+  let steps = 0;
+  while (steps < 400) {
+    const { ctx } = client.getState();
+    if (ctx.gameover) break;
+    const advanced = checkStep(client, ctx.currentPlayer);
+    if (!advanced) {
+      throw new Error(`DRIFT (atlas): no legal move listed for acting seat at step ${steps}`);
     }
     steps++;
   }
