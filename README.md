@@ -1,122 +1,141 @@
-# Meinopoly
+<div align="center">
 
-A moddable Monopoly-style board game engine built with [boardgame.io](https://boardgame.io). The current mod is **Dominion: Multi-dimensional World Property Council** — a sci-fi council of 10 unique characters competing for property control.
+![Meinopoly](assets/hero.png)
 
-![Game Board](screenshots/debug/game-board.png)
+# MEINOPOLY
 
-## Features
+**Every world can be a board game. Even the one inside a book.**
 
-- **10 Unique Characters** — each with pixel-art portraits, 6 stats (Capital, Luck, Negotiation, Charisma, Tech, Stamina), passive abilities, and full lore (in Chinese)
-- **40-Space Board** — properties, railroads, utilities, taxes, Chance & Community Chest
-- **4-Tier Building System** — House, Hotel, Skyscraper, Landmark with even-building rule
-- **Season System** — Summer, Autumn, Winter, Spring cycle every 10 turns, affecting prices, rent, and taxes
-- **Property Trading** — propose, accept, reject, or cancel trades between players
-- **Auction System** — round-robin bidding when a player passes on buying a property
-- **Mortgage/Unmortgage** — standard mortgage mechanics with season-adjusted values
-- **Enhanced Event Cards** — 6 extra card types: payPercent, gainAll, freeUpgrade, downgrade, forceBuy, gainPerProperty
-- **Config-Driven Rules** — all game rules live in a single config file (`mods/dominion/rules.js`), making the engine fully moddable
-- **2–10 Players** — local hot-seat or online multiplayer (boardgame.io server + lobby)
-- **Map System** — 4 board layouts (square, circle, hexagon, custom), data-driven via `map.json`
-- **AI Characters** — optional OpenAI-powered in-character event reactions and chat (bring your own key)
-- **Victory Conditions** — Last Standing, Timed/Richest, or Dominion (first to N color groups), chosen at game start
-- **Game Boy Color Pixel UI** — chunky 16-bit aesthetic with 3 palettes (Council/Verdant/Arcade) and a CRT toggle
-- **Character Lore Viewer** — click "View Lore" to read each character's full backstory in a modal
-- **278 unit tests** (Jest) + **18 E2E tests** (Playwright) covering all game mechanics
+一个可改装、AI 驱动的大富翁式策略引擎 — 任何一本书，都能变成一个可玩的世界。
 
-## Characters
+[English](#english) · [中文](#中文)
 
-| Character | Title | Passive |
-|-----------|-------|---------|
-| Albert Victor | Council Financier | Property price -10%, negative event losses -20% |
-| Lia Startrace | Interstellar Pioneer | Upgrade cost -20% |
-| Marcus Grayline | Political Operator | Alliance income share +10%, voting influence +1 |
-| Evelyn Zero | Probability Speculator | Extra card redraws |
-| Knox Ironlaw | Order Enforcer | Regulate a property for +20% rent |
-| Sophia Ember | Crisis Arbitrageur | Gain $100 when any player goes bankrupt |
-| Cassian Echo | Information Merchant | Unlimited card redraws |
-| Mira Dawnlight | Idealist Council Member | +$50 bonus when passing GO |
-| Renn Chainbreaker | Rule Breaker | -25% rent on monopoly properties |
-| Ophelia Nightveil | Shadow Council Member | Hide true money from other players |
+</div>
 
-## Tech Stack
+---
 
-- **Game engine**: [boardgame.io](https://boardgame.io) v0.45
-- **Bundler**: Parcel v1
-- **Language**: Vanilla JavaScript (ES modules, no framework)
-- **Tests**: Jest (unit) + Playwright (E2E)
-- **Node**: v20.19.0
+## English
 
-## Quick Start
+Meinopoly is a moddable Monopoly-style strategy engine. The engine is constant — worlds, characters, boards, art, and rules are all **mods**, and mods can be **generated from a book by AI**.
+
+### 📖 Turn any book into a game — one command
 
 ```bash
-# Install dependencies
+npm run create-mod -- mybook.txt --from-book --portraits --boardbg --auto-balance
+```
+
+Feed it a novel. Out comes a complete, playable mod:
+
+- **Characters** extracted from the text — 6 gameplay stats, passive abilities, and per-character lore
+- **A map with real geography** — real places get real coordinates; fictional worlds get AI layouts
+- **Pixel-art portraits** for the whole cast and **era-styled board art**, generated to match the book's world
+- **Per-place descriptions** pulled from the source, shown in-game
+- **Auto-balancing** — a built-in tournament simulator tunes the roster until no character is statistically over- or under-powered
+
+Costs are printed before any API spend; every step is idempotent and re-runnable.
+
+### 🌍 Three ways to see a world
+
+| Classic ring | War-room atlas | Pixel globe |
+|---|---|---|
+| The familiar loop, reskinned per world | Node-card cities over painted terrain, glowing route networks | A rotating night-lights planet you play on |
+
+![War room](assets/board-warroom.png)
+
+![Globe](assets/globe-silkroad.png)
+
+### ⚔️ More than roll-and-buy
+
+- **Rent duels** — challenge the landlord to a stat showdown instead of paying (win: rent waived; lose: pay double)
+- **Trading & auctions** — full negotiation between players, round-robin bidding on passed properties
+- **Characters that matter** — Capital, Luck, Negotiation, Charisma, Tech, Stamina all hook into real money flows; luck earns card redraws
+- **Living boards** — seasons shift prices, event cards can force buys, upgrades, or teleports; 4 building tiers from House to Landmark
+- **Three victory modes** — Last Standing, Timed-Richest, or Dominion (control the map)
+
+### 🤖 AI at the table
+
+- **Local bots** with distinct play styles fill empty seats
+- **AI characters** react to the game and chat in-character, built from their lore (optional, OpenAI key)
+- **MCP server** — LLM agents can join a running match as *real seated players*: `npm run mcp` exposes state, legal moves, and move execution over the Model Context Protocol. Yes, Claude can sit at your table.
+
+### 🀄 Fully bilingual
+
+One click flips the entire game between **中文** and **English** — UI, boards, and the full event log re-render live.
+
+### 🔧 Built like software, not a demo
+
+- [boardgame.io](https://boardgame.io) core, seat-authorized online multiplayer, save/load
+- **1,479 unit tests + 45 end-to-end tests**, golden-scenario message pinning, headless balance tournaments with CI-gated fairness flags
+- Six worlds ship in the box: **Dominion** (sci-fi council), **Terra Titans** (16 historical leaders on a globe), **Ancient Empires**, **Steam Barons**, **Silk Road**, **Gilded Rails**
+
+### Quick start
+
+```bash
 npm install
-
-# Start dev server (opens at localhost:1234)
-npm start
-
-# Run unit tests
-npx jest --no-coverage
-
-# Production build
-npm run build
+npm start            # play at http://localhost:1234
+npm run server       # online multiplayer server (port 8088)
+npm run sim          # headless balance tournament
+npx jest --no-coverage   # run the test suite
 ```
 
-Supports 2–10 players in local hot-seat or online multiplayer. For online play, run the server with `npm run server` (boardgame.io server on port 8088).
+---
 
-## Project Structure
+## 中文
 
-```
-src/
-  Game.js          # boardgame.io game definition (moves, setup, turn logic)
-  App.js           # DOM-based UI (board, panels, modals)
-  constants.js     # Re-exports from mod rules (shim for backward compat)
-  Lobby.js         # Online multiplayer lobby UI
-  map-loader.js    # Map schema validation + position generators
-  character-ai.js  # OpenAI-backed character reactions + chat
-  __tests__/       # 278 Jest unit tests
+Meinopoly 是一个**可改装**的大富翁式策略引擎：引擎不变，世界、角色、棋盘、美术、规则全部是 **mod**——而 mod 可以由 AI **从一本书直接生成**。
 
-mods/dominion/
-  index.js         # Re-exports all mod data
-  rules.js         # All game rules config (core, buildings, rent, seasons, trading, auction...)
-  characters.js    # 10 characters with stats, passives, portraits
-  board.js         # 40 board spaces + 8 color groups
-  cards.js         # Chance & Community Chest decks
-  lore.js          # Character lore data (Chinese)
-  portraits/       # 10 pixel-art character head PNGs
-  lore/            # 10 character lore markdown files
+### 📖 一行命令，把一本书变成一局游戏
 
-data/              # Design docs (Chinese) and Python tooling
-index.html         # Entry point with inline CSS
+```bash
+npm run create-mod -- 三国演义.txt --from-book --portraits --boardbg --auto-balance
 ```
 
-## Modding
+喂它一本小说，吐出一个完整可玩的 mod：
 
-The engine is designed to be moddable. All game data lives in `mods/dominion/` — to create a new mod:
+- **角色**从原文提取——6 项对局属性、被动技能、逐角色背景故事
+- **带真实地理的地图**——真实地名用真实经纬度，架空世界由 AI 排布
+- 整套**像素头像**与匹配时代风格的**棋盘美术**自动生成
+- **每格简介**取自原著，游戏内点击即看
+- **自动平衡**——内置锦标赛模拟器反复调参，直到没有角色在统计上过强或过弱
 
-1. Create a new folder under `mods/` (e.g. `mods/my-mod/`)
-2. Implement the same exports as `mods/dominion/index.js`:
-   - `BOARD_SPACES`, `COLOR_GROUPS` — board layout
-   - `CHARACTERS`, `getCharacterById`, `getStartingMoney` — character data
-   - `CHANCE_CARDS`, `COMMUNITY_CARDS` — event card decks
-   - `RULES` — full rules config object
-3. Update the import path in `src/Game.js` and `src/App.js`
+任何 API 花费前都会先打印成本计划；每一步幂等、可重跑。
 
-The `RULES` object controls all game parameters — starting money, jail fine, building costs, stat effects, passive ability values, trading/auction settings, and more.
+### 🌍 一个世界，三种打开方式
 
-## Roadmap
+| 经典环形棋盘 | 战情室地图 | 像素地球 |
+|---|---|---|
+| 熟悉的循环，每个世界换装 | 手绘地形上的城市节点卡，路线网络发光 | 在一颗会转的夜光星球上落子 |
 
-See [ROADMAP.md](docs/ROADMAP.md) for the full development plan. See also [RULES.md](docs/RULES.md) and [MODDING.md](docs/MODDING.md).
+### ⚔️ 不止掷骰买地
 
-- **Phase 1** — Core Demo ✅
-- **Phase 2** — Character Integration ✅
-- **Phase 3** — Enhanced Gameplay ✅ (trading, auctions, config-driven rules)
-- **Phase 4** — Multiplayer & N-Player ✅ (2–10 players, online server + lobby)
-- **Phase 5** — Map System ✅ (4 layouts, data-driven boards)
-- **Phase 6** — AI Character System ✅ (event reactions + chat)
-- **Phase 7** — Weighted Victory 🟡 (Phase A done: configurable win conditions + scoreboard; influence/stability TBD)
-- **Phase 8+** — AI bot players, advanced mechanics, deployment (planned)
+- **租金对战**——落进别人地盘可以不交租，改为属性对决单挑地主（赢了免租，输了双倍）
+- **交易与拍卖**——玩家间自由谈判；弃购的地产进入轮流竞价
+- **角色真的有用**——资本、幸运、谈判、魅力、科技、体力全部挂进真实的金钱流；幸运还能重抽事件卡
+- **活的棋盘**——四季轮转影响物价，事件卡会强制购地、免费升级、瞬移；房产四级进阶直到地标
+- **三种胜利方式**——最后生还 / 限时首富 / 版图支配
 
-## License
+### 🤖 AI 上桌
 
-Private project.
+- **本地机器人**性格各异，随时补位
+- **AI 角色**按各自的人设背景对局面做出反应、和你聊天（可选，需 OpenAI key）
+- **MCP 服务器**——LLM 智能体能以**真实玩家席位**加入对局：`npm run mcp` 通过 Model Context Protocol 暴露状态、合法着法与行棋接口。没错，Claude 可以坐在你的牌桌上。
+
+### 🀄 完整双语
+
+一键在**中文 / English** 间切换——界面、棋盘、整条事件日志实时重渲染。
+
+### 🔧 按软件工程标准打造
+
+- [boardgame.io](https://boardgame.io) 内核、席位鉴权的在线多人、存档/读档
+- **1,479 个单元测试 + 45 个端到端测试**、金样场景文本锁定、CI 门控公平性标记的无头平衡锦标赛
+- 开箱自带六个世界：**Dominion**（科幻议会）、**泰坦纪元**（16 位历史领袖的地球）、**上古帝国**、**蒸汽大亨**、**丝绸之路**、**镀金铁路**
+
+### 快速开始
+
+```bash
+npm install
+npm start            # 本地游玩 http://localhost:1234
+npm run server       # 在线多人服务器（8088 端口）
+npm run sim          # 无头平衡锦标赛
+npx jest --no-coverage   # 跑测试
+```
