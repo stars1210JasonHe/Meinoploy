@@ -2166,8 +2166,8 @@ class MonopolyBoard {
     places.forEach(p => {
       if (!p.connectors) return;
       Object.keys(p.connectors).forEach(dir => {
-        const t = byId[p.connectors[dir]];
-        if (t) arcs.push({ sLat: p.geo.lat, sLng: p.geo.lng, eLat: t.geo.lat, eLng: t.geo.lng, fromId: p.id, toId: t.id, hot: false });
+        const target = byId[p.connectors[dir]];
+        if (target) arcs.push({ sLat: p.geo.lat, sLng: p.geo.lng, eLat: target.geo.lat, eLng: target.geo.lng, fromId: p.id, toId: target.id, hot: false });
       });
     });
     this._globeData = { points, arcs };
@@ -2453,12 +2453,12 @@ class MonopolyBoard {
       });
       return null;
     }
-    const t = {};
+    const targets = {};
     choices.forEach(c => {
       const sp = this.boardSpaces[c.node];
-      if (sp && sp.placeId) t[sp.placeId] = c.route;
+      if (sp && sp.placeId) targets[sp.placeId] = c.route;
     });
-    return t;
+    return targets;
   }
 
   // Light the WALKABLE travel route on the sphere: when the active player has rolled into
@@ -2696,11 +2696,11 @@ class MonopolyBoard {
     const tile = this.boardEl.querySelector(`.tile[data-space="${spaceId}"]`);
     if (!tile) return { x: 50, y: 50 };
     const b = this.boardEl.getBoundingClientRect();
-    const t = tile.getBoundingClientRect();
+    const tileRect = tile.getBoundingClientRect();
     if (!b.width || !b.height) return { x: 50, y: 50 };
     return {
-      x: ((t.left + t.width / 2) - b.left) / b.width * 100,
-      y: ((t.top + t.height / 2) - b.top) / b.height * 100,
+      x: ((tileRect.left + tileRect.width / 2) - b.left) / b.width * 100,
+      y: ((tileRect.top + tileRect.height / 2) - b.top) / b.height * 100,
     };
   }
 
