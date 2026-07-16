@@ -376,14 +376,18 @@ describe('runPostBuildChains — call-site-ordering regression (MUST-FIX / SHOUL
   // Real end-to-end proof (no injected chain mocks — exercises the actual runPortraitsChain /
   // runBoardBgChain exported from create-mod.js) of the exact behavior table required by the
   // fix wave spec: both flags + no key -> portraits ERROR printed, boardBg WARN printed (it
-  // DOES run), exit code 1. Safe to run for real: this repo/worktree has no .env, and with
-  // OPENAI_API_KEY deleted, both chains bail out at their own key-preflight check before ever
-  // touching the network or requiring gen-portraits/gen-boardbg's client code.
+  // DOES run), exit code 1. The chains' preflight calls loadDotEnv(REPO_ROOT) at call time,
+  // which would resurrect the key from a real repo-root .env (present in the main checkout,
+  // absent in CI/worktrees) — so BOTH the env var and loadDotEnv must be neutralized for the
+  // no-key scenario to hold in every environment. With both gone, the chains bail out at
+  // their own key-preflight before ever touching the network or the image client code.
   test('real chains, both flags + no key: portraits ERROR + boardBg WARN (it runs) + exit(1)', async () => {
     const { runPostBuildChains, runPortraitsChain, runBoardBgChain } = require('../../scripts/create-mod');
+    const extractFacts = require('../../scripts/extract-facts');
     const hadKey = Object.prototype.hasOwnProperty.call(process.env, 'OPENAI_API_KEY');
     const savedKey = process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_API_KEY;
+    const dotenvSpy = jest.spyOn(extractFacts, 'loadDotEnv').mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => {});
     const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -402,6 +406,7 @@ describe('runPostBuildChains — call-site-ordering regression (MUST-FIX / SHOUL
       expect(exitSpy).toHaveBeenCalledWith(1);
     } finally {
       if (hadKey) process.env.OPENAI_API_KEY = savedKey; else delete process.env.OPENAI_API_KEY;
+      dotenvSpy.mockRestore();
       exitSpy.mockRestore();
       errSpy.mockRestore();
       warnSpy.mockRestore();
@@ -410,9 +415,11 @@ describe('runPostBuildChains — call-site-ordering regression (MUST-FIX / SHOUL
 
   test('real chains, --boardbg alone + no key: WARN only, no exit(1) (create succeeded)', async () => {
     const { runPostBuildChains, runBoardBgChain } = require('../../scripts/create-mod');
+    const extractFacts = require('../../scripts/extract-facts');
     const hadKey = Object.prototype.hasOwnProperty.call(process.env, 'OPENAI_API_KEY');
     const savedKey = process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_API_KEY;
+    const dotenvSpy = jest.spyOn(extractFacts, 'loadDotEnv').mockImplementation(() => {});
     const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => {});
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
@@ -422,6 +429,7 @@ describe('runPostBuildChains — call-site-ordering regression (MUST-FIX / SHOUL
       expect(exitSpy).not.toHaveBeenCalled();
     } finally {
       if (hadKey) process.env.OPENAI_API_KEY = savedKey; else delete process.env.OPENAI_API_KEY;
+      dotenvSpy.mockRestore();
       exitSpy.mockRestore();
       warnSpy.mockRestore();
     }
