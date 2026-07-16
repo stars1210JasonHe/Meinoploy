@@ -1362,6 +1362,83 @@
       box-shadow:0 0 0 2px rgba(4,7,14,.85), 0 0 10px 1px var(--pc, var(--accent));
     }
 
+    /* ============================================================
+       RESKIN R4 — AMBIENCE (2026-07-16). All additive, presentation-
+       only, opacity/filter/transform animations behind a reduced-
+       motion gate. Zero geometry impact (E2E zero-overlap/board-lock
+       measure boxes; dust/halo layers are pointer-events:none).
+       ============================================================ */
+    /* Drifting light dust: 7 pixel motes on slow staggered loops between
+       the board art and the grid. Deterministic (nth-child), composited
+       (transform+opacity only). */
+    .board__dust { position:absolute; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
+    .board__dust i { position:absolute; width:3px; height:3px; background:var(--wr-cyan-soft);
+      opacity:0; image-rendering:pixelated; }
+    .board__dust i:nth-child(2n) { background:var(--wr-amber-soft); width:2px; height:2px; }
+    .board__dust i:nth-child(1) { left:12%; top:85%; }
+    .board__dust i:nth-child(2) { left:28%; top:95%; }
+    .board__dust i:nth-child(3) { left:45%; top:88%; }
+    .board__dust i:nth-child(4) { left:58%; top:97%; }
+    .board__dust i:nth-child(5) { left:70%; top:90%; }
+    .board__dust i:nth-child(6) { left:84%; top:94%; }
+    .board__dust i:nth-child(7) { left:93%; top:86%; }
+    @media (prefers-reduced-motion: no-preference) {
+      .board__dust i { animation:dustDrift 38s linear infinite; }
+      .board__dust i:nth-child(2) { animation-duration:52s; animation-delay:-14s; }
+      .board__dust i:nth-child(3) { animation-duration:31s; animation-delay:-22s; }
+      .board__dust i:nth-child(4) { animation-duration:59s; animation-delay:-8s; }
+      .board__dust i:nth-child(5) { animation-duration:44s; animation-delay:-30s; }
+      .board__dust i:nth-child(6) { animation-duration:35s; animation-delay:-5s; }
+      .board__dust i:nth-child(7) { animation-duration:48s; animation-delay:-19s; }
+      @keyframes dustDrift {
+        0%   { transform:translate(0, 0); opacity:0; }
+        8%   { opacity:.55; }
+        50%  { opacity:.30; }
+        92%  { opacity:.5; }
+        100% { transform:translate(6vmin, -78vmin); opacity:0; }
+      }
+      /* Node idle pulse: the R1c halos breathe slowly, staggered so the map
+         shimmers rather than throbbing in sync. Opacity-only. */
+      .tile-halo { animation:haloBreathe 7s ease-in-out infinite; }
+      .tile-halo:nth-child(3n) { animation-duration:8.5s; animation-delay:-3s; }
+      .tile-halo:nth-child(3n+1) { animation-duration:6.2s; animation-delay:-1.5s; }
+      @keyframes haloBreathe {
+        0%, 100% { opacity:.75; }
+        50% { opacity:1; }
+      }
+      /* Hover micro-motion: buttons + chips lift (they carry no positioning
+         transforms); tiles get a glow step instead (their centering transform
+         must not be touched). */
+      .pix-btn:hover:not(:disabled) { transform:translateY(-1px); }
+      .pix-btn:active:not(:disabled) { transform:translate(0,3px); }
+      .app--game .pcard--chip:hover { transform:translateY(-1px); }
+      .board--atlas .tile--click:hover { box-shadow:0 0 12px rgba(79,227,255,.35); }
+      /* Victory moment: crown + winner name pop in with a steps() scale;
+         standings rows stagger-fade. (Post-gameover re-renders are rare —
+         no moves land — so the entrance replaying is acceptable.) */
+      .results__crown, .results__winner {
+        animation:victoryPop .5s steps(4) both;
+      }
+      .results__winner { animation-delay:.15s; }
+      @keyframes victoryPop {
+        0% { transform:scale(.6); opacity:0; }
+        100% { transform:scale(1); opacity:1; }
+      }
+      .standrow { animation:rowFade .4s ease-out both; }
+      .standrow:nth-child(2) { animation-delay:.15s; }
+      .standrow:nth-child(3) { animation-delay:.3s; }
+      .standrow:nth-child(4) { animation-delay:.45s; }
+      .standrow:nth-child(n+5) { animation-delay:.6s; }
+      @keyframes rowFade {
+        from { opacity:0; transform:translateY(6px); }
+        to { opacity:1; transform:none; }
+      }
+      /* Duel flash CUT (spec §1.5): renderTurnbox rewrites its innerHTML on
+         EVERY state tick, so any appear-animation on turnbox content restarts
+         per tick — a strobe, not a moment. Needs a keyed-render before it's
+         safe; ticketed instead of shipped. */
+    }
+
     /* Proof-set application (R1a): each player chip is its own war-room panel
        (mockup: chips sit bare on the stage) — so the strip CONTAINER's box
        chrome retires; the wr-panel chips carry the visual weight now. */

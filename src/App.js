@@ -2551,7 +2551,9 @@ class MonopolyBoard {
       // #board-legend anchors to the BOARD's bottom-left (R1d) — in the
       // full-bleed layout .game__center spans the viewport under the fixed
       // rails, so anchoring there put the cartouche beneath the actionbar.
-      this.boardEl.innerHTML = '<div class="board__bg"></div><div class="board__grid-wrap"></div><div id="token-layer"></div><div id="board-legend" class="wr-panel wr-notch--sm"></div>';
+      // .board__dust (R4): ambient mote layer — static markup, pure-CSS drift,
+      // pointer-events:none; sits between the art and the grid.
+      this.boardEl.innerHTML = '<div class="board__bg"></div><div class="board__dust" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="board__grid-wrap"></div><div id="token-layer"></div><div id="board-legend" class="wr-panel wr-notch--sm"></div>';
       this._boardBgEl = this.boardEl.querySelector('.board__bg');
       this._gridWrap = this.boardEl.querySelector('.board__grid-wrap');
       this._tokenLayer = this.boardEl.querySelector('#token-layer');
