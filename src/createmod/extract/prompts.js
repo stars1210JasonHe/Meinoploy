@@ -62,6 +62,13 @@ export const MAP_CACHE_KEY = createHash('sha256')
   .digest('hex')
   .slice(0, 16);
 
+// Per-place description: strict-mode schemas require every property in `required`, so
+// "optional" is simulated via nullability (type:['string','null']) rather than omission —
+// the model emits null when it has no book-grounded material, and CODE (sanitizeDescription
+// in extract/index.js) degrades any missing/empty/overlong value to "omit the key from facts"
+// after the call returns. Never a hard failure, never a re-roll, never a new API round-trip.
+const NULLABLE_DESCRIPTION = { type: ['string', 'null'] };
+
 // ── synthesis: world (two variants: geo default, pos for --map-image) ──
 function worldSchema(withImage) {
   const placeProps = {
@@ -69,6 +76,7 @@ function worldSchema(withImage) {
     realName: str(),
     archetypes: arr({ type: 'string', enum: ARCHETYPE_IDS }),
     data: obj({ population: num(), gdp: num(), fame: num() }),
+    description: NULLABLE_DESCRIPTION,
   };
   if (withImage) {
     placeProps.pos = obj({ x: num(), y: num() });
@@ -99,18 +107,27 @@ export function buildWorldPrompt(cut, themes, lang, { mapImage } = {}) {
     system: 'You design the world of a Monopoly-like board-game mod from book-derived facts. '
       + 'Emit EXACTLY one entry per listed place — no more, no fewer. Assign each place ONE archetype '
       + 'that fits its role in the book. Invent plausible data (population, gdp in $B, fame 0-100) for '
-      + 'fictional places; use real-ish figures for real ones. modId is a romanized kebab-ASCII slug of the title.',
+      + 'fictional places; use real-ish figures for real ones. modId is a romanized kebab-ASCII slug of the title. '
+      + 'For each place, description is an OPTIONAL one-sentence flavor line (<=120 characters) grounded '
+      + 'in the book — a distinctive fact or image about the place, in the same language as the rest of '
+      + 'your output. Use null when the book gives no solid grounding for one; never invent unsupported detail.',
     user: `${langLine(lang)}\n${geoRule}\nBook themes: ${themes.join(', ') || 'n/a'}\n\nPLACES (emit exactly these, one entry each):\n${placeList}`,
     schema: worldSchema(!!mapImage),
   };
 }
 
 // ── synthesis: classic board ──
+// places[] items are {name, description} objects (not bare strings) so a per-property
+// description can ride the SAME synthesis call — deriveClassicBoard (smart/board.js) accepts
+// this object shape AND plain strings (hand-authored facts.json backward compat).
 const BOARD_SCHEMA = obj({
   modId: { type: 'string', pattern: KEBAB_PATTERN },
   modTitle: str(),
   tagline: str(),
-  groups: arr(obj({ name: str(), color: str(), places: arr(str()) })),
+  groups: arr(obj({
+    name: str(), color: str(),
+    places: arr(obj({ name: str(), description: NULLABLE_DESCRIPTION })),
+  })),
 });
 
 export function buildBoardPrompt(cut, themes, lang) {
@@ -119,7 +136,9 @@ export function buildBoardPrompt(cut, themes, lang) {
     name: 'synthesize_board',
     system: 'You design a classic ring board for a Monopoly-like mod from book-derived places/factions. '
       + 'Emit AT LEAST 2 groups, each with AT LEAST 2 property names, every group a DISTINCT CSS color. '
-      + 'Every property name must trace to a listed place or faction. modId is a romanized kebab-ASCII slug.',
+      + 'Every property name must trace to a listed place or faction. modId is a romanized kebab-ASCII slug. '
+      + 'For each property, description is an OPTIONAL one-sentence flavor line (<=120 characters) grounded '
+      + 'in the book, same language as the rest of your output. Use null when unsupported by the text.',
     user: `${langLine(lang)}\nBook themes: ${themes.join(', ') || 'n/a'}\n\nPLACES/FACTIONS:\n${placeList}`,
     schema: BOARD_SCHEMA,
   };

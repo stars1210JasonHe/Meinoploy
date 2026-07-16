@@ -23,6 +23,44 @@ export function kebabAscii(s) {
     .replace(/^-+|-+$/g, '');
 }
 
+// Per-place description degrade-on-failure (spec 2026-07-16 Part A step 1): the model output
+// is validated CODE-SIDE after the call returns — missing/null/non-string/empty/overlong (>120
+// chars) all degrade to "omit the field", mirroring the lore degrade pattern (never a hard
+// failure, never a retry). Trims incidental whitespace; does NOT truncate an overlong value —
+// truncating could cut a CJK sentence mid-character or silently ship a half-thought.
+export const PLACE_DESCRIPTION_MAX = 120;
+export function sanitizeDescription(raw, maxLen = PLACE_DESCRIPTION_MAX) {
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > maxLen) return undefined;
+  return trimmed;
+}
+
+// Classic board groups.places items come back from BOARD_SCHEMA as {name, description|null}
+// objects. Sanitize + collapse: a place with no valid description normalizes to a bare
+// string (keeps facts.json minimal and matches the plain hand-authored shape exactly); a
+// place WITH one becomes {name, description}. deriveClassicBoard (smart/board.js) accepts
+// both shapes, so this is the only place that needs to know about the object form.
+export function sanitizeBoardGroups(groups) {
+  return (groups || []).map(g => ({
+    ...g,
+    places: (g.places || []).map(item => {
+      if (typeof item === 'string') return item;
+      const desc = sanitizeDescription(item && item.description);
+      return desc ? { name: item.name, description: desc } : (item && item.name);
+    }),
+  }));
+}
+
+// Atlas world places: sanitize .description in place (delete when invalid) on an already-
+// shallow-cloned place object. Shared by the initial assembly and the world repair path so
+// both apply the exact same degrade rule.
+function sanitizePlaceDescription(place) {
+  const desc = sanitizeDescription(place.description);
+  if (desc) place.description = desc; else delete place.description;
+  return place;
+}
+
 // tiny promise pool
 async function pool(items, limit, fn) {
   const results = new Array(items.length);
@@ -154,10 +192,10 @@ export async function extractFacts(bookText, opts, llm) {
     lore,
   };
   if (boardData) {
-    facts.board = { groups: boardData.groups };
+    facts.board = { groups: sanitizeBoardGroups(boardData.groups) };
   } else {
     const places = worldData.places.map(p => {
-      const out = { ...p };
+      const out = sanitizePlaceDescription({ ...p });
       if (out.pos && !out.geo) {
         // UNCONDITIONAL pseudo-geo backfill (SP4 topology derefs geo)
         out.geo = { lat: 90 - out.pos.y / 100 * 180, lng: out.pos.x / 100 * 360 - 180 };
@@ -256,14 +294,14 @@ export async function validateAndRepair(facts, ctx) {
     try {
       if (facts.board) {
         const rep = await synth(buildRepairPrompt(buildBoardPrompt(cut, cut.themes, lang), routed.world));
-        facts.board = { groups: rep.groups };
+        facts.board = { groups: sanitizeBoardGroups(rep.groups) };
         facts.name = facts.name || rep.modTitle;
       } else {
         const base = buildWorldPrompt(cut, cut.themes, lang, { mapImage: !!opts.mapImageDataUrl });
         const rep = await synth(buildRepairPrompt(base, routed.world),
           opts.mapImageDataUrl ? { imageDataUrl: opts.mapImageDataUrl } : undefined);
         const places = rep.places.map(p => {
-          const o = { ...p };
+          const o = sanitizePlaceDescription({ ...p });
           if (o.pos && !o.geo) o.geo = { lat: 90 - o.pos.y / 100 * 180, lng: o.pos.x / 100 * 360 - 180 };
           return o;
         });
