@@ -64,11 +64,30 @@ function sampleArgs(entry, G, seat) {
   }
 }
 
-function checkStep(client, seat) {
+// `priority` (optional): move names to try FIRST, in order, before the rest
+// of Object.keys(Monopoly.moves) in their original order. Without it the
+// iteration order is exactly Object.keys(Monopoly.moves) — the classic-board
+// scenarios below pass no priority, so their dispatch order is byte-identical
+// to the pre-priority oracle. Reviewer finding (small-tickets wave): the
+// first-listed-wins walk means rollDice (defined before rollOnly in Game.js)
+// always wins the pre-roll state, so rollOnly/awaitingRoute/commitRoute were
+// structurally unreachable — and payRent (defined before initiateDuel)
+// swallowed every duel offer the same way. The atlas scenarios use `priority`
+// to steer the walk into those branches; the oracle's listed<=>accepted
+// checks are order-independent (every blind dispatch of an unlisted move must
+// be rejected no matter when it's tried), so reordering never weakens them.
+// Returns the DISPATCHED move's name (truthy) so callers can self-verify
+// which branches the walk really reached, false if no listed move advanced,
+// undefined on gameover.
+function checkStep(client, seat, priority) {
   const { G, ctx } = client.getState();
   if (ctx.gameover) return;
   const listed = new Set(getLegalMoves(G, ctx, seat).map(e => e.move));
-  for (const move of Object.keys(Monopoly.moves)) {
+  const defaultOrder = Object.keys(Monopoly.moves);
+  const order = priority
+    ? [...priority, ...defaultOrder.filter(m => !priority.includes(m))]
+    : defaultOrder;
+  for (const move of order) {
     const before = client.getState();
     const entry = getLegalMoves(before.G, before.ctx, seat).find(e => e.move === move);
     if (entry) {
@@ -83,7 +102,7 @@ function checkStep(client, seat) {
       if (!changed) {
         throw new Error(`DRIFT: listed move ${move} was REJECTED at seat ${seat} (turnPhase ${before.G.turnPhase})`);
       }
-      return true; // state advanced — restart the scan from the new state
+      return move; // state advanced (truthy) — restart the scan from the new state
     } else if (!ARG_MOVES.has(move)) {
       // NOT LISTED (and blind-dispatchable) => dispatch must be rejected.
       client.moves[move]();
@@ -119,23 +138,74 @@ test.each([1, 7, 8, 21])('drift: full game agreement, seed %i', (seed) => {
   expect(steps).toBeGreaterThan(20); // the game genuinely progressed
 });
 
-test.each([2, 9])('drift: full game agreement, atlas board (terra-titans), seed %i', (seed) => {
-  const client = freshAtlasClient(2, seed);
-  // Same walk as the classic-board oracle above — checkStep/sampleArgs are
-  // movementMode-agnostic (rollDice auto-routes on atlas; commitRoute
-  // dispatches argless and the engine auto-routes on omission), and
-  // terra-titans additionally enables duel mode (RULES.duel.enabled), so this
-  // run also exercises the payRent/initiateDuel/respondDuel/declineDuel
-  // quartet the classic-only oracle never reaches (dominion has duels off).
+// Steered walk driver, shared by the priority scenarios below. `priority`
+// steers checkStep's first-listed-wins scan (see checkStep header): rollOnly
+// over rollDice so awaitingRoute actually opens on atlas (then commitRoute
+// closes it via the oracle's own listed=>accepted path), and a per-scenario
+// duel stance so duel offers escalate instead of always draining through
+// payRent. Returns the set of moves the walk actually DISPATCHED, for
+// self-verifying assertions — a silent no-op (branch never reached) fails
+// loudly instead of green-washing.
+function driveSteeredGame(client, priority) {
+  const dispatched = new Set();
   let steps = 0;
   while (steps < 400) {
     const { ctx } = client.getState();
     if (ctx.gameover) break;
-    const advanced = checkStep(client, ctx.currentPlayer);
-    if (!advanced) {
-      throw new Error(`DRIFT (atlas): no legal move listed for acting seat at step ${steps}`);
+    const move = checkStep(client, ctx.currentPlayer, priority);
+    if (!move) {
+      throw new Error(`DRIFT (steered): no legal move listed for acting seat at step ${steps}`);
     }
+    dispatched.add(move);
     steps++;
   }
   expect(steps).toBeGreaterThan(20); // the game genuinely progressed
+  return dispatched;
+}
+
+// The two stances share ['rollOnly','commitRoute',...,'buyProperty','endTurn']:
+// - rollOnly over rollDice opens awaitingRoute; commitRoute (before endTurn —
+//   endTurn is NOT awaitingRoute-gated, ledger's pre-existing hole) closes it.
+// - buyProperty + endTurn preferred over the asset moves: without this the
+//   default-order walk mortgages every property the moment it's owned
+//   (mortgageProperty is defined before buyProperty/endTurn in Game.js), so
+//   every rent stays $0 and the `rent > 0` duel-offer condition (Game.js
+//   handleLanding) is structurally unreachable — measured, not guessed: a
+//   20-seed hunt without this steering produced ZERO duel offers; with it,
+//   12/12 seeds fired the full duel path in both stances.
+// - initiateDuel before payRent escalates offers while off cooldown; the
+//   3-turn cooldown then routes later offers through payRent (default order),
+//   so both offer answers get dispatched in the same game.
+test.each([2, 9])('drift: atlas board (terra-titans), rollOnly/commitRoute + duel-respond stance, seed %i', (seed) => {
+  const dispatched = driveSteeredGame(freshAtlasClient(2, seed), ['rollOnly', 'commitRoute', 'initiateDuel', 'respondDuel', 'buyProperty', 'endTurn']);
+  // Self-verifying (reviewer-mandated): each branch was genuinely dispatched
+  // through the oracle's listed=>accepted path — a silent no-op fails here.
+  expect(dispatched.has('rollOnly')).toBe(true);
+  expect(dispatched.has('commitRoute')).toBe(true);
+  expect(dispatched.has('rollDice')).toBe(false); // rollOnly won every pre-roll state
+  expect(dispatched.has('initiateDuel')).toBe(true);
+  expect(dispatched.has('respondDuel')).toBe(true);
+  expect(dispatched.has('payRent')).toBe(true); // cooldown-blocked offers drain here
+});
+
+test.each([2, 9])('drift: atlas board (terra-titans), duel-decline stance, seed %i', (seed) => {
+  const dispatched = driveSteeredGame(freshAtlasClient(2, seed), ['rollOnly', 'commitRoute', 'initiateDuel', 'declineDuel', 'buyProperty', 'endTurn']);
+  expect(dispatched.has('rollOnly')).toBe(true);
+  expect(dispatched.has('commitRoute')).toBe(true);
+  expect(dispatched.has('initiateDuel')).toBe(true);
+  expect(dispatched.has('declineDuel')).toBe(true); // owner refuses — the respond stance never reaches this branch
+  expect(dispatched.has('payRent')).toBe(true);
+});
+
+// rollOnly's OTHER branch: on a loop map it skips the route pause and moves
+// immediately (Game.js rollOnly's `else performMove(G, ctx, undefined)`) —
+// reachable only when rollOnly is preferred on a classic board, which neither
+// the byte-identical classic scenarios above (rollDice always wins their
+// default order) nor the atlas scenarios (always take the atlas branch) can
+// reach. One steered classic game covers it; awaitingRoute must never open.
+test('drift: classic board via rollOnly (loop-map immediate-move branch), seed 1', () => {
+  const dispatched = driveSteeredGame(freshClient(2, 1), ['rollOnly']);
+  expect(dispatched.has('rollOnly')).toBe(true);
+  expect(dispatched.has('rollDice')).toBe(false); // rollOnly won every pre-roll state
+  expect(dispatched.has('commitRoute')).toBe(false); // loop map: no route pause ever opened
 });

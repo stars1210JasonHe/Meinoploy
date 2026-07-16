@@ -43,7 +43,7 @@ import { MODS } from '../../mods/index';
 import { isDuelCooldownBlocked } from '../events';
 import { getUpgradeCost } from '../Game';
 import { routeChoices } from '../atlas-movement';
-import { canAct } from './view';
+import { canAct, isMerchant } from './view';
 import { decisionSeq, EXPECT_REQUIRED } from './move-schemas';
 
 // Mirrors Game.js's (unexported) groupKeyOf exactly (Game.js:210).
@@ -265,7 +265,7 @@ export function getLegalMoves(G, ctx, seat) {
   // Game.js (only useReroll explicitly checks G.pendingCard, handled below).
   if (G.pendingCard) {
     out.push({ move: 'acceptCard', description: 'Apply the drawn card.' });
-    const merchant = p.character && p.character.passive && p.character.passive.id === 'merchant';
+    const merchant = isMerchant(p); // shared mirror (view.js) — also drives the digest's redraw hint
     if (merchant || p.luckRedraws > 0) {
       out.push({ move: 'redrawCard', description: `Redraw the card${merchant ? ' (merchant: free)' : ` (${p.luckRedraws} redraw(s) left)`}.` });
     }

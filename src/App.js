@@ -3845,8 +3845,8 @@ class MonopolyBoard {
     this.botSeats = new Set(saveData.botSeats || []);
     this._buildBotDriver();
     // Clear any in-flight dice/hop from the PRIOR client before it's replaced, AND seed the
-    // cursor to the save's own LAST-BAKED seq (matching the `eventSeq: savedG.eventSeq || 0`
-    // fallback two lines up) rather than resetting to -1. A plain reset() would make every event
+    // cursor to the save's own LAST-BAKED seq (matching rehydrateSavedG's `savedG.eventSeq || 0`
+    // backfill, Game.js) rather than resetting to -1. A plain reset() would make every event
     // already baked into the loaded G.events (up to the 200-event window) look "fresh" on the
     // very next onState() — replaying the save's whole recent history as a burst of dice/hop
     // animation instead of just resuming play from where the save was taken.
