@@ -827,12 +827,22 @@ class MonopolyBoard {
   // (every type is null in the exact same conditions in every locale — see
   // i18n-log.js's null-parity guarantee), only the text, so which locale is
   // passed here is immaterial to correctness.
-  _updateLogUnread(G) {
+  //
+  // `precomputedLines` (post-merge localization ticket 2): when update() just ran
+  // renderMessages(G) and got a non-null array back (the log WAS visible and rebuilt this
+  // very tick), it hands that array straight in here instead of letting this method run
+  // renderLogLines over the same G.events/locale a second time. Every other caller
+  // (onLocaleChange's drawer-tab-rebuild branch, _openDrawer) still calls this with no 2nd
+  // arg and gets the exact same self-computed count as before — behavior-identical, just
+  // not redundantly recomputed on the one hot path where the answer was already sitting
+  // right there.
+  _updateLogUnread(G, precomputedLines) {
     if (!this.drawerTabsEl) return;
     const btn = this.drawerTabsEl.querySelector('.drawer-tabs__btn[data-tab="log"]');
     if (!btn) return;
     const g = G || this._lastG;
-    const count = g && g.events ? renderLogLines(g.events, getLocale(), g).length : 0;
+    const count = precomputedLines ? precomputedLines.length
+      : (g && g.events ? renderLogLines(g.events, getLocale(), g).length : 0);
     const viewingLog = this._drawerOpen && this._drawerTab === 'log';
     if (viewingLog) this._logSeenCount = count;
     const unread = !viewingLog && count > this._logSeenCount;
@@ -1343,8 +1353,8 @@ class MonopolyBoard {
     this.renderPlayerInfo(G, ctx);
     this.renderTurnbox(G, ctx);
     this.renderManage(G, ctx);
-    this.renderMessages(G);
-    this._updateLogUnread(G);
+    const logLines = this.renderMessages(G);
+    this._updateLogUnread(G, logLines);
     this._renderAIResponses();
     this.renderChatPanel(G, ctx);
     this.renderStateModal(G, ctx);
@@ -3069,6 +3079,12 @@ class MonopolyBoard {
   // shows the WHOLE game history, and a LANG flip re-renders that entire
   // history in the new language (renderLogLines re-derives every line from
   // event data on every call, never from a cached string).
+  // Returns the rendered { type, kind, text } array (post-merge localization ticket 2:
+  // update() below hands this straight to _updateLogUnread instead of it independently
+  // re-running renderLogLines over the same G.events/locale/G a second time on every tick
+  // the log happens to be open — same inputs, same result, computed twice for nothing).
+  // Returns null when the rebuild was skipped (log not visible) — _updateLogUnread falls
+  // back to computing its own count in that case, exactly as it always has.
   renderMessages(G) {
     // T4 review Important #2 (perf): the log source is now up to 200 events per
     // rebuild, and update() calls this every state tick — skip the DOM rebuild
@@ -3076,13 +3092,15 @@ class MonopolyBoard {
     // (_updateLogUnread), and _openDrawer('log') re-renders on reveal below.
     if (!(this._drawerOpen && this._drawerTab === 'log')) {
       this._logStale = true;
-      return;
+      return null;
     }
     this._logStale = false;
-    const lines = renderLogLines(G.events, getLocale(), G).map(({ kind, text }) => (
+    const rendered = renderLogLines(G.events, getLocale(), G);
+    const lines = rendered.map(({ kind, text }) => (
       `<div class="logline logline--${kind}">${esc(text)}</div>`
     )).reverse().join('');
     this.messagesEl.innerHTML = `<div class="logbox"><div class="logbox__title">${t('log.title')}</div><div class="logbox__list">${lines}</div></div>`;
+    return rendered;
   }
 
   // ─────────────────────────────────────────────────────────
