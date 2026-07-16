@@ -79,6 +79,46 @@ For Python scripts in `data/`:
 cd data && uv run Split.py
 ```
 
+## MCP Server (AI agent access)
+
+`scripts/mcp-server.js` is a 9-tool stdio MCP server (`list_matches`, `create_match`,
+`join_match`, `get_state`, `get_state_digest`, `list_legal_moves`, `make_move`,
+`get_events`, `wait_for_my_turn`) that lets an AI agent join a running game server as a
+real player seat — session logic lives in `src/mcp/` (`session.js`, `view.js`,
+`legal-moves.js`, `move-schemas.js`), the script itself is the stdio transport + tool
+registration wrapper.
+
+**1. Start the game server** (the MCP server is a client of this, not a replacement for it):
+
+```bash
+npm run server                              # dominion/classic (default), port 8088
+MOD=terra-titans node -r esm server.js      # a specific mod, its default map/world
+MOD=dominion MAP=classic node -r esm server.js   # a specific mod + map/world id
+```
+
+`MOD=`/`MAP=` are boot-time env vars (`server.js`, read once at startup) — one mod+map
+per server process; `MAP=` without `MOD=` is a startup error (a map id only means
+something within a mod). The browser client aligns to `G.activeModId`/`G.activeMapId`
+on its first sync, and the MCP server aligns the same way in `onSync` (`src/mcp/session.js`).
+
+**2. Register the MCP server with Claude Code** — direct `node`, NEVER `npm run mcp`:
+
+```bash
+claude mcp add meinopoly -- node <absolute path>/scripts/mcp-server.js
+```
+
+`npm run mcp` (i.e. `node scripts/mcp-server.js` via npm) exists for manual/local testing
+(`--selftest` bootstrap check, ad-hoc runs) but must **never** be used as the actual MCP
+registration command — npm's own startup banner writes to stdout, which is the JSON-RPC
+wire for stdio transport, and corrupts every message that follows. Always register with
+a direct `node <abs path>` invocation so nothing but the server's own JSON-RPC ever
+touches stdout.
+
+Useful env vars (all optional, see `scripts/mcp-server.js` header):
+`MEINOPOLY_SERVER_URL` (default `http://localhost:8088`), `MEINOPOLY_MCP_MOVE_TIMEOUT_MS`
+(default 1500), `MEINOPOLY_MCP_SYNC_TIMEOUT_MS` (default 5000), `MEINOPOLY_MCP_SESSION_FILE`
+(default `.superpowers/mcp-session.json` — join credentials, gitignored).
+
 ## Conventions
 
 - Game state is managed entirely through boardgame.io's G object (immutable pattern with Immer)
