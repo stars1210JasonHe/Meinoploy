@@ -471,26 +471,39 @@ function main(argv) {
     return;
   }
   console.log(`Created mod ${r.id} (${r.written.length} files). Run \`npm run build\` to play it.`);
-  if (args.portraits) runPortraitsChain(args, r.id).catch(e => { console.error('ERROR: ' + e.message); process.exit(1); });
-  if (args.boardBg) runBoardBgChain(args, r.id);
+  if (args.portraits || args.boardBg) {
+    runPostBuildChains({
+      portraits: args.portraits,
+      boardBg: args.boardBg,
+      runPortraits: () => runPortraitsChain(args, r.id),
+      runBoardBg: () => runBoardBgChain(args, r.id),
+    });
+  }
 }
 
 // Fires the optional --portraits chain after the plain/smart build path succeeds. This path
 // (unlike --from-book) never needed OPENAI_API_KEY before, so the .env load is lazy and only
 // happens here, gated on --portraits actually being requested on a real (non-dry-run) build.
 // async: a synchronous throw from loadDotEnv/require (e.g. a broken .env parse or a missing
-// module) must land in the caller's `.catch(...)`, not escape as a raw, unhandled stack trace.
-// Wrapping the body in `async` turns any synchronous throw into a rejected promise automatically.
+// module) must land in the caller's `try`/`catch` (see runPostBuildChains below), not escape as
+// a raw, unhandled stack trace. Wrapping the body in `async` turns any synchronous throw into a
+// rejected promise automatically.
+//
+// Fix wave 2026-07-16 (MUST-FIX): this used to call `process.exit(1)` itself on both failure
+// paths (missing key / chainPortraits resolving false). That mid-flight exit ran BEFORE the
+// sibling --boardbg chain ever got a chance to start when both flags were passed together —
+// silently dropping --boardbg with no warning even though the create had already succeeded.
+// runPortraitsChain now only REPORTS failure (returns false, same console.error messages as
+// before) — the caller (runPostBuildChains) decides when/whether to exit, after --boardbg (if
+// requested) has also been awaited to completion.
 export async function runPortraitsChain(args, modId) {
   const { loadDotEnv } = require('./extract-facts');
   loadDotEnv(REPO_ROOT);
   if (!process.env.OPENAI_API_KEY) {
     console.error('ERROR: OPENAI_API_KEY is not set (env var or repo-root .env)');
-    process.exit(1);
+    return false;
   }
-  return chainPortraits({ modId, style: args.style, imageModel: args.imageModel, rootDir: REPO_ROOT, force: !!args.force }).then(ok => {
-    if (!ok) process.exit(1);
-  });
+  return chainPortraits({ modId, style: args.style, imageModel: args.imageModel, rootDir: REPO_ROOT, force: !!args.force });
 }
 
 // Fires the optional --boardbg chain after the plain/smart build path succeeds. Unlike
@@ -505,8 +518,46 @@ export async function runBoardBgChain(args, modId) {
     return;
   }
   return chainBoardBg({ modId, imageModel: args.imageModel, rootDir: REPO_ROOT, force: !!args.force }).catch(e => {
-    console.warn('WARN: boardBg chain failed: ' + e.message);
+    const { redactSecrets } = require('./gen-portraits');
+    console.warn('WARN: boardBg chain failed: ' + redactSecrets(String(e && e.message)));
   });
+}
+
+// Runs the optional --portraits and --boardbg chains SEQUENTIALLY and AWAITED — portraits first
+// (unchanged per-chain semantics: a missing key or a generation failure is a hard fail), then
+// --boardbg (unchanged lenient warn-only semantics) — and only THEN applies portraits' exit(1)
+// contract. This replaces the old pattern (both call sites, main() and loadFromBookEnvAndRun) of
+// firing both chains as independent, unawaited async calls: that race let a portraits failure's
+// `process.exit(1)` kill the process while --boardbg was still mid-flight (an in-progress API
+// call or file write) — SHOULD-FIX 1. Combined with runPortraitsChain's OLD synchronous exit(1)
+// on a missing key, it could drop --boardbg entirely before it ever started — MUST-FIX. Both
+// flags' single-flag-alone behavior is unchanged; the only observable change is that --boardbg
+// now always gets to run to completion before any portraits-driven exit happens (2026-07-16 fix
+// wave; see docs/superpowers/sdd/createmod-content-report.md "Fix wave").
+export async function runPostBuildChains({ portraits, boardBg, runPortraits, runBoardBg }) {
+  let portraitsOk = true;
+  if (portraits) {
+    try {
+      portraitsOk = await runPortraits();
+    } catch (e) {
+      const { redactSecrets } = require('./gen-portraits');
+      console.error('ERROR: ' + redactSecrets(String(e && e.message)));
+      portraitsOk = false;
+    }
+  }
+  if (boardBg) {
+    // runBoardBg (runBoardBgChain) already reports+swallows its own failures internally (warn,
+    // never throw) for every REALISTIC failure path; this try/catch is purely a defensive guard
+    // against a stray synchronous throw (e.g. a corrupt .env parse) turning into an unhandled
+    // promise rejection — it must never affect the exit code, which is driven by portraits alone.
+    try {
+      await runBoardBg();
+    } catch (e) {
+      const { redactSecrets } = require('./gen-portraits');
+      console.warn('WARN: boardBg chain failed: ' + redactSecrets(String(e && e.message)));
+    }
+  }
+  if (!portraitsOk) process.exit(1);
 }
 
 // Loads .env + validates the API key, builds the real OpenAI client, then runs --from-book.
@@ -532,16 +583,25 @@ function loadFromBookEnvAndRun(args, argv) {
       if (args.portraits) console.log('--portraits ignored: nothing was built');
       return;
     }
-    // Both chains may run together (e.g. --from-book --portraits --boardbg); neither may
-    // `return` early and skip the other.
-    if (args.portraits) {
-      // OPENAI_API_KEY was already loaded above to build the extraction client; reuse it.
-      chainPortraits({ modId: r.id, style: args.style, imageModel: args.imageModel, rootDir: REPO_ROOT }).then(ok => {
-        if (!ok) process.exit(1);
+    // Both chains may run together (e.g. --from-book --portraits --boardbg); sequenced +
+    // awaited via runPostBuildChains (not two independent unawaited fires) so a portraits
+    // hard-failure can never race-kill a still in-flight --boardbg call (SHOULD-FIX 1). This
+    // path pre-validated OPENAI_API_KEY above to build the extraction client, so runPortraits
+    // reuses it directly via chainPortraits (no repeat key preflight — the missing-key case
+    // can't reach here).
+    if (args.portraits || args.boardBg) {
+      runPostBuildChains({
+        portraits: args.portraits,
+        boardBg: args.boardBg,
+        runPortraits: () => chainPortraits({ modId: r.id, style: args.style, imageModel: args.imageModel, rootDir: REPO_ROOT }),
+        runBoardBg: () => runBoardBgChain(args, r.id),
       });
     }
-    if (args.boardBg) runBoardBgChain(args, r.id);
-  }).catch(e => { console.error('ERROR: ' + e.message); process.exit(1); });
+  }).catch(e => {
+    const { redactSecrets } = require('./gen-portraits');
+    console.error('ERROR: ' + redactSecrets(String(e && e.message)));
+    process.exit(1);
+  });
 }
 
 if (require.main === module) main(process.argv.slice(2));

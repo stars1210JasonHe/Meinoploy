@@ -306,3 +306,169 @@ describe('runBoardBgChain', () => {
     expect(typeof mod.runBoardBgChain).toBe('function');
   });
 });
+
+// Fix wave (2026-07-16) — MUST-FIX + SHOULD-FIX 1 regression coverage. Adversarial review found:
+// runPortraitsChain used to call process.exit(1) synchronously (mid-flight) on a missing
+// OPENAI_API_KEY, and both call sites (main(), loadFromBookEnvAndRun) fired --portraits and
+// --boardbg as two independent UNAWAITED async calls. Together this meant a portraits failure
+// could kill the process before --boardbg's chain ever started (or while it was still
+// mid-flight), silently dropping --boardbg with no warning even though the create succeeded.
+// The fix: runPortraitsChain now only REPORTS failure (returns false); runPostBuildChains runs
+// portraits then boardBg SEQUENTIALLY and AWAITED, and only exits after both have settled.
+describe('runPostBuildChains — call-site-ordering regression (MUST-FIX / SHOULD-FIX 1, 2026-07-16 fix wave)', () => {
+  test('injected mocks: boardBg is INVOKED (and awaited to completion) even when portraits fails; exit(1) fires only after both settle', async () => {
+    const { runPostBuildChains } = require('../../scripts/create-mod');
+    const order = [];
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => { order.push('exit(1)'); });
+    try {
+      const runPortraits = jest.fn(async () => {
+        order.push('portraits:start');
+        order.push('portraits:fail');
+        return false; // simulates either a missing key or chainPortraits resolving {ok:false}
+      });
+      const runBoardBg = jest.fn(async () => {
+        order.push('boardbg:start');
+        // still "mid-flight" (an in-progress API call / file write) when portraits already
+        // failed — the old unawaited-parallel code would have let exit(1) fire right here.
+        await new Promise(resolve => setTimeout(resolve, 5));
+        order.push('boardbg:done');
+      });
+      await runPostBuildChains({ portraits: true, boardBg: true, runPortraits, runBoardBg });
+
+      expect(runPortraits).toHaveBeenCalledTimes(1);
+      expect(runBoardBg).toHaveBeenCalledTimes(1); // INVOKED despite portraits having failed
+      // ordering proof: boardBg ran to completion strictly BEFORE exit(1) — never mid-flight.
+      expect(order).toEqual(['portraits:start', 'portraits:fail', 'boardbg:start', 'boardbg:done', 'exit(1)']);
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(exitSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      exitSpy.mockRestore();
+    }
+  });
+
+  test('portraits succeeds, boardBg fails (warn-only): no exit(1) — boardBg never turns a good create into a failure', async () => {
+    const { runPostBuildChains } = require('../../scripts/create-mod');
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => {});
+    try {
+      const runPortraits = jest.fn(async () => true);
+      const runBoardBg = jest.fn(async () => { throw new Error('boardBg network boom'); });
+      await runPostBuildChains({ portraits: true, boardBg: true, runPortraits, runBoardBg });
+      expect(runBoardBg).toHaveBeenCalledTimes(1);
+      expect(exitSpy).not.toHaveBeenCalled();
+    } finally {
+      exitSpy.mockRestore();
+    }
+  });
+
+  test('portraits-only (no boardBg requested): runBoardBg never called, exit(1) still fires on portraits failure', async () => {
+    const { runPostBuildChains } = require('../../scripts/create-mod');
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => {});
+    try {
+      const runBoardBg = jest.fn();
+      await runPostBuildChains({ portraits: true, boardBg: false, runPortraits: async () => false, runBoardBg });
+      expect(runBoardBg).not.toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      exitSpy.mockRestore();
+    }
+  });
+
+  // Real end-to-end proof (no injected chain mocks — exercises the actual runPortraitsChain /
+  // runBoardBgChain exported from create-mod.js) of the exact behavior table required by the
+  // fix wave spec: both flags + no key -> portraits ERROR printed, boardBg WARN printed (it
+  // DOES run), exit code 1. Safe to run for real: this repo/worktree has no .env, and with
+  // OPENAI_API_KEY deleted, both chains bail out at their own key-preflight check before ever
+  // touching the network or requiring gen-portraits/gen-boardbg's client code.
+  test('real chains, both flags + no key: portraits ERROR + boardBg WARN (it runs) + exit(1)', async () => {
+    const { runPostBuildChains, runPortraitsChain, runBoardBgChain } = require('../../scripts/create-mod');
+    const hadKey = Object.prototype.hasOwnProperty.call(process.env, 'OPENAI_API_KEY');
+    const savedKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => {});
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const args = { style: null, imageModel: null, force: false };
+      await runPostBuildChains({
+        portraits: true,
+        boardBg: true,
+        runPortraits: () => runPortraitsChain(args, 'some-mod'),
+        runBoardBg: () => runBoardBgChain(args, 'some-mod'),
+      });
+      const errOut = errSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      const warnOut = warnSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(errOut).toContain('ERROR: OPENAI_API_KEY is not set (env var or repo-root .env)');
+      expect(warnOut).toContain('WARN: OPENAI_API_KEY is not set (env var or repo-root .env) — skipping boardBg; the mod itself was built.');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      if (hadKey) process.env.OPENAI_API_KEY = savedKey; else delete process.env.OPENAI_API_KEY;
+      exitSpy.mockRestore();
+      errSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  test('real chains, --boardbg alone + no key: WARN only, no exit(1) (create succeeded)', async () => {
+    const { runPostBuildChains, runBoardBgChain } = require('../../scripts/create-mod');
+    const hadKey = Object.prototype.hasOwnProperty.call(process.env, 'OPENAI_API_KEY');
+    const savedKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    const exitSpy = jest.spyOn(process, 'exit').mockImplementation(() => {});
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const args = { style: null, imageModel: null, force: false };
+      await runPostBuildChains({ portraits: false, boardBg: true, runPortraits: undefined, runBoardBg: () => runBoardBgChain(args, 'some-mod') });
+      expect(warnSpy.mock.calls.map(c => c.join(' ')).join('\n')).toContain('WARN: OPENAI_API_KEY is not set');
+      expect(exitSpy).not.toHaveBeenCalled();
+    } finally {
+      if (hadKey) process.env.OPENAI_API_KEY = savedKey; else delete process.env.OPENAI_API_KEY;
+      exitSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+});
+
+// SHOULD-FIX 2, 2026-07-16 fix wave: runGenBoardBg's "PNG exists + no --force -> skip, zero
+// spend" branch (gen-boardbg.js:88-91) had no direct test proving the images client is never
+// touched on a second run. A poison-pill client (generate() throws if called) makes any
+// regression that accidentally drops the exists-check fail loudly instead of silently spending.
+describe('runGenBoardBg — poison-pill idempotency proof (SHOULD-FIX 2, 2026-07-16 fix wave)', () => {
+  test('PNG already exists, no --force -> succeeds without ever calling client.generate()', async () => {
+    const root = makeRoot();
+    expect(createMod({ inputPath: ATLAS, rootDir: root }).ok).toBe(true);
+    const bgDir = path.join(root, 'mods', 'ancient-empires', 'backgrounds');
+    fs.mkdirSync(bgDir, { recursive: true });
+    fs.writeFileSync(path.join(bgDir, 'ancient-empires.png'), FAKE_PNG);
+
+    const poisonClient = { generate: async () => { throw new Error('poison pill: generate() must NOT be called when the PNG already exists and --force was not passed'); } };
+    const poisonCodec = {
+      decode: () => { throw new Error('poison pill: codec.decode() must NOT be called on the skip path'); },
+      encode: () => { throw new Error('poison pill: codec.encode() must NOT be called on the skip path'); },
+    };
+    const logs = [];
+    const r = await runGenBoardBg({ modId: 'ancient-empires', rootDir: root, force: false, log: s => logs.push(s) }, poisonClient, poisonCodec);
+
+    expect(r).toEqual({ ok: true, written: [] });
+    expect(logs.join('\n')).toMatch(/background exists:.*use --force to regenerate/);
+    // the pre-existing PNG is untouched, byte-for-byte (skip never rewrites it either)
+    expect(fs.readFileSync(path.join(bgDir, 'ancient-empires.png')).equals(FAKE_PNG)).toBe(true);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test('PNG already exists + --force=true -> DOES call client.generate() (force overrides the skip)', async () => {
+    const root = makeRoot();
+    expect(createMod({ inputPath: ATLAS, rootDir: root }).ok).toBe(true);
+    const bgDir = path.join(root, 'mods', 'ancient-empires', 'backgrounds');
+    fs.mkdirSync(bgDir, { recursive: true });
+    fs.writeFileSync(path.join(bgDir, 'ancient-empires.png'), FAKE_PNG);
+
+    let called = false;
+    const client = { generate: async () => { called = true; return { b64: 'xx', usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }; } };
+    const fakeCodec = { decode: () => ({ width: 4, height: 4, data: new Uint8Array(4 * 4 * 4).fill(1) }), encode: () => Buffer.from('regenerated-png-bytes') };
+    const r = await runGenBoardBg({ modId: 'ancient-empires', rootDir: root, force: true, log: () => {} }, client, fakeCodec);
+
+    expect(r.ok).toBe(true);
+    expect(called).toBe(true); // sanity: force really does spend, proving the skip test above is meaningful
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
