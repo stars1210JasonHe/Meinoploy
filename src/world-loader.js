@@ -296,6 +296,17 @@ export function validateWorld(world, archetypes) {
     placeIds.add(p.id);
   });
 
+  // 1b. Optional per-place description (create-mod content wave, 2026-07-16): mod content,
+  // not an i18n string — tolerated when absent, rejected only when present and malformed.
+  // 200-char ceiling is a laxer author-facing cap than SP2's 120-char auto-generation cap
+  // (extraction degrades on its own before this ever runs; hand-authored facts.json gets a
+  // little more room).
+  places.forEach(function (p) {
+    if (p.description !== undefined && (typeof p.description !== 'string' || p.description.length > 200)) {
+      errors.push('place "' + p.id + '": description must be a string <= 200 chars');
+    }
+  });
+
   // 2. Refs: archetypes, connector targets, hubs
   places.forEach(function (p) {
     (p.archetypes || []).forEach(function (aId) {

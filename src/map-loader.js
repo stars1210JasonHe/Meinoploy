@@ -219,6 +219,12 @@ export function validateMap(mapJson) {
       if ((s.type === 'railroad' || s.type === 'utility') && (!s.price || s.price <= 0)) {
         errors.push('Space ' + i + ' (' + s.name + '): ' + s.type + ' must have price > 0');
       }
+      // Optional per-space description (create-mod content wave, 2026-07-16): mod content,
+      // tolerated when absent, rejected only when present and malformed. See world-loader.js's
+      // matching check for the 200-char rationale (laxer than SP2's 120-char auto-gen cap).
+      if (s.description !== undefined && (typeof s.description !== 'string' || s.description.length > 200)) {
+        errors.push('Space ' + i + ' (' + s.name + '): description must be a string <= 200 chars');
+      }
     });
   }
 

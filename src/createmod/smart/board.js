@@ -47,9 +47,16 @@ export function deriveClassicBoard(boardFacts, opts) { // eslint-disable-line no
     seenColors.set(g.color, g.name);
   });
 
-  // Collect properties in group order.
+  // Collect properties in group order. Each place is EITHER a plain string (hand-authored
+  // facts.json, no description) OR a {name, description} object (SP2 synthesis output, or a
+  // hand-author opting into the same per-place 简介 field) — both shapes are accepted so this
+  // stays backward-compatible with every existing facts.json on disk.
   const properties = [];
-  groups.forEach(g => g.places.forEach(name => properties.push({ name, color: g.color })));
+  groups.forEach(g => g.places.forEach(item => {
+    const name = typeof item === 'string' ? item : item.name;
+    const description = typeof item === 'string' ? undefined : item.description;
+    properties.push({ name, color: g.color, description });
+  }));
   const M = properties.length;
 
   // Size first: interspersed specials, then pad to N >= 10 with extra chance/community.
@@ -62,7 +69,7 @@ export function deriveClassicBoard(boardFacts, opts) { // eslint-disable-line no
   const items = [];
   let interspersed = 0;
   properties.forEach((p, i) => {
-    items.push({ kind: 'property', name: p.name, color: p.color });
+    items.push({ kind: 'property', name: p.name, color: p.color, description: p.description });
     if ((i + 1) % SPECIAL_EVERY === 0 && interspersed < numSpecials) {
       items.push({ kind: rotation[interspersed % 3] });
       interspersed++;
@@ -96,6 +103,7 @@ export function deriveClassicBoard(boardFacts, opts) { // eslint-disable-line no
         price,
         rent: Math.max(2, Math.round(price * 0.06)),
       };
+      if (item.description) spaces[idx].description = item.description;
       (groupSpaces[item.color] = groupSpaces[item.color] || []).push(idx);
       order++;
     } else if (item.kind === 'tax') {
