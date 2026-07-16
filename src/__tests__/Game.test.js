@@ -2145,6 +2145,29 @@ describe('luck card-gain amplifier + stamina loss reduction (Task 2)', () => {
     expect(totalCreated).toBe(227);
   });
 
+  test('gainAll: eventData carries real per-player/total amounts, message stays nominal ($100)', () => {
+    // Ticket: pre-fix, card_applied's effect.amount (127, the winner
+    // seat's luck-amplified share, or 100, the nominal face value — whichever
+    // a consumer read) was the ONLY logged figure, so no consumer could see
+    // both the real per-seat transfers AND the total the bank actually
+    // minted. effect.amount MUST stay the nominal card.value (the golden
+    // MESSAGE interpolates it directly) — perPlayerAmounts/totalPaid are the
+    // enrichment.
+    const G = freshG();
+    G.players[0].character = statChar({ luck: 9 }); // amplified to 127%
+    G.players[1].character = statChar({}); // unamplified
+    G.pendingCard = { card: { text: 'Stimulus', action: 'gainAll', value: 100 }, deck: 'chance', cardIndex: 3 };
+
+    Monopoly.moves.acceptCard(G, makeCtx('0'));
+
+    const applied = G.events.find(e => e.type === 'card_applied' && e.data.action === 'gainAll');
+    expect(applied.data.effect.amount).toBe(100); // nominal — message byte-identity anchor
+    expect(applied.data.effect.perPlayerAmounts).toEqual({ '0': 127, '1': 100 });
+    expect(applied.data.effect.totalPaid).toBe(227);
+    // Message text is byte-identical to the pre-fix golden string.
+    expect(G.messages).toContain('All players receive $100!');
+  });
+
   test('gainAll skips bankrupt players regardless of their luck', () => {
     const G = freshG();
     G.players[0].character = statChar({ luck: 9 });

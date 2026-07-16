@@ -761,7 +761,14 @@ describe('card_applied: gainAll / gainPerProperty (direct-invocation)', () => {
     expect(G.players[0].money).toBe(before0 + 100);
     expect(G.players[1].money).toBe(before1);
     const applied = eventsOfType(G, 'card_applied').find(e => e.data.action === 'gainAll');
-    expect(applied.data).toEqual({ deck: 'chance', cardIndex: 6, action: 'gainAll', text: 'Stimulus', effect: { amount: 100 } });
+    // effect.amount stays the nominal card face value (formatEventMessage
+    // interpolates it directly — golden-pinned); perPlayerAmounts/totalPaid
+    // enrich eventData with the real per-seat transfers (ticket: gainAll logs
+    // nominal amount). Bankrupt seat 1 is excluded from perPlayerAmounts.
+    expect(applied.data).toEqual({
+      deck: 'chance', cardIndex: 6, action: 'gainAll', text: 'Stimulus',
+      effect: { amount: 100, perPlayerAmounts: { '0': 100 }, totalPaid: 100 },
+    });
     expect(G.messages).toContain('All players receive $100!');
   });
 

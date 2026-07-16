@@ -866,16 +866,26 @@ function applyCard(G, ctx, player, card, deck, cardIndex) {
       // question to resolve here: each recipient's OWN luck amplifies their
       // OWN share, same as a solo 'gain' card, applied per-player. Stamina
       // never enters this branch (nobody pays).
+      const perPlayerAmounts = {};
+      let totalPaid = 0;
       G.players.forEach(p => {
         if (!p.bankrupt) {
-          p.money += Math.floor(card.value * (1 + getLuckGainBonus(p)));
+          const amt = Math.floor(card.value * (1 + getLuckGainBonus(p)));
+          p.money += amt;
+          perPlayerAmounts[p.id] = amt;
+          totalPaid += amt;
         }
       });
-      // effect.amount stays the nominal per-recipient card face value (not
-      // player-specific) — recipients' amplified shares differ per player
-      // and aren't itemized here, consistent with calculateRent's silent,
-      // un-itemized stat multipliers (Task 1 precedent).
-      logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'gainAll', text: card.text, effect: { amount: card.value } });
+      // Post-merge ticket (stat-mechanics final review, Minor #3): effect.amount
+      // MUST stay the nominal per-recipient card face value — formatEventMessage
+      // ('All players receive $${effect.amount}!') interpolates it directly, and
+      // that MESSAGE text is golden-pinned byte-for-byte across all 10 scenario
+      // fixtures, so it cannot change here. The drift this ticket closes is that
+      // `amount` was the ONLY figure logged even though luck-amplified recipients
+      // actually receive (and the bank actually mints) more than that nominal
+      // value — perPlayerAmounts/totalPaid enrich eventData with what each seat
+      // and the table as a whole really received, without touching the message.
+      logEvent(G, 'card_applied', player.id, { deck, cardIndex, action: 'gainAll', text: card.text, effect: { amount: card.value, perPlayerAmounts, totalPaid } });
       break;
     }
 
