@@ -291,6 +291,20 @@ Decomposed 2026-07-06 into: SP1 foundation (events+seats) → SP2 duel/对战 �
 > generated-boardBg precedence is silent (mapImage wins).
 
 ## Ticket sweep (2026-07-16, autonomous)
+> **BATCH 3 MERGED (feat/small-tickets, 7 commits, 1489 unit + 45 E2E)**: gainAll eventData
+> carries real perPlayerAmounts/totalPaid (golden text untouched); MCP digest redraw hint
+> now eligibility-gated (shared isMerchant helper); old saves without luckRedraws rehydrate
+> via exported rehydrateSavedG (regression-tested with a real old-shape fixture); MCP seams
+> (onSync identity check, waitForMyTurn catch specificity, smoke stderr capture); drift
+> oracle REALLY reaches rollOnly/commitRoute + the duel quartet (double-pass review caught a
+> false coverage claim — first-listed-move dispatch always picked rollDice, and the greedy
+> walk's mortgage-everything kept rent at $0 so duels never fired; steered scenarios +
+> self-verifying dispatch assertions, Istanbul-proven 0%→100%); CLAUDE.md documents the MCP
+> registration flow. Closes the stat-mechanics and MT2-SP3 post-merge ticket lists above.
+> **Route-pick hit-test fix (owner live report)**: overlapping flat-atlas tiles intercepted
+> clicks on highlighted route targets (sanguo dense cluster; reproduced via elementFromPoint)
+> — route-pick modality now lifts targets above neighbors. TICKET: tile overlap also blocks
+> the detail popover outside route picks (batch with keyed-turnbox App.js work).
 > **Localization minors ×4 MERGED (feat/loc-minors)**: lobby LANG-flip now preserves typed
 > name + fetched matches (cached instance + Lobby.refreshLocale, was full reconstruction);
 > unread badge no longer recomputes renderLogLines a second time per tick; zh log formatters
