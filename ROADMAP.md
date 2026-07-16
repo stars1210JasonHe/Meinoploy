@@ -241,10 +241,22 @@ Decomposed 2026-07-06 into: SP1 foundation (events+seats) → SP2 duel/对战 �
 > 關羽 wins 67.5% of 8-seat games (5.4× baseline), 李儒 0% — sanguo needs tuning before play.
 
 ## Near-term (owner 2026-07-12): per-place 简介 in create-mod
-Wave 4 ships a tile-info popover that displays an OPTIONAL `place.description`; no world carries
-it yet. Follow-up: the create-mod pipeline (extract-facts → smart-builder → emit) should generate
-a short per-place description from the source book so generated mods (sanguo etc.) ship with 简介.
-Touches the LLM extraction schema + emit pass-through + validateWorld optional-field tolerance.
+> **DONE 2026-07-16 (feat/createmod-content, 4 commits, 1479 unit; content wave also ships
+> --boardbg, closing the reskin boardBg-auto-wire follow-up).** extract-facts synthesis
+> emits an OPTIONAL per-place `description` (≤120 chars code-side, book language, degrade-
+> to-omit — never a hard failure); passthrough facts→expandFacts→emit lands it exactly where
+> the Wave-4 popover reads it (atlas `world.places[i].description`, round-trip proven);
+> validateWorld/validateMap accept string ≤200 with clear rejects. Seed-determinism verified
+> byte-identical with/without descriptions. NEW `create-mod --boardbg`: chains background
+> generation (gpt-image-2) + the reemit rewire pass for wiring, mirroring --portraits (cost
+> plan before spend, dry-run zero-spend, failure isolation). Double-pass review: one real
+> MUST-FIX found and fixed (--portraits' sync key-preflight process.exit dropped --boardbg
+> entirely; chains now sequenced+awaited with accumulated exit code, verified by subprocess
+> repro). Drive-by fix: runGenBoardBg honored rootDir (tests no longer touch real mods/).
+> TICKETS: classic-map descriptions round-trip into data.json but the popover can't display
+> them (space.placeId gap — App.js change, batched with keyed-turnbox); live-API acceptance
+> (real book → mod with 简介+bg) owner-run pending; backfill descriptions for existing
+> generated mods (API spend) optional.
 
 ## Engine stat mechanics (owner 2026-07-14, from the balance-sim findings)
 > **DONE 2026-07-14 (feat/stat-mechanics, 5 commits, 1285 unit + 44 E2E).** The sim proved
