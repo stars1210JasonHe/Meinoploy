@@ -565,6 +565,15 @@
        turnbox's "CHOOSE YOUR ROUTE" hint stays readable through the dim. */
     .app--game #game-area.game--routepick .game__chips,
     .app--game #game-area.game--routepick .game__actionbar { pointer-events:none; opacity:.45; }
+    /* Route-pick hit-test fix (owner report 2026-07-16, sanguo dense cluster):
+       flat-atlas tiles can overlap after rank-fit/declutter, and a later DOM
+       sibling laid over a route target intercepts its clicks (reproduced:
+       elementFromPoint at the target's center resolved to the neighbor's
+       .tile__name — the pick silently no-ops). While a pick is pending, the
+       ONLY meaningful click is a route target, so lift targets above every
+       overlapping neighbor (tiles are position:absolute siblings in the same
+       stacking context; nothing else in .board__grid carries a z-index). */
+    .app--game #game-area.game--routepick .tile--route-target { z-index:15; }
     /* Owner acceptance fix wave, Fix 1 ("卡住了" — the game was WAITING for a
        route click the owner couldn't see): a floating banner INSIDE
        .game__center, shown ONLY under .game--routepick, so it can never be
