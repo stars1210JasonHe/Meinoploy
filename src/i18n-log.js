@@ -39,16 +39,27 @@ import { formatEventMessage, playerName } from './events';
 import { RULES } from '../mods/active-rules';
 import { t } from './i18n';
 
-function deckLabelZh(deck) {
-  return deck === 'chance' ? t('tile.type.chance') : t('tile.type.community');
+// `locale` is threaded through explicitly (post-merge ticket, T6-review Minor #5) rather
+// than left to t()'s default (the i18n module's CURRENT global locale). formatLogLine's
+// `locale` parameter is what actually decided we're in the zh branch — these two helpers
+// used to call the bare t()/t(key) and silently trust that the global singleton still
+// agreed with that decision. Normally it does (a caller renders with getLocale() and
+// nothing else changes it mid-call), but that was only an implicit invariant, never
+// enforced: a caller rendering an explicit 'zh' pass while the global locale is 'en' (a
+// mid-render LANG flip, or simply a caller that wants a zh preview without touching the
+// live UI locale) would otherwise get EN deck/season words spliced into an otherwise-zh
+// sentence. Passing `locale` into t()'s 3rd (override) param makes these two pure with
+// respect to their arguments instead of the ambient global — see i18n.js's t() doc comment.
+function deckLabelZh(deck, locale) {
+  return deck === 'chance' ? t('tile.type.chance', null, locale) : t('tile.type.community', null, locale);
 }
 
-function seasonNameZh(season) {
+function seasonNameZh(season, locale) {
   // Final-review Minor #1: a future mod's custom season id has no i18n entry —
   // t() then echoes the key back; fall back to the mod's own name (same
   // key-echo detection App.js's _centerHtml uses for the season box).
   const key = 'season.name.' + season.id;
-  const name = t(key);
+  const name = t(key, null, locale);
   return name === key ? season.name : name;
 }
 
@@ -121,9 +132,9 @@ const ZH_FORMATTERS = {
     return `缴纳 ${G.board.spaces[data.spaceId].name}：$${data.amount}。`;
   },
 
-  card_drawn(actor, data) {
+  card_drawn(actor, data, G, locale) {
     if (data.empty) return '牌堆已空。';
-    return `${deckLabelZh(data.deck)}：${data.text}`;
+    return `${deckLabelZh(data.deck, locale)}：${data.text}`;
   },
 
   card_prompt() {
@@ -154,8 +165,8 @@ const ZH_FORMATTERS = {
     }
   },
 
-  card_redrawn(actor, data) {
-    return `重抽！${deckLabelZh(data.deck)}：${data.newText}`;
+  card_redrawn(actor, data, G, locale) {
+    return `重抽！${deckLabelZh(data.deck, locale)}：${data.newText}`;
   },
 
   went_to_jail(actor, data) {
@@ -221,9 +232,9 @@ const ZH_FORMATTERS = {
     return '放弃购买。';
   },
 
-  season_changed(actor, data) {
+  season_changed(actor, data, G, locale) {
     const season = RULES.seasons.list[data.seasonIndex];
-    return `${season.icon} 季节变为${seasonNameZh(season)}！`;
+    return `${season.icon} 季节变为${seasonNameZh(season, locale)}！`;
   },
 
   bankruptcy(actor, data, G) {
@@ -301,7 +312,11 @@ const ZH_FORMATTERS = {
 export function formatLogLine(ev, locale, G) {
   if (locale === 'zh') {
     const fn = ZH_FORMATTERS[ev.type];
-    if (fn) return fn(ev.actor, ev.data, G);
+    // `locale` (always 'zh' here) is passed through as an explicit 4th arg — the couple of
+    // formatters that need it (card_drawn/card_redrawn/season_changed, via deckLabelZh/
+    // seasonNameZh) use it instead of trusting the i18n module's ambient global locale to
+    // still agree with the decision this branch already made. See those helpers' comment.
+    if (fn) return fn(ev.actor, ev.data, G, locale);
   }
   return formatEventMessage(ev.type, ev.actor, ev.data, G);
 }

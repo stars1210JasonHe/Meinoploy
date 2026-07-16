@@ -440,6 +440,53 @@ describe('i18n-log — zh interpolation (representative sample)', () => {
   });
 });
 
+describe('i18n-log — locale threading (post-merge ticket #5: formatLogLine must not depend on the ambient i18n global)', () => {
+  // deckLabelZh/season_changed's seasonNameZh used to call the bare t()/t(key), which reads
+  // the i18n module's CURRENT global locale — not the `locale` argument the caller (and
+  // formatLogLine's own 'zh' branch guard) already committed to. These two formatters are
+  // the only ZH_FORMATTERS entries that call t() at all, so they're the only ones this bug
+  // could ever affect. Proof: flip the GLOBAL i18n locale to 'en' first, then ask
+  // formatLogLine for a 'zh' render — every word must still be zh, none of the deck/season
+  // labels should leak the (currently-global) EN strings in.
+  const { setLocale, getLocale } = require('../i18n');
+  const prevLocale = getLocale();
+
+  afterEach(() => {
+    setLocale(prevLocale); // this test file shares one i18n module instance — restore it
+  });
+
+  const G = {
+    players: [{ id: '0', character: { name: 'Marcus Grayline' } }],
+    board: { spaces: {} },
+  };
+
+  test('card_drawn: zh deck label survives even while the global locale is en', () => {
+    setLocale('en');
+    const ev = { type: 'card_drawn', actor: '0', data: { deck: 'chance', text: 'Advance to Illinois Ave.' } };
+    expect(formatLogLine(ev, 'zh', G)).toBe('机变：Advance to Illinois Ave.');
+  });
+
+  test('card_redrawn: zh deck label survives even while the global locale is en', () => {
+    setLocale('en');
+    const ev = { type: 'card_redrawn', actor: '0', data: { deck: 'community', newText: 'Bank error in your favor.' } };
+    expect(formatLogLine(ev, 'zh', G)).toBe('重抽！命运：Bank error in your favor.');
+  });
+
+  test('season_changed: zh season name survives even while the global locale is en', () => {
+    setLocale('en');
+    const ev = { type: 'season_changed', actor: null, data: { seasonIndex: 0 } };
+    const result = formatLogLine(ev, 'zh', G);
+    expect(result).toContain('夏季'); // RULES.seasons.list[0] is summer; zh name via i18n
+    expect(result).not.toMatch(/[A-Za-z]/); // no stray EN letters leaked from the global locale
+  });
+
+  test('conversely, an en render is unaffected by the global locale being zh (en path never calls t())', () => {
+    setLocale('zh');
+    const ev = { type: 'card_drawn', actor: '0', data: { deck: 'chance', text: 'Advance to Illinois Ave.' } };
+    expect(formatLogLine(ev, 'en', G)).toBe(formatEventMessage('card_drawn', '0', ev.data, G));
+  });
+});
+
 describe('i18n-log — logLineKind visual classification', () => {
   const G = {
     players: [

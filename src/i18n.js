@@ -723,13 +723,21 @@ function _interpolate(str, params) {
 function _isBlank(v) {
   return v === undefined || v === '';
 }
-export function t(key, params) {
-  const table = STRINGS[_locale] || {};
+// `localeOverride` (post-merge ticket, i18n-log.js's formatLogLine): every other call site
+// omits this 3rd arg and gets the module's current locale exactly as before — 100%
+// backward compatible. It exists so a caller that has ALREADY committed to rendering a
+// specific locale (formatLogLine's zh branch, keyed off an explicit `locale` parameter, not
+// off getLocale()) can look up strings for THAT locale even if the global singleton has
+// since moved on, instead of silently trusting the singleton to still agree. See
+// i18n-log.js's deckLabelZh/seasonNameZh for the concrete consumer.
+export function t(key, params, localeOverride) {
+  const locale = (localeOverride === 'zh' || localeOverride === 'en') ? localeOverride : _locale;
+  const table = STRINGS[locale] || {};
   let str = table[key];
   if (_isBlank(str)) {
     if (!_warned.has(key)) {
       _warned.add(key);
-      console.warn(`[i18n] missing key "${key}" for locale "${_locale}"`);
+      console.warn(`[i18n] missing key "${key}" for locale "${locale}"`);
     }
     const enStr = STRINGS.en && STRINGS.en[key];
     str = !_isBlank(enStr) ? enStr : key;
