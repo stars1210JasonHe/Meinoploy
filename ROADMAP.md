@@ -133,7 +133,30 @@ Decomposed 2026-07-06 into: SP1 foundation (events+seats) → SP2 duel/对战 �
 > unblocks when bots land or via a second Claude session. Post-merge tickets: atlas drift coverage,
 > App.js version-skew re-align guard, CLAUDE.md docs pass (npm run mcp + registration flow), small
 > seam polish (onSync client-identity check, waitForMyTurn catch specificity, smoke gameProc stderr).
-- **Other mechanisms (TBD — to discuss):** e.g. AI bot players, alliances/voting, world events.
+> **MT2-SP4 — Dialogue system direction B (记忆宿敌): DONE 2026-07-17 (feat/dialogue-b,
+> 18 commits, SDD T1-T4 each double-pass reviewed + final whole-branch review READY TO
+> MERGE; 1713 unit + 49 E2E).** Owner picked B ("先B 后C"; C = opt-in follow-up wave).
+> Per-character memory, 90% pure code: seat-keyed attitude ledger (grudge/trust, rule
+> table over the 42-type event stream, decay/caps, save-envelope persistence, old-save
+> tolerant) + turn digest; LLM only writes prose on top (memory-aware prompts that cite
+> real amounts/opponents, season diaries, banter pairs — all locale-aware, all silently
+> off without a key while ledger/chips keep working). **$3/game HARD cost cap** (owner
+> directive): conservative price table + call-count double fuse at the single API choke
+> point, session-monotonic across save/load (checkpoint-cycling can't refresh the
+> budget), poison-pill tested. UI: seq-keyed speech bubbles over portrait chips
+> (scroll/resize/gutter-safe), attitude tier glyphs in the player popover (keyless),
+> 心路/diary tab + mid-game lore access. Bots read the ledger on trade decisions
+> (bounded — never accepts a strictly-losing deal; RULES-gated, live-read config).
+> E2E: deterministic ledger-state-driven attitude spec (proven 3× on an isolated
+> server) + bubble smokes. Notable finds along the way: seat-vs-character key mismatch
+> left T3 surfaces empty until real-browser E2E execution exposed it (paper review +
+> jest both missed it); pre-existing immer×Parcel fresh-cache `__DEV__` crash fixed
+> for the whole repo. OWNER SIGN-OFF at acceptance: grudge stacking magnitude (one
+> chain can +6, cap 10), OFF silences diaries/banter + MAJOR==ALL for them, every
+> trade builds trust (no fairness data on the event), $3 cap is per-game semantics.
+- **Other mechanisms (TBD — to discuss):** alliances/voting, world events; dialogue
+  direction C (谈判有牙 — persuasion with bounded gameplay modifiers) queued as the
+  next MT2 wave after B's acceptance.
 
 ## Next wave (owner feedback 2026-07-11, experience-first)
 > **Experience wave: DONE 2026-07-12 (main `6bc10dc`, 10 commits, 1128 unit + 30 E2E).**
