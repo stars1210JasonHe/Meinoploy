@@ -242,6 +242,11 @@ class MonopolyBoard {
     this.botSeats = new Set();
     this.pendingBots = 0;
     this._botDriver = null;
+    // Keyed turnbox write cache (see _writeTurnbox doc comment) — last html
+    // string actually WRITTEN to turnboxEl.innerHTML, reset alongside every
+    // other per-client render cache in _stopClient() so a stale value from a
+    // finished game can never suppress the first real write of the next one.
+    this._turnboxHtml = null;
     // Active mod (default Dominion). All mod CONTENT reads route through this.activeMod;
     // selectMod() swaps it + the engine RULES singleton. availableMaps = the active mod's
     // boards (maps + atlas worlds), the same set the old module-level AVAILABLE_MAPS held.
@@ -2948,19 +2953,19 @@ class MonopolyBoard {
     // for a bot seat; humans' turns are completely unaffected by this branch.
     if (this._isBotSeat(deriveActingSeat(G, ctx))) {
       html += `<div class="turnbox__waiting">${t('turnbox.botThinking')}</div></div>`;
-      this.turnboxEl.innerHTML = html;
+      this._writeTurnbox(html);
       return;
     }
 
     if (isAtlas && isDuelResponse) {
       html += `<div class="turnbox__slot">${this._centerSlotHtml(G, ctx)}</div></div>`;
-      this.turnboxEl.innerHTML = html;
+      this._writeTurnbox(html);
       return;
     }
 
     if (!isMyTurn) {
       html += `<div class="turnbox__waiting">${t('turnbox.waitingFor', { name: esc(name) })}</div></div>`;
-      this.turnboxEl.innerHTML = html;
+      this._writeTurnbox(html);
       return;
     }
 
@@ -3017,6 +3022,38 @@ class MonopolyBoard {
     html += `</div>`;
 
     html += `</div>`;
+    this._writeTurnbox(html);
+  }
+
+  // Keyed/differential turnbox write (ticket: keyed turnbox rendering).
+  // renderTurnbox's 4 write sites funnel through here instead of assigning
+  // turnboxEl.innerHTML directly. update() calls renderTurnbox on EVERY
+  // client state tick (bot-pacing timers, animation ticks, any move by any
+  // seat all funnel through the same client.subscribe -> update() path) —
+  // turnbox content is otherwise a pure function of (G, ctx), so a rewrite
+  // is only meaningful when the rendered html actually changed. Skipping a
+  // no-op rewrite fixes two real bugs: (a) any CSS appear-animation on
+  // turnbox content (e.g. the R4-cut duel-result flash) restarted on every
+  // tick — a strobe, not a one-time moment (see R4 spec §4's "duel flash
+  // CUT" note); (b) the button DOM nodes (#btn-roll etc.) were discarded
+  // and recreated every tick, which is why gameplay.spec.js:82 documents
+  // "btn-roll detaches on any re-render" as a known E2E hazard to design
+  // around rather than rely on.
+  //
+  // wireActions is called unconditionally, right after renderTurnbox, on
+  // EVERY update() tick (see the call order a few lines below in update()) —
+  // it re-binds every #btn-* handler via getElementById(id).onclick = fn
+  // regardless of whether this write actually ran. That means: when this
+  // DOES write (content changed), the new elements exist by the time
+  // wireActions runs and get their handlers bound, same as before; when
+  // this SKIPS the write (content unchanged), the existing elements + their
+  // already-correct handlers are simply left alone — wireActions re-runs
+  // getElementById + reassigns the same onclick anyway (idempotent, cheap),
+  // so no button ever ends up unbound. Nothing about wireActions' own
+  // behavior changes; only the frequency of turnboxEl DOM churn does.
+  _writeTurnbox(html) {
+    if (html === this._turnboxHtml) return;
+    this._turnboxHtml = html;
     this.turnboxEl.innerHTML = html;
   }
 
@@ -3739,6 +3776,7 @@ class MonopolyBoard {
     // never builds one at all).
     if (this._botDriver) { this._botDriver.stop(); this._botDriver = null; }
     if (this.client) { this.client.stop(); this.client = null; this._bumpClients(-1); }
+    this._turnboxHtml = null; // next client's first renderTurnbox must always write, never skip
   }
 
   exitToMenu() {
