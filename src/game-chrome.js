@@ -80,6 +80,21 @@ export function chipDetailHtml(d) {
     </div>`;
 }
 
+// Resolve the tile popover's `description` field (ticket: classic-board place
+// descriptions in the tile popover). App.js's _tileDetailData previously only
+// ever surfaced `place.description` (the atlas world-place lookup, gated on
+// space.placeId) — classic board spaces have no placeId, so `place` is always
+// null for them and the popover's description section silently never
+// appeared, even after the 2026-07-16 content wave started emitting
+// `spaces[i].description` on generated classic maps (createmod/smart/board.js
+// deriveClassicBoard). Atlas behavior is UNCHANGED: whenever `place` resolved
+// (non-null), its .description is used exactly as before, even when falsy —
+// classic spaces (place === null) now fall back to the space's own
+// .description instead of going straight to null.
+export function resolveTileDescription(place, space) {
+  return (place ? place.description : (space && space.description)) || null;
+}
+
 // Tile detail popover — opened when a board tile is clicked. Same GB-pixel
 // class-family style as chipDetailHtml, rooted at .tile-detail (E2E asserts
 // this class is present). `groupHtml` is the ONLY raw pass-through field

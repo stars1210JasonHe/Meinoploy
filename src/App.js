@@ -17,7 +17,7 @@ import { createAnimator, DICE_TUMBLE_MS } from './anim';
 import { createAudio } from './audio';
 import { initLocale, getLocale, setLocale, onLocaleChange, t } from './i18n';
 import { renderLogLines } from './i18n-log';
-import { chipHtml, chipDetailHtml, tileDetailHtml, drawerShellHtml, tokenVisual, nodeGlow, legendHtml, NODE_GLOW_COLORS } from './game-chrome';
+import { chipHtml, chipDetailHtml, tileDetailHtml, drawerShellHtml, tokenVisual, nodeGlow, legendHtml, NODE_GLOW_COLORS, resolveTileDescription } from './game-chrome';
 import { resolveBoardBg, starfieldDataUri } from './board-bg';
 import { bloomSprite } from './wr-bloom';
 // Local computer players (Task 2 wiring): bot-driver.js is the engine-decoupled
@@ -2083,7 +2083,12 @@ class MonopolyBoard {
       groupHtml: this._tileGroupHtml(space, G),
       placeStats: place && place.data ? { population: place.data.population, gdp: place.data.gdp, fame: place.data.fame } : null,
       archetypes: place && place.archetypes && place.archetypes.length ? place.archetypes : null,
-      description: (place && place.description) || null,
+      // resolveTileDescription (ticket: classic-board place descriptions):
+      // atlas boards (place resolved) keep place.description-only behavior;
+      // classic boards (place null — no placeId) fall back to space.description,
+      // which the 2026-07-16 content wave started emitting on generated classic
+      // maps. See that function's doc comment in game-chrome.js.
+      description: resolveTileDescription(place, space),
       flavorText: this._tileFlavorText(space),
     };
   }

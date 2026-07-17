@@ -1,4 +1,4 @@
-import { chipHtml, chipDetailHtml, drawerShellHtml, tokenVisual, tileDetailHtml, nodeGlow, NODE_GLOW_COLORS, legendHtml } from '../game-chrome';
+import { chipHtml, chipDetailHtml, drawerShellHtml, tokenVisual, tileDetailHtml, nodeGlow, NODE_GLOW_COLORS, legendHtml, resolveTileDescription } from '../game-chrome';
 import { setLocale } from '../i18n';
 
 // Task 3 (i18n): game-chrome now renders its static labels through t(), whose
@@ -276,6 +276,29 @@ describe('tileDetailHtml', () => {
     expect(h).toContain('Stuttgart Fracture'); // name = data
     expect(h).not.toContain('UNOWNED');
     expect(h).not.toContain('MORTGAGED');
+  });
+});
+
+// Ticket: classic-board place descriptions in the tile popover.
+describe('resolveTileDescription', () => {
+  test('atlas: place resolved -> uses place.description verbatim, ignores space.description', () => {
+    expect(resolveTileDescription({ description: 'Real-world atlas blurb.' }, { description: 'should be ignored' }))
+      .toBe('Real-world atlas blurb.');
+  });
+
+  test('atlas: place resolved but has no description -> null (behavior UNCHANGED, no classic fallback)', () => {
+    expect(resolveTileDescription({ description: null }, { description: 'should still be ignored' })).toBeNull();
+    expect(resolveTileDescription({}, { description: 'should still be ignored' })).toBeNull();
+  });
+
+  test('classic: no place (placeId-less space) -> falls back to space.description', () => {
+    expect(resolveTileDescription(null, { description: 'A fractured industrial district.' }))
+      .toBe('A fractured industrial district.');
+  });
+
+  test('classic: no place and no space.description -> null', () => {
+    expect(resolveTileDescription(null, { name: 'GO' })).toBeNull();
+    expect(resolveTileDescription(null, null)).toBeNull();
   });
 });
 
