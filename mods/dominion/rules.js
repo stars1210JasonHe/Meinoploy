@@ -207,6 +207,48 @@ export const RULES = {
     durationSeconds: 120,
   },
 
+  // ── Dialogue System (MT2-SP4 direction B, "记忆宿敌") ─────
+  // Consumed by src/dialogue/memory.js (attitude ledger + turn digest, pure/
+  // deterministic, zero engine changes) and, later, character-ai.js/App.js/
+  // bot-driver.js (T2-T4). Every field here has a matching fallback in
+  // src/mod-loader.js's DEFAULT_RULES so a mod with no `dialogue` block at
+  // all still resolves a complete config (see src/dialogue/memory.js's
+  // DEFAULT_DIALOGUE_RULES for a THIRD, independent fallback layer).
+  dialogue: {
+    // Recent-history window a turn digest considers, from BOTH ends:
+    // maxEvents caps the raw event count, maxSeasons caps how many
+    // season_changed boundaries back it may reach ("rolling ~2 season
+    // cycles" per spec) — whichever is more restrictive wins. maxSeasons: 0
+    // disables the season-side restriction (count window alone applies).
+    digestWindow: {
+      maxEvents: 60,
+      maxSeasons: 2,
+    },
+    // Attitude ledger per-event deltas (AttitudeLedger.applyEvent's rule
+    // table — see src/dialogue/memory.js for exactly which event.data
+    // fields each row reads).
+    weights: {
+      duelLostGrudge: 2,          // lost a duel to X
+      bankruptedByGrudge: 3,      // went bankrupt, creditor was X
+      tradeAcceptedTrust: 1,      // completed a trade with X (symmetric)
+      bigRentGrudge: 1,           // paid >= rentGrudgeThreshold rent to X
+      forceBuyVictimGrudge: 2,    // X hostile-took-over a property from you
+    },
+    caps: { grudge: 10, trust: 10 },        // both axes clamp to [0, cap]
+    decayPerSeason: { grudge: 1, trust: 1 }, // toward 0, applied on season_changed
+    rentGrudgeThreshold: 200,
+    // Chip display tiers (T3, code-driven, keyless): value >= tiers[0] => ▲,
+    // >= tiers[1] => ▲▲, >= tiers[2] => ▲▲▲.
+    attitudeDisplay: {
+      grudgeTiers: [3, 6, 9],
+      trustTiers: [3, 6, 9],
+    },
+    // Gates for later tasks; T1 itself does not read these.
+    botAttitudeEnabled: true, // T4: bot-driver.js trade-response tilt (local bot paths only, sim stays pure)
+    banterEnabled: true,      // T2/T3: duel/auction/trade banter reply-pairs
+    diaryEnabled: true,       // T2: once-per-season-change LLM diary line
+  },
+
   // ── Player Display ──────────────────────────────────────
   display: {
     playerColors: [

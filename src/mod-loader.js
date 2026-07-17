@@ -93,6 +93,34 @@ export const DEFAULT_RULES = {
     enabled: false,
     durationSeconds: 120,
   },
+  // Dialogue system fallback (MT2-SP4 direction B) — kept in lockstep with
+  // mods/dominion/rules.js's `dialogue` block (see src/dialogue/memory.js
+  // DEFAULT_DIALOGUE_RULES for the full field-by-field rationale) so ANY
+  // mod loaded via loadMod() with no `dialogue` key in its rules.json still
+  // resolves a complete, NaN-free config.
+  dialogue: {
+    digestWindow: {
+      maxEvents: 60,
+      maxSeasons: 2,
+    },
+    weights: {
+      duelLostGrudge: 2,
+      bankruptedByGrudge: 3,
+      tradeAcceptedTrust: 1,
+      bigRentGrudge: 1,
+      forceBuyVictimGrudge: 2,
+    },
+    caps: { grudge: 10, trust: 10 },
+    decayPerSeason: { grudge: 1, trust: 1 },
+    rentGrudgeThreshold: 200,
+    attitudeDisplay: {
+      grudgeTiers: [3, 6, 9],
+      trustTiers: [3, 6, 9],
+    },
+    botAttitudeEnabled: true,
+    banterEnabled: true,
+    diaryEnabled: true,
+  },
   display: {
     playerColors: [
       '#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
