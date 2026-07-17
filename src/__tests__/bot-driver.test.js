@@ -884,6 +884,47 @@ describe('createBotDriver', () => {
       jest.advanceTimersByTime(BOT_DELAYS.think);
       expect(dispatched).toEqual([['acceptTrade']]); // missing pair -> {grudge:0,trust:0} -> unchanged threshold
     });
+
+    // T4 fix wave (whole-branch review): RULES.dialogue.botTradeAttitude
+    // must be LIVE-read via the getTradeAttitudeConfig dep, not silently
+    // shadowed by DEFAULT_TRADE_POLICY's hand-mirrored constants — a mod
+    // that overrides the magnitudes has to actually change bot behavior.
+    test('getTradeAttitudeConfig override changes the threshold shift (mod config wins over the DEFAULT_TRADE_POLICY fallback)', () => {
+      // grudge=1 on the net=+50 trade: default 15/pt -> threshold 15 <= 50
+      // -> accept. A mod override of 60/pt -> threshold 60 > 50 -> reject.
+      // Same ledger, same trade — ONLY the config dep differs.
+      const ledger = { '1': { '0': { grudge: 1, trust: 0 } } };
+
+      const base = makeHarness(makeTradeState('0'));
+      base.deps.getDialogueLedger = () => ledger;
+      // No getTradeAttitudeConfig -> DEFAULT_TRADE_POLICY fallback (15/pt).
+      const baseDriver = createBotDriver(base.deps);
+      baseDriver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(base.dispatched).toEqual([['acceptTrade']]);
+
+      const overridden = makeHarness(makeTradeState('0'));
+      overridden.deps.getDialogueLedger = () => ledger;
+      overridden.deps.getTradeAttitudeConfig = () => ({ grudgeThresholdPerPoint: 60 }); // partial: other fields fall back
+      const overriddenDriver = createBotDriver(overridden.deps);
+      overriddenDriver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(overridden.dispatched).toEqual([['rejectTrade']]);
+    });
+
+    test('getTradeAttitudeConfig returning the default values is byte-identical to omitting the dep', () => {
+      const ledger = { '1': { '0': { grudge: 1, trust: 0 } } };
+      const { deps, dispatched } = makeHarness(makeTradeState('0'));
+      deps.getDialogueLedger = () => ledger;
+      deps.getTradeAttitudeConfig = () => ({
+        grudgeThresholdPerPoint: 15, trustThresholdPerPoint: 15,
+        maxGrudgeShift: 150, maxTrustShift: 150,
+      });
+      const driver = createBotDriver(deps);
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['acceptTrade']]); // same as the fallback run above
+    });
   });
 });
 

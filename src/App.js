@@ -1085,6 +1085,17 @@ class MonopolyBoard {
   selectMod(mod) {
     this.activeMod = mod;
     setActiveMod(mod.id);
+    // T4 fix wave (whole-branch review): characterAI captured RULES.dialogue
+    // by VALUE at boot (constructor, ~line 298) — resolveDialogueRules
+    // deep-merges into a new object, so the live RULES singleton being
+    // re-pointed in place by setActiveMod above does NOT propagate into the
+    // already-constructed instance. Refresh through the escape hatch built
+    // for exactly this (see setDialogueRules/constructor doc in
+    // character-ai.js) so per-mod dialogue overrides (cost caps, price
+    // table, diary/banter gates, prompt knobs) actually apply to the
+    // newly-selected mod. The other RULES-swap seam (loadGame's mod-restore
+    // branch) gets the same call.
+    this.characterAI.setDialogueRules(RULES.dialogue);
     this.availableMaps = mod.maps.concat(mod.worlds);
     // Land on this mod's default board so a subsequent victory-select / quick-start reads
     // a board that belongs to the chosen mod (map-select overrides this on pick).
@@ -1440,6 +1451,15 @@ class MonopolyBoard {
       // and G.trade.proposerId, both already seat ids — no translation
       // needed at this call site.
       getDialogueLedger: RULES.dialogue.botAttitudeEnabled ? () => this.dialogueLedger : undefined,
+      // T4 fix wave (whole-branch review): the shift MAGNITUDES must be
+      // live-read from the mod's rules too, not just the ledger — without
+      // this dep, bot-driver.js's DEFAULT_TRADE_POLICY fallback constants
+      // silently won over any per-mod botTradeAttitude override. Getter for
+      // the same live-RULES-singleton reason as everything else here;
+      // wired unconditionally (unlike getDialogueLedger) because magnitudes
+      // are inert whenever the attitude itself is null — the enable gate
+      // stays getDialogueLedger's alone.
+      getTradeAttitudeConfig: () => RULES.dialogue.botTradeAttitude,
     });
   }
 
@@ -4559,6 +4579,10 @@ class MonopolyBoard {
     if (mod !== this.activeMod) {
       this.activeMod = mod;
       setActiveMod(mod.id);
+      // T4 fix wave: same by-value-capture refresh as selectMod (see the
+      // comment there) — a load that switches mods must re-point
+      // characterAI's dialogue rules at the restored mod's config too.
+      this.characterAI.setDialogueRules(RULES.dialogue);
       this.availableMaps = mod.maps.concat(mod.worlds);
     }
     const savedMap = this.availableMaps.find(m => m.id === saveData.mapId) || this.availableMaps[0];

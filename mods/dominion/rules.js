@@ -282,13 +282,15 @@ export const RULES = {
     // would otherwise reject on value, only into accepting a less-favorable
     // (but still non-losing, relative to its own base threshold) one. See
     // src/bot-driver.js's decideTradeResponse doc comment for the exact
-    // formula and proof. This block is a discoverable/tunable config
-    // surface — bot-driver.js deliberately does not import RULES (zero
-    // import-time coupling to any mods/ package, same reasoning as
-    // DEFAULT_TRADE_POLICY.mortgagedPropertyRate above it), so its own
-    // DEFAULT_TRADE_POLICY mirrors these exact numbers locally; RULES.
-    // dialogue.botAttitudeEnabled (above) is the actual on/off gate read at
-    // the App.js wiring layer (_buildBotDriver), not this sub-block.
+    // formula and proof. LIVE-READ at runtime (T4 fix wave): App.js's
+    // _buildBotDriver threads this block into the driver via its
+    // getTradeAttitudeConfig dep, so per-mod overrides of these magnitudes
+    // take real effect — bot-driver.js still does not import RULES itself
+    // (zero import-time coupling to any mods/ package, same reasoning as
+    // DEFAULT_TRADE_POLICY.mortgagedPropertyRate above it); its own
+    // DEFAULT_TRADE_POLICY copy of these numbers is only the fallback for
+    // unwired/pure callers. RULES.dialogue.botAttitudeEnabled (above) is
+    // the actual on/off gate, read at the same App.js wiring layer.
     botTradeAttitude: {
       grudgeThresholdPerPoint: 15, // per grudge point (ledger range 0-caps.grudge)
       trustThresholdPerPoint: 15,  // per trust point (ledger range 0-caps.trust)

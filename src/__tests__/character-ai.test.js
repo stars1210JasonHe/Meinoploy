@@ -73,6 +73,24 @@ describe('CharacterAI', () => {
       ai.setVerbosity('invalid');
       expect(ai.verbosity).toBe(VERBOSITY.MAJOR);
     });
+
+    // T4 fix wave (whole-branch review): constructor captures dialogueRules
+    // BY VALUE (resolveDialogueRules deep-merges into a fresh object), so
+    // the live RULES singleton being re-pointed on a mod switch does NOT
+    // propagate on its own — App.js's selectMod/loadGame mod-switch seams
+    // must call setDialogueRules(RULES.dialogue) explicitly. This is the
+    // pure half of that seam: setDialogueRules actually refreshes live
+    // behavior (the cost caps read from this.dialogueRules on every check).
+    test('setDialogueRules refreshes mod config live (mod-switch seam): budget caps change after the call', () => {
+      const ai = new CharacterAI('sk-test'); // boot-time defaults: budget 3.0 / 400 calls
+      expect(ai.getCostEstimate()).toMatchObject({ budgetUSD: 3.0, maxCalls: 400, capped: false });
+      // Simulate switching to a mod whose rules.js overrides the caps.
+      ai.setDialogueRules({ costBudgetUSD: 0, maxCallsPerSession: 7 });
+      // Partial override resolves through resolveDialogueRules (other fields
+      // fall back to defaults) AND takes effect immediately — budget 0 means
+      // the cap is already exhausted with zero spend.
+      expect(ai.getCostEstimate()).toMatchObject({ budgetUSD: 0, maxCalls: 7, capped: true });
+    });
   });
 
   describe('isEnabled', () => {

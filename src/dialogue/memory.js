@@ -96,13 +96,16 @@ export const DEFAULT_DIALOGUE_RULES = {
     intro: 0.001,
     chat: 0.01,
   },
-  // T4 (src/bot-driver.js decideTradeResponse) — gate/magnitudes for the
+  // T4 (src/bot-driver.js decideTradeResponse) — magnitudes for the
   // attitude-aware trade-acceptance-threshold shift. Unread by memory.js
-  // itself (bot-driver.js mirrors these numbers locally rather than
-  // importing RULES, per its own zero-mod-coupling discipline); kept here
-  // purely as the third defaulting layer so the drift-guard test
-  // ("defaults drift guard" in dialogue-memory.test.js) continues to catch
-  // any future divergence across all three copies.
+  // itself: App.js live-threads RULES.dialogue.botTradeAttitude into the
+  // bot driver via its getTradeAttitudeConfig dep (T4 fix wave), and
+  // bot-driver.js keeps a numerically-equal fallback in
+  // DEFAULT_TRADE_POLICY for unwired/pure callers, per its own
+  // zero-mod-coupling discipline. Kept here as the third defaulting layer
+  // so the drift-guard test ("defaults drift guard" in
+  // dialogue-memory.test.js) continues to catch any future divergence
+  // across all three copies.
   botTradeAttitude: {
     grudgeThresholdPerPoint: 15,
     trustThresholdPerPoint: 15,

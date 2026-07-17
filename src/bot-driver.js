@@ -187,15 +187,21 @@ export const DEFAULT_TRADE_POLICY = Object.freeze({
   // bare 0.5; one does exist, so this value mirrors it exactly.
   mortgagedPropertyRate: 0.5,
   // === T4 (MT2-SP4 direction B, bot linkage) ================================
-  // Attitude-aware acceptance-threshold shift magnitudes. Mirrors mods/
-  // dominion/rules.js's RULES.dialogue.botTradeAttitude EXACTLY (same
-  // "local policy default instead of importing RULES" reasoning as
-  // mortgagedPropertyRate immediately above — this file stays mod-agnostic;
-  // see resolveEffectiveThreshold's doc comment for the formula/bound this
-  // feeds). grudgeThresholdPerPoint TIGHTENS (raises) the effective
-  // threshold per grudge point toward the proposer; trustThresholdPerPoint
-  // RELAXES (lowers) it per trust point. The max*Shift caps bound the total
-  // swing regardless of how large/malformed an attitude value is.
+  // Attitude-aware acceptance-threshold shift magnitudes — the FALLBACK
+  // layer only (T4 fix wave): the live per-mod values from
+  // RULES.dialogue.botTradeAttitude are threaded in at runtime via
+  // createBotDriver's getTradeAttitudeConfig dep (App.js wires it), and win
+  // the Object.assign merge per-field whenever present; these constants
+  // apply only when the dep is unwired (pure decideTradeResponse callers,
+  // tests) or the mod config is partial. Kept numerically equal to the
+  // dominion defaults (same "local fallback instead of importing RULES"
+  // reasoning as mortgagedPropertyRate immediately above — this file stays
+  // mod-agnostic; see resolveEffectiveThreshold's doc comment for the
+  // formula/bound this feeds). grudgeThresholdPerPoint TIGHTENS (raises)
+  // the effective threshold per grudge point toward the proposer;
+  // trustThresholdPerPoint RELAXES (lowers) it per trust point. The
+  // max*Shift caps bound the total swing regardless of how large/malformed
+  // an attitude value is.
   grudgeThresholdPerPoint: 15,
   trustThresholdPerPoint: 15,
   maxGrudgeShift: 150,
@@ -368,6 +374,27 @@ export const BOT_DELAYS = Object.freeze({
 //                             reproduces pre-T4 decideTradeResponse
 //                             decisions byte-for-byte — this is how App.js
 //                             implements RULES.dialogue.botAttitudeEnabled.
+//   getTradeAttitudeConfig() (optional, T4 fix wave) -> the live
+//                             RULES.dialogue.botTradeAttitude object
+//                             ({grudgeThresholdPerPoint,
+//                             trustThresholdPerPoint, maxGrudgeShift,
+//                             maxTrustShift}), or a falsy value. Merged into
+//                             decideTradeResponse's `policy` argument at the
+//                             trade call site, so a mod that OVERRIDES those
+//                             magnitudes in its rules actually changes bot
+//                             behavior at runtime (the whole-branch review
+//                             caught that without this dep, the values in
+//                             DEFAULT_TRADE_POLICY — a hand-mirror of the
+//                             dominion defaults — silently won regardless of
+//                             mod config, violating the plan's "all tunables
+//                             RULES-config per-mod overridable" invariant).
+//                             A getter, not a captured value: the live RULES
+//                             singleton is re-pointed in place on every mod
+//                             switch (Game.js setActiveMod). Omitted/falsy,
+//                             or a partial object, falls back (per-field) to
+//                             DEFAULT_TRADE_POLICY — decisions under default
+//                             config are byte-identical either way, since
+//                             the two sets of numbers are drift-guard-equal.
 //
 // Behavior:
 //   - single-flight: onUpdate() is a no-op while a step is already scheduled
@@ -448,6 +475,9 @@ export function createBotDriver(deps) {
     // (applyEvents/AttitudeLedger are pure), so a captured reference would
     // go stale after the very first ledger update.
     getDialogueLedger,
+    // T4 fix wave (optional) — live RULES.dialogue.botTradeAttitude
+    // magnitudes; see the deps doc comment above for the full rationale.
+    getTradeAttitudeConfig,
   } = deps;
 
   let epoch = 0;
@@ -605,7 +635,14 @@ export function createBotDriver(deps) {
       const ledger = typeof getDialogueLedger === 'function' ? getDialogueLedger() : null;
       const proposerId = String(G.trade.proposerId);
       const attitude = ledger ? getAttitude(ledger, seat, proposerId) : null;
-      const [name, ...args] = decideTradeResponse(G, seat, undefined, attitude)[0];
+      // T4 fix wave: thread the LIVE mod-config shift magnitudes in as the
+      // policy argument (they share DEFAULT_TRADE_POLICY's key names by
+      // construction, and botTradeAttitude carries ONLY the four shift
+      // fields — never tradeAcceptThreshold/mortgagedPropertyRate — so the
+      // value computation is untouched by this merge). Falsy/omitted →
+      // undefined → pure DEFAULT_TRADE_POLICY, exactly as before this wave.
+      const attCfg = typeof getTradeAttitudeConfig === 'function' ? getTradeAttitudeConfig() : null;
+      const [name, ...args] = decideTradeResponse(G, seat, attCfg || undefined, attitude)[0];
       // Minor fix (wave 2): reset the roll-pacing flag BEFORE dispatch(),
       // not after. This step is "finished" either way (accept/reject
       // resolved, or dispatch() throws and guardedStep aborts the chain) —
