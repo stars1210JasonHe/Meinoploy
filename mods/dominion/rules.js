@@ -272,6 +272,29 @@ export const RULES = {
       intro: 0.001,
       chat: 0.01,
     },
+    // T4 (bot linkage, src/bot-driver.js decideTradeResponse): magnitudes for
+    // the attitude-aware trade-acceptance-threshold shift. High grudge toward
+    // the trade proposer TIGHTENS the acceptance threshold (harder to accept
+    // — requires a better deal); high trust RELAXES it (easier to accept).
+    // Both are linear-per-point, hard-capped, and BOUNDED so relaxation can
+    // never push the effective threshold below min(tradeAcceptThreshold, 0)
+    // — a bot can never be talked into accepting a strictly-losing trade it
+    // would otherwise reject on value, only into accepting a less-favorable
+    // (but still non-losing, relative to its own base threshold) one. See
+    // src/bot-driver.js's decideTradeResponse doc comment for the exact
+    // formula and proof. This block is a discoverable/tunable config
+    // surface — bot-driver.js deliberately does not import RULES (zero
+    // import-time coupling to any mods/ package, same reasoning as
+    // DEFAULT_TRADE_POLICY.mortgagedPropertyRate above it), so its own
+    // DEFAULT_TRADE_POLICY mirrors these exact numbers locally; RULES.
+    // dialogue.botAttitudeEnabled (above) is the actual on/off gate read at
+    // the App.js wiring layer (_buildBotDriver), not this sub-block.
+    botTradeAttitude: {
+      grudgeThresholdPerPoint: 15, // per grudge point (ledger range 0-caps.grudge)
+      trustThresholdPerPoint: 15,  // per trust point (ledger range 0-caps.trust)
+      maxGrudgeShift: 150,         // hard cap on total tightening
+      maxTrustShift: 150,          // hard cap on total relaxation (before the bound's floor)
+    },
   },
 
   // ── Player Display ──────────────────────────────────────

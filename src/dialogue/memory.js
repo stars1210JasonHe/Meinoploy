@@ -96,6 +96,19 @@ export const DEFAULT_DIALOGUE_RULES = {
     intro: 0.001,
     chat: 0.01,
   },
+  // T4 (src/bot-driver.js decideTradeResponse) — gate/magnitudes for the
+  // attitude-aware trade-acceptance-threshold shift. Unread by memory.js
+  // itself (bot-driver.js mirrors these numbers locally rather than
+  // importing RULES, per its own zero-mod-coupling discipline); kept here
+  // purely as the third defaulting layer so the drift-guard test
+  // ("defaults drift guard" in dialogue-memory.test.js) continues to catch
+  // any future divergence across all three copies.
+  botTradeAttitude: {
+    grudgeThresholdPerPoint: 15,
+    trustThresholdPerPoint: 15,
+    maxGrudgeShift: 150,
+    maxTrustShift: 150,
+  },
 };
 
 // Recognized RULES.dialogue field names — used ONLY to detect "this object is
@@ -107,7 +120,7 @@ const DIALOGUE_RULE_KEYS = [
   'digestWindow', 'weights', 'caps', 'decayPerSeason', 'rentGrudgeThreshold',
   'attitudeDisplay', 'bubbleMs', 'botAttitudeEnabled', 'banterEnabled', 'diaryEnabled',
   'diaryPromptLines', 'diaryHistoryCap', 'costBudgetUSD', 'maxCallsPerSession',
-  'callPriceUSD',
+  'callPriceUSD', 'botTradeAttitude',
 ];
 
 // Accepts: the full RULES object (reads .dialogue off it), a RULES.dialogue-

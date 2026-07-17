@@ -1420,6 +1420,26 @@ class MonopolyBoard {
       isBot: (seat) => this._isBotSeat(seat),
       animBusy: () => !!(this.animator && this.animator.isBusy()),
       getCharacterIds: () => this.activeMod.characters.map(c => c.id),
+      // T4 (MT2-SP4 direction B, bot linkage): the ledger SLICE bot-driver.js
+      // needs to make attitude-aware trade decisions — a live getter (NOT a
+      // captured `this.dialogueLedger` value, which would go stale the
+      // moment _updateDialogueLedger folds a new event, since AttitudeLedger
+      // is pure/replace-not-mutate — same reasoning `getState` above already
+      // documents for the same "live App state" class of dep).
+      // RULES.dialogue.botAttitudeEnabled (default true, T1) IS the gate:
+      // read once here at driver-(re)build time — same one-shot-per-game
+      // resolution as every other _buildBotDriver dep above (no in-game
+      // toggle UI exists for this flag; it's a per-mod rules.js author-time
+      // config, not a live settings-modal control) — false means this dep
+      // returns a falsy value, which bot-driver.js's own doc comment
+      // guarantees collapses to byte-identical pre-T4 decisions.
+      // Seat-keyed by construction: this.dialogueLedger's keys are seat ids
+      // (T3 review lesson, commit 328837d — see the getAttitude call at the
+      // player-detail popover above for the sibling usage), and bot-driver.js
+      // only ever calls getAttitude with `seat` (deriveActingSeat's return)
+      // and G.trade.proposerId, both already seat ids — no translation
+      // needed at this call site.
+      getDialogueLedger: RULES.dialogue.botAttitudeEnabled ? () => this.dialogueLedger : undefined,
     });
   }
 

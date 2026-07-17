@@ -13,6 +13,17 @@
 // side, but this module never calls a move directly — it only ever calls the
 // injected `dispatch(name, ...args)`, which the wiring layer (a later task)
 // binds to `client.moves[name](...args)`.
+//
+// T4 (MT2-SP4 direction B, bot linkage) — the ONE exception to "everything
+// is injected, this module imports nothing app-specific": src/dialogue/
+// memory.js's getAttitude is a pure, mod-agnostic function (reads a plain
+// {[charId]: {[opponentId]: {grudge, trust}}} object, imports nothing from
+// mods/ itself — see that file's own header comment), so importing it here
+// costs this module nothing in terms of App/character-ai/mod coupling. The
+// LEDGER DATA itself still comes in via `deps` (see createBotDriver's
+// `getDialogueLedger` dep below) — this module never reaches into App state
+// on its own, it only applies a pure transform to data App.js hands it.
+import { getAttitude } from './dialogue/memory';
 
 // === Seat derivation ==========================================================
 // Mirrors match.js's own acting-seat special-case (match.js:126-129, auction
@@ -175,7 +186,61 @@ export const DEFAULT_TRADE_POLICY = Object.freeze({
   // rules modules. If no engine convention existed this would just be a
   // bare 0.5; one does exist, so this value mirrors it exactly.
   mortgagedPropertyRate: 0.5,
+  // === T4 (MT2-SP4 direction B, bot linkage) ================================
+  // Attitude-aware acceptance-threshold shift magnitudes. Mirrors mods/
+  // dominion/rules.js's RULES.dialogue.botTradeAttitude EXACTLY (same
+  // "local policy default instead of importing RULES" reasoning as
+  // mortgagedPropertyRate immediately above — this file stays mod-agnostic;
+  // see resolveEffectiveThreshold's doc comment for the formula/bound this
+  // feeds). grudgeThresholdPerPoint TIGHTENS (raises) the effective
+  // threshold per grudge point toward the proposer; trustThresholdPerPoint
+  // RELAXES (lowers) it per trust point. The max*Shift caps bound the total
+  // swing regardless of how large/malformed an attitude value is.
+  grudgeThresholdPerPoint: 15,
+  trustThresholdPerPoint: 15,
+  maxGrudgeShift: 150,
+  maxTrustShift: 150,
 });
+
+// Linear, capped magnitude for one axis (grudge or trust) of the attitude
+// shift. Defensive against non-finite/negative input (a malformed or
+// hand-built `attitude` object, e.g. in a test) — a non-finite or negative
+// axis value contributes zero shift rather than corrupting the formula.
+function attitudeShift(value, perPoint, maxShift) {
+  const v = Number.isFinite(value) ? Math.max(value, 0) : 0;
+  return Math.min(v * perPoint, maxShift);
+}
+
+// Attitude-adjusted acceptance threshold. `attitude` is the acting seat's
+// {grudge, trust} toward the trade's OTHER party (or null/undefined —
+// returns baseThreshold UNCHANGED, so "no attitude" is a true identity, not
+// an approximation).
+//
+// grudgeShift tightens (adds to) the threshold; trustShift relaxes
+// (subtracts from) it — both linear-per-point, each independently capped at
+// max*Shift. The combined shift is then floored at lowerBound =
+// min(baseThreshold, 0):
+//
+//   effectiveThreshold = max(baseThreshold + grudgeShift - trustShift, lowerBound)
+//
+// BOUND (never accept a strictly-losing trade it would otherwise reject on
+// value): for ANY net < lowerBound — i.e. a net value the base (no-
+// attitude) policy would ALREADY reject (net < baseThreshold) AND that is
+// itself a losing deal relative to the bot's own baseline (net < 0 when
+// baseThreshold >= 0, the common/default case) — effectiveThreshold can
+// never drop to or below net, because effectiveThreshold >= lowerBound >
+// net always. Trust can relax acceptance down to (but never past)
+// lowerBound; it can never make the bot MORE lenient than its own
+// unmodified base policy already was at the floor. Grudge has no such cap
+// on the tightening side — making a bot harder to trade with is always
+// safe (it can only turn an accept into a reject, never the reverse).
+function resolveEffectiveThreshold(baseThreshold, attitude, pol) {
+  if (!attitude) return baseThreshold;
+  const grudgeShift = attitudeShift(attitude.grudge, pol.grudgeThresholdPerPoint, pol.maxGrudgeShift);
+  const trustShift = attitudeShift(attitude.trust, pol.trustThresholdPerPoint, pol.maxTrustShift);
+  const lowerBound = Math.min(baseThreshold, 0);
+  return Math.max(baseThreshold + grudgeShift - trustShift, lowerBound);
+}
 
 // Face-value price of a board space, discounted per mortgagedPropertyRate if
 // currently mortgaged. Reads G.board.spaces[pid].price the same way sim/
@@ -191,14 +256,25 @@ function tradePropertyValue(G, pid, rate) {
 // Pure: decides how the acting `seat` should respond to a pending G.trade.
 // Net value TO `seat` = (incoming money + incoming properties' price sum)
 // - (outgoing money + outgoing properties' price sum); accepts when net >=
-// policy.tradeAcceptThreshold, else rejects. "Incoming"/"outgoing" are
-// resolved relative to `seat` (not hardcoded to the target side) so the
-// function stays correct even if ever called for the proposer's seat —
-// though in practice only the target can dispatch acceptTrade/rejectTrade
-// (Game.js:1743/1815 requireActor(..., G.trade.targetPlayerId)), so
-// createBotDriver only ever calls this once it has confirmed
-// seat === G.trade.targetPlayerId.
-export function decideTradeResponse(G, seat, policy) {
+// the (possibly attitude-adjusted) acceptance threshold, else rejects.
+// "Incoming"/"outgoing" are resolved relative to `seat` (not hardcoded to
+// the target side) so the function stays correct even if ever called for
+// the proposer's seat — though in practice only the target can dispatch
+// acceptTrade/rejectTrade (Game.js:1743/1815 requireActor(...,
+// G.trade.targetPlayerId)), so createBotDriver only ever calls this once it
+// has confirmed seat === G.trade.targetPlayerId.
+//
+// `attitude` (T4, MT2-SP4 direction B — optional, LAST arg, backward
+// compatible: every pre-T4 call site/test that omits it gets byte-identical
+// behavior) is the acting seat's {grudge, trust} toward the trade's OTHER
+// party, or null/undefined. See resolveEffectiveThreshold's doc comment for
+// the exact formula and the never-accept-a-strictly-losing-trade bound.
+// Deliberately just the two numbers, not a ledger or RULES object — this
+// function stays pure and has zero knowledge of the ledger's shape or of
+// RULES.dialogue.botAttitudeEnabled; the caller (createBotDriver's act(),
+// wired from App.js) is responsible for resolving the ledger lookup AND the
+// enable gate before ever constructing this argument.
+export function decideTradeResponse(G, seat, policy, attitude) {
   const pol = Object.assign({}, DEFAULT_TRADE_POLICY, policy || {});
   const trade = G.trade;
   const actingIsTarget = String(seat) === String(trade.targetPlayerId);
@@ -213,7 +289,8 @@ export function decideTradeResponse(G, seat, policy) {
     .reduce((sum, pid) => sum + tradePropertyValue(G, pid, pol.mortgagedPropertyRate), 0);
 
   const net = incomingValue - outgoingValue;
-  return net >= pol.tradeAcceptThreshold ? [['acceptTrade']] : [['rejectTrade']];
+  const effectiveThreshold = resolveEffectiveThreshold(pol.tradeAcceptThreshold, attitude, pol);
+  return net >= effectiveThreshold ? [['acceptTrade']] : [['rejectTrade']];
 }
 
 // === Pacing constants ==========================================================
@@ -280,6 +357,17 @@ export const BOT_DELAYS = Object.freeze({
 //                             of the error being swallowed — same "no API key
 //                             = game still works, but errors aren't silently
 //                             eaten" idiom as character-ai.js.
+//   getDialogueLedger() (optional, T4) -> the live attitude-ledger state
+//                             object (src/dialogue/memory.js AttitudeLedger),
+//                             or a falsy value. Consulted ONLY when resolving
+//                             a pending trade targeting the acting bot, via
+//                             the module-level getAttitude import (see this
+//                             file's own top-of-file comment on that import).
+//                             Omitting it, or having it return a falsy
+//                             value, disables the whole T4 feature and
+//                             reproduces pre-T4 decideTradeResponse
+//                             decisions byte-for-byte — this is how App.js
+//                             implements RULES.dialogue.botAttitudeEnabled.
 //
 // Behavior:
 //   - single-flight: onUpdate() is a no-op while a step is already scheduled
@@ -318,7 +406,10 @@ export const BOT_DELAYS = Object.freeze({
 //     bot.js's decideMoves has no G.trade branch at all (see
 //     decideTradeResponse's file comment for the full explanation), so
 //     calling decide() here would eventually dispatch a rejected endTurn
-//     forever instead of ever resolving the trade.
+//     forever instead of ever resolving the trade. T4: when getDialogueLedger
+//     is wired and returns a ledger, decideTradeResponse also receives the
+//     acting seat's {grudge, trust} toward the proposer (getAttitude,
+//     imported from src/dialogue/memory.js) as its 4th argument.
 //   - error recovery (fix wave 2 — see guardedStep() below): the ENTIRE
 //     scheduled chain is error-guarded, not just act()/actCharacterSelect().
 //     A throw from ANY injected dep this module calls while a step is
@@ -344,6 +435,19 @@ export function createBotDriver(deps) {
     getCharacterIds,
     rngImpl = Math.random,
     onError = console.error,
+    // T4 (optional) — () => the live attitude-ledger state object (see
+    // src/dialogue/memory.js AttitudeLedger), or a falsy value. This is the
+    // ONLY switch for the whole attitude-aware trade feature: App.js wires
+    // it to `() => this.dialogueLedger` ONLY when RULES.dialogue.
+    // botAttitudeEnabled is true, and omits the dep entirely (or returns a
+    // falsy value) otherwise — either way `attitude` resolves to null below,
+    // which decideTradeResponse treats as a true identity (see its own doc
+    // comment), giving byte-identical decisions to pre-T4 behavior. Getter
+    // (not a captured value) for the same reason getState is a getter: the
+    // ledger object is REPLACED (not mutated) on every fold
+    // (applyEvents/AttitudeLedger are pure), so a captured reference would
+    // go stale after the very first ledger update.
+    getDialogueLedger,
   } = deps;
 
   let epoch = 0;
@@ -491,7 +595,17 @@ export function createBotDriver(deps) {
     // decide(), same reasoning as the G.awaitingRoute special-case
     // immediately below.
     if (G.trade && seat === String(G.trade.targetPlayerId)) {
-      const [name, ...args] = decideTradeResponse(G, seat)[0];
+      // T4: seat-keyed attitude lookup (both `seat` and G.trade.proposerId
+      // are seat ids — deriveActingSeat/Game.js proposeTrade — so no id
+      // translation is needed here, unlike App.js's own player-detail
+      // popover which also has to resolve a character id to a seat first).
+      // getDialogueLedger is the ENTIRE gate (see its own dep-doc comment
+      // above): absent, or returning a falsy ledger, => attitude stays
+      // null => decideTradeResponse's byte-identical-to-today path.
+      const ledger = typeof getDialogueLedger === 'function' ? getDialogueLedger() : null;
+      const proposerId = String(G.trade.proposerId);
+      const attitude = ledger ? getAttitude(ledger, seat, proposerId) : null;
+      const [name, ...args] = decideTradeResponse(G, seat, undefined, attitude)[0];
       // Minor fix (wave 2): reset the roll-pacing flag BEFORE dispatch(),
       // not after. This step is "finished" either way (accept/reject
       // resolved, or dispatch() throws and guardedStep aborts the chain) —

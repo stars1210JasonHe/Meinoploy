@@ -152,6 +152,15 @@ export const DEFAULT_RULES = {
       intro: 0.001,
       chat: 0.01,
     },
+    // T4 (src/bot-driver.js decideTradeResponse) — kept in lockstep with
+    // mods/dominion/rules.js's dialogue.botTradeAttitude block (drift-guard
+    // covered, see that file's comment for the full rationale).
+    botTradeAttitude: {
+      grudgeThresholdPerPoint: 15,
+      trustThresholdPerPoint: 15,
+      maxGrudgeShift: 150,
+      maxTrustShift: 150,
+    },
   },
   display: {
     playerColors: [
