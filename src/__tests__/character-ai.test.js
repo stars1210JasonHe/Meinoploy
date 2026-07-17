@@ -909,6 +909,46 @@ describe('consumeNewEvents', () => {
     expect(newEvents.map(e => e.seq)).toEqual([100, 101, 102]);
     expect(nextSeq).toBe(102);
   });
+
+  // T2-review Fix 1 (AI off→on mid-game): detectAndTriggerAI (App.js) now
+  // consumes/advances the cursor UNCONDITIONALLY, before its isEnabled()
+  // gate — same treatment _updateDialogueLedger already had. Previously the
+  // gate sat first, so the cursor froze while AI was off and flipping it
+  // back ON mid-game replayed every missed event as one burst (a diary call
+  // per missed season + all historical banter in a single tick). This test
+  // walks the exact post-fix caller contract through consumeNewEvents: the
+  // "disabled" renders consume-and-discard, the re-enable render sees ZERO
+  // new events, and only events logged AFTER the flip fire.
+  test('disable→enable cycle: events absorbed while disabled leave zero to fire on re-enable', () => {
+    // Enabled phase: lazy-init at 3 events, then nothing new.
+    let events = [ev(0), ev(1), ev(2)];
+    let cursor = consumeNewEvents(events, undefined).nextSeq;
+    expect(cursor).toBe(2);
+
+    // AI turned OFF; play continues — two renders arrive while disabled.
+    // The caller STILL consumes each render (post-fix contract) and simply
+    // fires nothing with the result.
+    events = [...events, ev(3), ev(4)]; // e.g. a season_changed + a duel_resolved
+    let r = consumeNewEvents(events, cursor);
+    expect(r.newEvents.length).toBe(2); // caller discards these (disabled)
+    cursor = r.nextSeq;
+    events = [...events, ev(5), ev(6)]; // another season boundary while still off
+    r = consumeNewEvents(events, cursor);
+    expect(r.newEvents.length).toBe(2); // discarded again
+    cursor = r.nextSeq;
+    expect(cursor).toBe(6);
+
+    // AI turned back ON: the very next render must see NOTHING to replay —
+    // no reaction/diary/banter burst.
+    r = consumeNewEvents(events, cursor);
+    expect(r.newEvents).toEqual([]);
+    expect(r.nextSeq).toBe(6);
+
+    // Only events logged AFTER the re-enable fire.
+    events = [...events, ev(7)];
+    r = consumeNewEvents(events, cursor);
+    expect(r.newEvents.map(e => e.seq)).toEqual([7]);
+  });
 });
 
 // --- MT2-SP4 T2: dialogue-memory prompt-assembly pure formatters ---

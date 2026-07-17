@@ -3814,15 +3814,25 @@ class MonopolyBoard {
   // §2.4). String-sniffing over G.messages retired.
   // ─────────────────────────────────────────────────────────
   detectAndTriggerAI(G, ctx) {
-    if (!this.characterAI.isEnabled()) return;
     if (G.phase !== 'play') return;
 
     // Lazy cursor: undefined on first sight of G.events (new game, load,
     // exit-to-menu restart, mid-match online join) -> consumeNewEvents sets
     // the cursor to the current max seq WITHOUT returning anything to fire,
     // so none of those transitions replay old events as a reaction burst.
+    //
+    // T2-review Fix 1: the cursor is consumed/advanced UNCONDITIONALLY,
+    // BEFORE the isEnabled() gate — the same treatment _updateDialogueLedger
+    // already gets. When this gate sat first, the cursor froze while AI was
+    // off (no key, or verbosity OFF), so flipping AI back ON mid-game via
+    // the always-visible settings modal replayed EVERY missed event in one
+    // batch — a diary call per missed season plus all historical banter in a
+    // single tick. Now events that occur while disabled are silently
+    // absorbed (consumed, nothing fired), and re-enabling reacts only to
+    // events that occur AFTER the flip.
     const { newEvents, nextSeq } = consumeNewEvents(G.events, this._lastEventSeq);
     this._lastEventSeq = nextSeq;
+    if (!this.characterAI.isEnabled()) return; // absorbed silently — fire nothing while disabled
     if (newEvents.length === 0) return;
 
     const player = G.players[ctx.currentPlayer];
