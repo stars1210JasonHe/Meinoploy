@@ -1885,8 +1885,13 @@ class MonopolyBoard {
     const cBonus = cr.stamina + cr.luckBonus;
     const dBonus = dr.stamina + dr.luckBonus;
     const outcomeText = outcome === 'waived' ? t('duel.outcomeWaived') : t('duel.outcomePaid', { mult: RULES.duel.loseMultiplier });
+    // turnbox__duelflash (ticket: duel result flash, R4 spec §1.5): safe now
+    // that _writeTurnbox (keyed turnbox rendering ticket) only recreates this
+    // node when the rendered turnbox html actually changes — see index.html's
+    // .turnbox__duelflash rule for why that makes a once-on-appear CSS
+    // animation here correct instead of a per-tick strobe.
     return `
-      <div class="turnbox__slot">
+      <div class="turnbox__slot turnbox__duelflash">
         <div class="cp__info">${esc(challengerName)} [${cr.dice[0]}][${cr.dice[1]}]+${cBonus} = ${cr.total} &nbsp;${t('duel.vs')}&nbsp; ${esc(ownerName)} [${dr.dice[0]}][${dr.dice[1]}]+${dBonus} = ${dr.total}</div>
         <div class="cp__info">${t('duel.wins', { name: esc(winnerName), outcome: outcomeText })}</div>
       </div>`;

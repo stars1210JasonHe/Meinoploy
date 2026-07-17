@@ -1442,10 +1442,20 @@
         from { opacity:0; transform:translateY(6px); }
         to { opacity:1; transform:none; }
       }
-      /* Duel flash CUT (spec §1.5): renderTurnbox rewrites its innerHTML on
-         EVERY state tick, so any appear-animation on turnbox content restarts
-         per tick — a strobe, not a moment. Needs a keyed-render before it's
-         safe; ticketed instead of shipped. */
+      /* Duel result flash (spec §1.5, shipped post-keyed-turnbox): renderTurnbox
+         used to rewrite turnboxEl.innerHTML on EVERY state tick, which made any
+         appear-animation on turnbox content restart per tick — a strobe, not a
+         moment — so this was CUT at R4 time. App.js's _writeTurnbox (keyed
+         turnbox rendering ticket) now skips the DOM write whenever the rendered
+         html is unchanged, so `.turnbox__duelflash` (the _duelResultStripHtml
+         wrapper) is only ever created fresh when the duel result actually just
+         landed — it fires once on appear and never re-triggers while the strip
+         persists across no-op re-render ticks. Opacity/filter only (R4 §2). */
+      .turnbox__duelflash { animation:duelFlash .3s steps(2) both; }
+      @keyframes duelFlash {
+        0%   { opacity:0; filter:brightness(2.2); }
+        100% { opacity:1; filter:brightness(1); }
+      }
     }
 
     /* Proof-set application (R1a): each player chip is its own war-room panel
