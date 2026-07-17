@@ -825,6 +825,65 @@ describe('createBotDriver', () => {
       expect(dispatched).toEqual([['placeBid', 10]]);
       expect(deps.decide).toHaveBeenCalledTimes(1);
     });
+
+    // === T4 (MT2-SP4 direction B, bot linkage) — getDialogueLedger wiring ===
+    // A net=+50 money-only trade (offeredMoney=50, requestedMoney=0) accepts
+    // under the default threshold (0) with no attitude at all — the shared
+    // baseline every sub-test below starts from.
+    function makeTradeState(proposerId) {
+      return {
+        G: {
+          board: { spaces: {} },
+          mortgaged: {},
+          trade: {
+            proposerId, targetPlayerId: '1',
+            offeredProperties: [], requestedProperties: [],
+            offeredMoney: 50, requestedMoney: 0,
+          },
+        },
+        ctx: { currentPlayer: '0' },
+      };
+    }
+
+    test('getDialogueLedger wired with grudge toward the proposer: threshold tightens and flips accept -> reject', () => {
+      const { deps, dispatched } = makeHarness(makeTradeState('0'));
+      // grudge=5 * default grudgeThresholdPerPoint(15) = 75 > net(50).
+      deps.getDialogueLedger = () => ({ '1': { '0': { grudge: 5, trust: 0 } } });
+      const driver = createBotDriver(deps);
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['rejectTrade']]);
+    });
+
+    test('getDialogueLedger omitted (dep not provided): byte-identical to pre-T4 (accepts)', () => {
+      const { deps, dispatched } = makeHarness(makeTradeState('0'));
+      // deps.getDialogueLedger intentionally left unset.
+      const driver = createBotDriver(deps);
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['acceptTrade']]);
+    });
+
+    test('getDialogueLedger returns a falsy ledger (RULES.dialogue.botAttitudeEnabled=false wiring shape): byte-identical to pre-T4 (accepts)', () => {
+      const { deps, dispatched } = makeHarness(makeTradeState('0'));
+      deps.getDialogueLedger = () => null;
+      const driver = createBotDriver(deps);
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['acceptTrade']]);
+    });
+
+    test('seat-keyed lookup: attitude is read for (actingSeat, G.trade.proposerId) specifically, not any other pair in the ledger', () => {
+      // Seat '1' holds a heavy grudge toward '0' (would reject the net=50
+      // trade below) but NONE toward '2' — the proposer here is '2', so the
+      // '0' entry must never be consulted.
+      const { deps, dispatched } = makeHarness(makeTradeState('2'));
+      deps.getDialogueLedger = () => ({ '1': { '0': { grudge: 10, trust: 0 } } });
+      const driver = createBotDriver(deps);
+      driver.onUpdate();
+      jest.advanceTimersByTime(BOT_DELAYS.think);
+      expect(dispatched).toEqual([['acceptTrade']]); // missing pair -> {grudge:0,trust:0} -> unchanged threshold
+    });
   });
 });
 
@@ -902,5 +961,144 @@ describe('decideTradeResponse', () => {
     // Target's view (net=+100) says accept; proposer's view (net=-100) says reject.
     expect(decideTradeResponse(G, '1')).toEqual([['acceptTrade']]);
     expect(decideTradeResponse(G, '0')).toEqual([['rejectTrade']]);
+  });
+
+  // === T4 (MT2-SP4 direction B, bot linkage) ==================================
+  // Attitude-aware acceptance threshold: effectiveThreshold =
+  //   max(baseThreshold + grudgeShift - trustShift, min(baseThreshold, 0))
+  // where grudgeShift/trustShift are linear-per-point (RULES.dialogue.
+  // botTradeAttitude, mirrored locally as DEFAULT_TRADE_POLICY's
+  // grudgeThresholdPerPoint/trustThresholdPerPoint) and each independently
+  // capped at maxGrudgeShift/maxTrustShift. Money-only trades (empty
+  // property arrays) below so `net` is exactly offeredMoney - requestedMoney
+  // from the target's perspective — no board/price rounding to reason about.
+  function makeMoneyTradeG(net) {
+    const trade = {
+      proposerId: '0', targetPlayerId: '1',
+      offeredProperties: [], requestedProperties: [],
+      offeredMoney: Math.max(net, 0), requestedMoney: Math.max(-net, 0),
+    };
+    return makeTradeG(trade, {});
+  }
+
+  describe('T4 — grudge tightens / trust relaxes (exact boundary values)', () => {
+    test('grudge=1 (default rate 15/pt): threshold shifts 0 -> 15; net=15 accepts, net=14 rejects', () => {
+      const attitude = { grudge: 1, trust: 0 };
+      expect(decideTradeResponse(makeMoneyTradeG(15), '1', undefined, attitude)).toEqual([['acceptTrade']]);
+      expect(decideTradeResponse(makeMoneyTradeG(14), '1', undefined, attitude)).toEqual([['rejectTrade']]);
+    });
+
+    test('trust=4 against a custom base threshold=100: shifts 100 -> 40; net=40 accepts, net=39 rejects', () => {
+      const policy = { tradeAcceptThreshold: 100 };
+      const attitude = { grudge: 0, trust: 4 };
+      expect(decideTradeResponse(makeMoneyTradeG(40), '1', policy, attitude)).toEqual([['acceptTrade']]);
+      expect(decideTradeResponse(makeMoneyTradeG(39), '1', policy, attitude)).toEqual([['rejectTrade']]);
+    });
+
+    test('combined grudge=8 + trust=3: shifts 0 -> +120 -45 = 75; net=75 accepts, net=74 rejects', () => {
+      const attitude = { grudge: 8, trust: 3 };
+      expect(decideTradeResponse(makeMoneyTradeG(75), '1', undefined, attitude)).toEqual([['acceptTrade']]);
+      expect(decideTradeResponse(makeMoneyTradeG(74), '1', undefined, attitude)).toEqual([['rejectTrade']]);
+    });
+
+    test('grudge and trust at equal max magnitude cancel exactly (grudge=10, trust=10 -> threshold unchanged)', () => {
+      const attitude = { grudge: 10, trust: 10 };
+      // Unchanged base threshold (0): same boundary as the no-attitude case.
+      expect(decideTradeResponse(makeMoneyTradeG(0), '1', undefined, attitude)).toEqual([['acceptTrade']]);
+      expect(decideTradeResponse(makeMoneyTradeG(-1), '1', undefined, attitude)).toEqual([['rejectTrade']]);
+    });
+  });
+
+  describe('T4 — shift magnitude caps (maxGrudgeShift / maxTrustShift)', () => {
+    test('grudgeShift clamps at maxGrudgeShift even with an extreme per-point rate', () => {
+      const policy = { grudgeThresholdPerPoint: 1000, maxGrudgeShift: 50 };
+      const attitude = { grudge: 1, trust: 0 }; // 1 * 1000 = 1000, clamped to 50
+      expect(decideTradeResponse(makeMoneyTradeG(50), '1', policy, attitude)).toEqual([['acceptTrade']]);
+      expect(decideTradeResponse(makeMoneyTradeG(49), '1', policy, attitude)).toEqual([['rejectTrade']]);
+    });
+
+    test('trustShift clamps at maxTrustShift even with an extreme per-point rate', () => {
+      const policy = { tradeAcceptThreshold: 200, trustThresholdPerPoint: 1000, maxTrustShift: 50 };
+      const attitude = { grudge: 0, trust: 1 }; // 1 * 1000 = 1000, clamped to 50 -> threshold 200-50=150
+      expect(decideTradeResponse(makeMoneyTradeG(150), '1', policy, attitude)).toEqual([['acceptTrade']]);
+      expect(decideTradeResponse(makeMoneyTradeG(149), '1', policy, attitude)).toEqual([['rejectTrade']]);
+    });
+
+    test('negative/non-finite attitude axes contribute zero shift (defensive, not a sign flip)', () => {
+      const bogus = { grudge: -5, trust: NaN };
+      // Should behave exactly like {grudge:0, trust:0} -> threshold unchanged at 0.
+      expect(decideTradeResponse(makeMoneyTradeG(0), '1', undefined, bogus)).toEqual([['acceptTrade']]);
+      expect(decideTradeResponse(makeMoneyTradeG(-1), '1', undefined, bogus)).toEqual([['rejectTrade']]);
+    });
+  });
+
+  // The plan's binding bound: "a bot must never accept a strictly-losing
+  // trade it would otherwise reject on value (the attitude shifts the
+  // margin requirement, never flips the sign of a bad deal)". Precisely:
+  // for any net < floor = min(baseThreshold, 0) — i.e. a net value the
+  // BASE (no-attitude) policy already rejects (net < baseThreshold) AND
+  // that is itself a losing deal relative to the bot's own baseline
+  // (net < 0 whenever baseThreshold >= 0, the default/common case) — the
+  // attitude-adjusted decision must ALSO reject, no matter how much trust
+  // is applied. Swept across a matrix of baseThreshold values (positive,
+  // zero, and two negative/already-lenient configs) at MAXIMUM relaxation
+  // (trust at the ledger cap) to prove the floor is a hard, un-crossable
+  // bound, and that it is TIGHT (net === floor still accepts — trust isn't
+  // being over-conservatively clipped either).
+  describe('T4 — bound: never accept a strictly-losing trade it would otherwise reject on value', () => {
+    test.each([
+      [0],
+      [50],
+      [-20],
+      [-100],
+    ])('baseThreshold=%d: floor = min(baseThreshold, 0) is a tight floor under max trust', (baseThreshold) => {
+      const policy = { tradeAcceptThreshold: baseThreshold };
+      const attitude = { grudge: 0, trust: 10 }; // ledger cap (RULES.dialogue.caps.trust default 10)
+      const floor = Math.min(baseThreshold, 0);
+      expect(decideTradeResponse(makeMoneyTradeG(floor - 1), '1', policy, attitude)).toEqual([['rejectTrade']]);
+      expect(decideTradeResponse(makeMoneyTradeG(floor), '1', policy, attitude)).toEqual([['acceptTrade']]);
+    });
+
+    test('grudge stacked on top of max trust cannot defeat the floor either (grudge only ever tightens)', () => {
+      const attitude = { grudge: 10, trust: 10 }; // both at ledger cap
+      const floor = 0; // baseThreshold defaults to 0
+      expect(decideTradeResponse(makeMoneyTradeG(floor - 1), '1', undefined, attitude)).toEqual([['rejectTrade']]);
+      expect(decideTradeResponse(makeMoneyTradeG(floor), '1', undefined, attitude)).toEqual([['acceptTrade']]);
+    });
+
+    test('a trade the base policy would ALREADY accept below zero (lenient negative baseThreshold) is unaffected by trust (never MORE lenient than base)', () => {
+      // baseThreshold=-20 already accepts some losing deals; max trust must
+      // not push the bar any further into negative territory than -20 itself.
+      const policy = { tradeAcceptThreshold: -20 };
+      const attitude = { grudge: 0, trust: 10 };
+      expect(decideTradeResponse(makeMoneyTradeG(-20), '1', policy, attitude)).toEqual([['acceptTrade']]); // === base decision
+      expect(decideTradeResponse(makeMoneyTradeG(-20), '1', policy, null)).toEqual([['acceptTrade']]); // base itself already accepts this
+      expect(decideTradeResponse(makeMoneyTradeG(-21), '1', policy, attitude)).toEqual([['rejectTrade']]); // still below base's own floor
+    });
+  });
+
+  // "botAttitudeEnabled=false OR null attitude -> byte-identical decisions
+  // to today" (plan T4 deliverable). The wiring-level half of this
+  // (RULES.dialogue.botAttitudeEnabled=false / getDialogueLedger
+  // omitted-or-falsy at the createBotDriver level) is covered in the
+  // "createBotDriver: trade-response routing" describe block above; this
+  // block covers the pure-function half directly.
+  describe('T4 — null/undefined attitude is a true identity (byte-identical to pre-T4 decideTradeResponse)', () => {
+    const cases = [
+      { name: 'favorable money-only', trade: { proposerId: '0', targetPlayerId: '1', offeredProperties: [], requestedProperties: [], offeredMoney: 120, requestedMoney: 20 }, mortgaged: {}, policy: undefined },
+      { name: 'unfavorable money-only', trade: { proposerId: '0', targetPlayerId: '1', offeredProperties: [], requestedProperties: [], offeredMoney: 20, requestedMoney: 120 }, mortgaged: {}, policy: undefined },
+      { name: 'break-even with custom threshold', trade: { proposerId: '0', targetPlayerId: '1', offeredProperties: [], requestedProperties: [], offeredMoney: 100, requestedMoney: 100 }, mortgaged: {}, policy: { tradeAcceptThreshold: 1 } },
+      { name: 'mortgaged property, favorable unmortgaged / unfavorable mortgaged', trade: { proposerId: '0', targetPlayerId: '1', offeredProperties: [1], requestedProperties: [], offeredMoney: 0, requestedMoney: 150 }, mortgaged: { 1: true }, policy: undefined },
+      { name: 'proposer-perspective (seat 0, not the target)', trade: { proposerId: '0', targetPlayerId: '1', offeredProperties: [1], requestedProperties: [2], offeredMoney: 0, requestedMoney: 0 }, mortgaged: {}, policy: undefined, seat: '0' },
+    ];
+
+    test.each(cases)('$name: omitted / undefined / null / zero-valued attitude all agree with the pre-T4 (3-arg) call', ({ trade, mortgaged, policy, seat }) => {
+      const G = makeTradeG(trade, mortgaged);
+      const actingSeat = seat || '1';
+      const baseline = decideTradeResponse(G, actingSeat, policy); // pre-T4 call shape (3 args)
+      expect(decideTradeResponse(G, actingSeat, policy, undefined)).toEqual(baseline);
+      expect(decideTradeResponse(G, actingSeat, policy, null)).toEqual(baseline);
+      expect(decideTradeResponse(G, actingSeat, policy, { grudge: 0, trust: 0 })).toEqual(baseline);
+    });
   });
 });
