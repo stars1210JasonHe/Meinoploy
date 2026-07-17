@@ -383,6 +383,10 @@ test.describe('Speech bubbles (T3, injected via the __MP_TEST_BUBBLE test seam)'
     test.setTimeout(30000);
     await selectCharactersDominion(page);
 
+    // #btn-ai-settings lives in the auto-hiding in-game topbar — reveal it
+    // via the top-edge hotzone first (bots.spec.js's #btn-save pattern).
+    await page.hover('#topbar-hotzone');
+    await expect(page.locator('.topbar')).toHaveClass(/topbar--show/);
     await page.click('#btn-ai-settings');
     await page.waitForSelector('#ai-verbosity-select', { timeout: 10000 });
     await page.selectOption('#ai-verbosity-select', 'off');

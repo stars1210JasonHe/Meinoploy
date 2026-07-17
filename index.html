@@ -1672,6 +1672,24 @@
 </head>
 <body>
   <div id="app"></div>
+  <script>
+    /* Parcel-v1 + immer quirk (T3-review E2E-proof finding, MEASURED not
+       guessed): immer@8.0.4 (boardgame.io's dep) declares
+       "source": "src/immer.ts" in its package.json, and Parcel v1 PREFERS
+       the source field — so on any FRESH parcel cache it compiles immer from
+       raw TS source whose bare __DEV__ references (normally replaced by
+       immer's own rollup build) survive into the bundle and throw
+       "ReferenceError: __DEV__ is not defined" at the first immer call
+       (boardgame.io client creation = every game start). Long-lived .cache
+       dirs mask this (their immer entries predate the resolution), which is
+       why the main dev server never showed it — any cache clear or new
+       checkout reproduces it. Bare identifier reads resolve through the
+       global object even in strict mode, so defining it here (before the
+       bundle script) makes the compiled-from-source immer behave like its
+       production build. Guarded assignment: inert wherever the cached,
+       __DEV__-free immer is still being served. */
+    window.__DEV__ = typeof window.__DEV__ === 'undefined' ? false : window.__DEV__;
+  </script>
   <script src="./src/App.js"></script>
 </body>
 </html>
