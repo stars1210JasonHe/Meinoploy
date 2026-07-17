@@ -435,10 +435,72 @@ export class CharacterAI {
     // populated, NaN-free config even if the caller (a standalone unit test,
     // or App.js before RULES is ready) never passes one.
     this.dialogueRules = resolveDialogueRules(options.dialogueRules);
+    // $3 session cost hard-cap (owner decision item 0, T2). Two INDEPENDENT
+    // fuses checked together by _budgetExhausted(): cumulative estimated
+    // USD spend vs costBudgetUSD, and raw call count vs
+    // maxCallsPerSession — either alone can trip the cap, so a
+    // misconfigured/zeroed price table can never defeat the count fuse.
+    // Both counters are pre-charged in _callApi BEFORE the network call is
+    // made (see its doc comment) — monotonic, never decreases except via
+    // resetCostEstimate()/setCostEstimate().
+    this._spentEstimateUSD = 0;
+    this._callCount = 0;
   }
 
   setDialogueRules(rulesLike) {
     this.dialogueRules = resolveDialogueRules(rulesLike);
+  }
+
+  // Conservative (over-estimate only) flat USD price for one call of
+  // `callType`, from RULES.dialogue.callPriceUSD. An unrecognized callType
+  // (future call site that forgets to register a price) falls back to the
+  // most expensive KNOWN tier rather than 0 — silently under-pricing an
+  // unknown call type would be the one way this guard could fail open.
+  _priceFor(callType) {
+    const table = this.dialogueRules.callPriceUSD || {};
+    const price = table[callType];
+    if (Number.isFinite(price)) return price;
+    const known = Object.values(table).filter(Number.isFinite);
+    return known.length ? Math.max(...known) : 0.01;
+  }
+
+  // Either fuse tripping is sufficient — see the constructor's doc comment.
+  // Number.isFinite guards a misconfigured (missing/NaN) limit from ever
+  // silently disabling its OWN fuse (a non-finite limit just makes that one
+  // comparison always false, falling through to the other fuse).
+  _budgetExhausted() {
+    const { costBudgetUSD, maxCallsPerSession } = this.dialogueRules;
+    if (Number.isFinite(costBudgetUSD) && this._spentEstimateUSD >= costBudgetUSD) return true;
+    if (Number.isFinite(maxCallsPerSession) && this._callCount >= maxCallsPerSession) return true;
+    return false;
+  }
+
+  // Read-only snapshot for the AI settings modal (App.js showAISettings).
+  getCostEstimate() {
+    return {
+      spentUSD: this._spentEstimateUSD,
+      callCount: this._callCount,
+      budgetUSD: this.dialogueRules.costBudgetUSD,
+      maxCalls: this.dialogueRules.maxCallsPerSession,
+      capped: this._budgetExhausted(),
+    };
+  }
+
+  // New GAME (not new boot) — the budget is per-game (T2 persistence
+  // decision), so App.js calls this at exitToMenu/fresh-game start, and
+  // setCostEstimate (below) to RESTORE a value on load instead.
+  resetCostEstimate() {
+    this._spentEstimateUSD = 0;
+    this._callCount = 0;
+  }
+
+  // Restores a persisted {spentUSD, callCount} (save-envelope load path).
+  // Tolerant of a missing/malformed estimate (old saves, corrupt data) —
+  // falls back to 0/0 rather than propagating NaN into the cap check.
+  setCostEstimate(est) {
+    const e = est || {};
+    this._spentEstimateUSD = Number.isFinite(e.spentUSD) ? e.spentUSD : 0;
+    this._callCount = Number.isFinite(e.callCount) ? e.callCount : 0;
   }
 
   isEnabled() {
@@ -612,12 +674,35 @@ export class CharacterAI {
     return parts.length > 0 ? '\n\nCurrent game state: ' + parts.join(', ') + '.' : '';
   }
 
-  // Call OpenAI API
-  async _callApi(messages, model) {
+  // Call OpenAI API. `callType` (T2, $3 hard cap — owner decision item 0)
+  // prices this call against RULES.dialogue.callPriceUSD; every public
+  // method funnels through this SINGLE choke point, so gating here covers
+  // every LLM call site (reactions/chat/intro/diary/banter) uniformly.
+  async _callApi(messages, model, callType = 'reaction') {
     if (!this.apiKey) throw new Error('No API key configured');
 
-    // Simple concurrency guard
+    // Hard cap: checked BEFORE any client/network work — a capped session
+    // makes literally zero further fetch() calls. Ledger/digest/chip logic
+    // (T1's pure core) is entirely unaffected; only this one choke point is
+    // gated. Deliberately ahead of the concurrency guard below: the budget
+    // fuse is the more fundamental limit and must win regardless of
+    // in-flight request count.
+    if (this._budgetExhausted()) return null;
+
+    // Simple concurrency guard (unchanged, pre-existing) — a
+    // concurrency-rejected call never reaches the network, so it is NOT
+    // pre-charged below (no real spend risk to account for).
     if (this._pendingRequests >= this.maxConcurrent) return null;
+
+    // Pre-charge: booked the instant a call is committed to (not on
+    // success), so the estimate/count are monotonic and the hard cap holds
+    // even if fetch() itself throws or hangs — "before client invocation"
+    // protects the ATTEMPT, matching the owner's intent that the cap can
+    // never be exceeded by construction, not merely by accounting after
+    // the fact.
+    this._spentEstimateUSD += this._priceFor(callType);
+    this._callCount += 1;
+
     this._pendingRequests++;
 
     try {
@@ -665,7 +750,7 @@ export class CharacterAI {
     ];
 
     try {
-      return await this._callApi(messages, this.model);
+      return await this._callApi(messages, this.model, 'reaction');
     } catch (e) {
       console.warn('CharacterAI event response failed:', e.message);
       return null;
@@ -690,7 +775,7 @@ export class CharacterAI {
     ];
 
     try {
-      return await this._callApi(messages, this.model);
+      return await this._callApi(messages, this.model, 'diary');
     } catch (e) {
       console.warn('CharacterAI diary entry failed:', e.message);
       return null;
@@ -712,7 +797,7 @@ export class CharacterAI {
     ];
 
     try {
-      return await this._callApi(messages, this.model);
+      return await this._callApi(messages, this.model, 'banter');
     } catch (e) {
       console.warn('CharacterAI banter line failed:', e.message);
       return null;
@@ -740,7 +825,7 @@ export class CharacterAI {
     messages.push({ role: 'user', content: userMessage });
 
     try {
-      return await this._callApi(messages, this.chatModel);
+      return await this._callApi(messages, this.chatModel, 'chat');
     } catch (e) {
       console.warn('CharacterAI chat failed:', e.message);
       return null;
@@ -758,7 +843,7 @@ export class CharacterAI {
     ];
 
     try {
-      return await this._callApi(messages, this.model);
+      return await this._callApi(messages, this.model, 'intro');
     } catch (e) {
       console.warn('CharacterAI intro failed:', e.message);
       return null;

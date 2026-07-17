@@ -142,6 +142,15 @@ export const DEFAULT_RULES = {
     diaryEnabled: true,
     diaryPromptLines: 3,
     diaryHistoryCap: 12,
+    costBudgetUSD: 3.0,
+    maxCallsPerSession: 400,
+    callPriceUSD: {
+      reaction: 0.001,
+      diary: 0.001,
+      banter: 0.001,
+      intro: 0.001,
+      chat: 0.01,
+    },
   },
   display: {
     playerColors: [

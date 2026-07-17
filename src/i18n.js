@@ -315,6 +315,9 @@ export const STRINGS = {
     'aiset.verbosityMajor': '仅重大事件（推荐）',
     'aiset.verbosityAll': '所有事件',
     'aiset.verbosityHint': '角色评论游戏事件的频率。',
+    // T2 ($3 hard cap): running dialogue-spend estimate readout.
+    'aiset.costLabel': '本局对话花费估算',
+    'aiset.costCapped': '已达上限',
     'aiset.cancel': '取消',
     'aiset.save': '保存',
 
@@ -619,6 +622,9 @@ export const STRINGS = {
     'aiset.verbosityMajor': 'Major events only (recommended)',
     'aiset.verbosityAll': 'All events',
     'aiset.verbosityHint': 'How often characters comment on game events.',
+    // T2 ($3 hard cap): running dialogue-spend estimate readout.
+    'aiset.costLabel': 'Dialogue Spend (est.)',
+    'aiset.costCapped': 'CAPPED',
     'aiset.cancel': 'CANCEL',
     'aiset.save': 'SAVE',
 

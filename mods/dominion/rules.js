@@ -253,6 +253,20 @@ export const RULES = {
     // (save-envelope size) — independent knobs, retention can exceed prompt use.
     diaryPromptLines: 3,
     diaryHistoryCap: 12,
+    // T2 ($3 hard cap, owner decision item 0): character-ai.js's per-session
+    // spend guard. costBudgetUSD is the primary fuse (cumulative estimated
+    // USD, from the conservative/over-estimate-only callPriceUSD table);
+    // maxCallsPerSession is an INDEPENDENT second fuse (raw call count) —
+    // either alone stops every further LLM call for the rest of the game.
+    costBudgetUSD: 3.0,
+    maxCallsPerSession: 400,
+    callPriceUSD: {
+      reaction: 0.001,
+      diary: 0.001,
+      banter: 0.001,
+      intro: 0.001,
+      chat: 0.01,
+    },
   },
 
   // ── Player Display ──────────────────────────────────────

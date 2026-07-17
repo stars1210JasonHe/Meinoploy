@@ -3601,6 +3601,13 @@ class MonopolyBoard {
 
   showAISettings() {
     const connected = !!this.characterAI.apiKey;
+    // T2 ($3 hard cap): running dialogue-spend estimate readout. Purely
+    // informational (App.js never writes to these — character-ai.js owns
+    // the counters); rendered keyless-safe since getCostEstimate() always
+    // returns real numbers regardless of apiKey state.
+    const cost = this.characterAI.getCostEstimate();
+    const costText = `$${cost.spentUSD.toFixed(2)} / $${cost.budgetUSD.toFixed(2)} · ${cost.callCount}/${cost.maxCalls}` +
+      (cost.capped ? ` — ${t('aiset.costCapped')}` : '');
     this.openUiModal(`
       <div class="aiset">
         <div class="aiset__head">${t('aiset.title')}</div>
@@ -3618,6 +3625,10 @@ class MonopolyBoard {
             <option value="all">${t('aiset.verbosityAll')}</option>
           </select>
           <span class="aiset__hint">${t('aiset.verbosityHint')}</span>
+        </div>
+        <div class="aiset__field">
+          <span class="aiset__label">${t('aiset.costLabel')}</span>
+          <span class="aiset__hint">${esc(costText)}</span>
         </div>
         <div class="aiset__actions">
           <button class="pix-btn pix-btn--ghost" id="btn-ai-cancel">${t('aiset.cancel')}</button>

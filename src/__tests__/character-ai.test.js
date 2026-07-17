@@ -526,6 +526,122 @@ describe('CharacterAI', () => {
     });
   });
 
+  describe('$3 session cost hard-cap (T2, owner decision item 0)', () => {
+    test('getCostEstimate reflects RULES.dialogue defaults with zero spend at construction', () => {
+      const ai = new CharacterAI('sk-test');
+      const est = ai.getCostEstimate();
+      expect(est).toEqual({ spentUSD: 0, callCount: 0, budgetUSD: DEFAULT_DIALOGUE_RULES.costBudgetUSD, maxCalls: DEFAULT_DIALOGUE_RULES.maxCallsPerSession, capped: false });
+    });
+
+    test('poison-pill: once the budget is exhausted, fetch is NEVER called again', async () => {
+      fetch.mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: 'x' } }] }) });
+      const ai = new CharacterAI('sk-test', { verbosity: VERBOSITY.ALL, dialogueRules: { costBudgetUSD: 0 } });
+      // costBudgetUSD: 0 means _budgetExhausted() is true from the very first call.
+      const result = await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      expect(result).toBeNull();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    test('poison-pill: an injected client that throws if called is never invoked once capped', async () => {
+      const poisonFetch = jest.fn(() => { throw new Error('should never be called — budget already exhausted'); });
+      global.fetch = poisonFetch;
+      const ai = new CharacterAI('sk-test', { verbosity: VERBOSITY.ALL, dialogueRules: { costBudgetUSD: 0 } });
+      await expect(ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {})).resolves.toBeNull();
+      await expect(ai.chat(mockCharacter, mockLore, 'hi', [], {})).resolves.toBeNull();
+      await expect(ai.introduce(mockCharacter, mockLore)).resolves.toBeNull();
+      await expect(ai.writeDiaryEntry(mockCharacter, mockLore, {})).resolves.toBeNull();
+      await expect(ai.banterLine(mockCharacter, mockLore, {}, 'hi')).resolves.toBeNull();
+      expect(poisonFetch).not.toHaveBeenCalled();
+      global.fetch = fetch; // restore the jest.fn() mock for subsequent tests
+    });
+
+    test('spend estimate is monotonic non-decreasing across successive successful calls', async () => {
+      fetch.mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: 'x' } }] }) });
+      const ai = new CharacterAI('sk-test', { verbosity: VERBOSITY.ALL });
+      let prev = ai.getCostEstimate().spentUSD;
+      for (let i = 0; i < 5; i++) {
+        await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+        const next = ai.getCostEstimate().spentUSD;
+        expect(next).toBeGreaterThanOrEqual(prev);
+        prev = next;
+      }
+      expect(prev).toBeGreaterThan(0);
+    });
+
+    test('trips the budget fuse once cumulative spend reaches costBudgetUSD, blocking further calls', async () => {
+      fetch.mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: 'x' } }] }) });
+      // 2 reactions at the default reaction price (0.001) = 0.002 exactly at budget.
+      const ai = new CharacterAI('sk-test', { verbosity: VERBOSITY.ALL, dialogueRules: { costBudgetUSD: 0.002 } });
+      const r1 = await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      const r2 = await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      expect(r1).not.toBeNull();
+      expect(r2).not.toBeNull();
+      expect(fetch).toHaveBeenCalledTimes(2);
+      const r3 = await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      expect(r3).toBeNull();
+      expect(fetch).toHaveBeenCalledTimes(2); // no 3rd network call
+      expect(ai.getCostEstimate().capped).toBe(true);
+    });
+
+    test('count fuse trips independently of the price table — even with price 0, the Nth+1 call is blocked', async () => {
+      fetch.mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: 'x' } }] }) });
+      const ai = new CharacterAI('sk-test', {
+        verbosity: VERBOSITY.ALL,
+        dialogueRules: { costBudgetUSD: 1000000, maxCallsPerSession: 2, callPriceUSD: { reaction: 0 } },
+      });
+      await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(ai.getCostEstimate().spentUSD).toBe(0); // price table zeroed — budget fuse alone would never trip
+      const blocked = await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      expect(blocked).toBeNull();
+      expect(fetch).toHaveBeenCalledTimes(2); // still 2 — the count fuse alone stopped the 3rd call
+      expect(ai.getCostEstimate().capped).toBe(true);
+    });
+
+    test('resetCostEstimate zeroes both counters', async () => {
+      fetch.mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: 'x' } }] }) });
+      const ai = new CharacterAI('sk-test', { verbosity: VERBOSITY.ALL });
+      await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      expect(ai.getCostEstimate().callCount).toBe(1);
+      ai.resetCostEstimate();
+      expect(ai.getCostEstimate()).toMatchObject({ spentUSD: 0, callCount: 0 });
+    });
+
+    test('setCostEstimate restores a persisted value (save-envelope load path)', () => {
+      const ai = new CharacterAI('sk-test');
+      ai.setCostEstimate({ spentUSD: 1.23, callCount: 45 });
+      expect(ai.getCostEstimate()).toMatchObject({ spentUSD: 1.23, callCount: 45 });
+    });
+
+    test('setCostEstimate tolerates missing/malformed input (old-save forward-compat) -> 0/0', () => {
+      const ai = new CharacterAI('sk-test');
+      ai.setCostEstimate({ spentUSD: 'oops', callCount: null });
+      expect(ai.getCostEstimate()).toMatchObject({ spentUSD: 0, callCount: 0 });
+      ai.setCostEstimate(undefined);
+      expect(ai.getCostEstimate()).toMatchObject({ spentUSD: 0, callCount: 0 });
+    });
+
+    test('an unrecognized callType falls back to the most expensive known tier, never 0 (fail-closed pricing)', () => {
+      const ai = new CharacterAI('sk-test');
+      const knownMax = Math.max(...Object.values(DEFAULT_DIALOGUE_RULES.callPriceUSD));
+      expect(ai._priceFor('some-future-call-type')).toBe(knownMax);
+    });
+
+    test('a concurrency-rejected call is NOT pre-charged (no real spend risk)', async () => {
+      let resolveFirst;
+      fetch.mockImplementationOnce(() => new Promise(r => { resolveFirst = r; }));
+      const ai = new CharacterAI('sk-test', { verbosity: VERBOSITY.ALL });
+      ai.maxConcurrent = 1;
+      const p1 = ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      const rejected = await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.GO_TO_JAIL, {}, {});
+      expect(rejected).toBeNull();
+      expect(ai.getCostEstimate().callCount).toBe(1); // only the first (in-flight) call was charged
+      resolveFirst({ ok: true, json: async () => ({ choices: [{ message: { content: 'ok' } }] }) });
+      await p1;
+    });
+  });
+
   describe('concurrency guard', () => {
     test('returns null when max concurrent requests exceeded', async () => {
       // Create two slow requests that don't resolve

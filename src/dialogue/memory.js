@@ -67,6 +67,31 @@ export const DEFAULT_DIALOGUE_RULES = {
   // retain more history than it re-feeds into every prompt.
   diaryPromptLines: 3,
   diaryHistoryCap: 12,
+  // T2 ($3 hard cap, owner decision item 0): a per-session spend guard in
+  // character-ai.js's SOLE fetch() choke point (_callApi) — checked BEFORE
+  // any network call. costBudgetUSD is the primary fuse (cumulative
+  // estimated USD spend, from the conservative/over-estimate-only
+  // callPriceUSD table below); maxCallsPerSession is an INDEPENDENT second
+  // fuse (absolute call count) so a misconfigured/zeroed price table can
+  // never defeat the cap. Neither fuse affects the attitude ledger, turn
+  // digest, or any keyless/code-driven feature — only LLM calls stop.
+  costBudgetUSD: 3.0,
+  maxCallsPerSession: 400,
+  // Deliberately conservative (rounds UP, never down) flat-rate USD
+  // estimates per call TYPE — not a token-accurate cost reconciliation
+  // (OpenAI's real per-call cost depends on prompt length, which this table
+  // does not measure). Purpose is solely to trip costBudgetUSD before the
+  // owner's real bill could ever exceed it, not to mirror an invoice.
+  // 'reaction'/'diary'/'banter'/'intro' all use the mini model
+  // (max_tokens 150); 'chat' uses the pricier chat model with a longer
+  // system prompt + history, hence the higher flat rate.
+  callPriceUSD: {
+    reaction: 0.001,
+    diary: 0.001,
+    banter: 0.001,
+    intro: 0.001,
+    chat: 0.01,
+  },
 };
 
 // Recognized RULES.dialogue field names — used ONLY to detect "this object is
@@ -77,7 +102,8 @@ export const DEFAULT_DIALOGUE_RULES = {
 const DIALOGUE_RULE_KEYS = [
   'digestWindow', 'weights', 'caps', 'decayPerSeason', 'rentGrudgeThreshold',
   'attitudeDisplay', 'botAttitudeEnabled', 'banterEnabled', 'diaryEnabled',
-  'diaryPromptLines', 'diaryHistoryCap',
+  'diaryPromptLines', 'diaryHistoryCap', 'costBudgetUSD', 'maxCallsPerSession',
+  'callPriceUSD',
 ];
 
 // Accepts: the full RULES object (reads .dialogue off it), a RULES.dialogue-
