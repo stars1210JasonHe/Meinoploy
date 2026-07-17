@@ -12,7 +12,10 @@
 //    RULES (mirrors src/__tests__/engine-events-emit.test.js's freshG
 //    pattern) — a regression guard proving the hand-built fixtures above
 //    match what the engine actually produces, not just my transcription.
+import { INVALID_MOVE } from 'boardgame.io/core';
 import { RULES, BOARD_SPACES } from '../../mods/dominion';
+import { Monopoly } from '../Game';
+import { DEFAULT_RULES } from '../mod-loader';
 import { logEvent } from '../events';
 import {
   DEFAULT_DIALOGUE_RULES,
@@ -64,6 +67,31 @@ describe('resolveDialogueRules', () => {
 
   test('real mods/dominion RULES.dialogue round-trips through resolveDialogueRules unchanged', () => {
     expect(resolveDialogueRules(RULES)).toEqual(RULES.dialogue);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Defaults drift guard (review fix wave). The dialogue defaults exist as
+// THREE hand-copied objects: DEFAULT_DIALOGUE_RULES (src/dialogue/memory.js),
+// DEFAULT_RULES.dialogue (src/mod-loader.js), and the mods/dominion/rules.js
+// dialogue block. The round-trip test above is tautological for drift (a
+// fully-populated RULES.dialogue always wins the merge, so the defaults'
+// VALUES are never compared) — these pairwise equality checks are the real
+// guard. When T2 adds a field (e.g. costBudgetUSD), it must land in all
+// three or these fail by construction.
+// ---------------------------------------------------------------------------
+
+describe('defaults drift guard — three copies stay in sync', () => {
+  test('mods/dominion/rules.js dialogue block === module DEFAULT_DIALOGUE_RULES', () => {
+    expect(RULES.dialogue).toEqual(DEFAULT_DIALOGUE_RULES);
+  });
+
+  test('mod-loader DEFAULT_RULES.dialogue === module DEFAULT_DIALOGUE_RULES', () => {
+    expect(DEFAULT_RULES.dialogue).toEqual(DEFAULT_DIALOGUE_RULES);
+  });
+
+  test('mod-loader DEFAULT_RULES.dialogue === mods/dominion/rules.js dialogue block', () => {
+    expect(DEFAULT_RULES.dialogue).toEqual(RULES.dialogue);
   });
 });
 
@@ -330,6 +358,17 @@ describe('serialize/deserialize', () => {
     const s1 = JSON.stringify(serializeLedger(state));
     const s2 = JSON.stringify(serializeLedger(state));
     expect(s1).toBe(s2);
+  });
+
+  test('byte-stability across two INDEPENDENTLY-built equivalent ledgers (review NIT): same event history folded twice from fresh state => identical bytes', () => {
+    // sampleLedger() constructs a brand-new state per call by re-applying the
+    // same events — two separate objects, not one serialized twice — so this
+    // asserts that key-insertion order (and thus JSON bytes) is a pure
+    // function of event order, not of object identity.
+    const a = sampleLedger();
+    const b = sampleLedger();
+    expect(a).not.toBe(b);
+    expect(JSON.stringify(serializeLedger(a))).toBe(JSON.stringify(serializeLedger(b)));
   });
 
   test('serializeLedger(undefined/null) => {}', () => {
@@ -616,5 +655,124 @@ describe('real event shapes (driven through the actual logEvent)', () => {
     expect(digest.wasBankrupted).toEqual([{ turn: 3, creditorId: '0' }]);
     expect(digest.propertiesTakenFrom).toEqual([]); // '1' was the taker here, not the victim
     expect(digest.propertiesTaken).toEqual([{ turn: 5, propertyId: 6, fromId: '2', cost: 80 }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Real-reducer contract tests (review fix wave). The block above drives the
+// real logEvent() but with HAND-TYPED data objects — a Game.js payload field
+// rename (e.g. ownerId -> landlordId) would sail through it silently. These
+// tests drive the REAL Game.js moves (Monopoly.moves.respondDuel, same
+// direct-invocation pattern src/__tests__/engine-duel.test.js established)
+// so the event payloads are produced by the actual reducer; if Game.js
+// renames a field the ledger/digest assertions here fail. Covers the two
+// riskiest shapes: duel_resolved (both outcomes — incl. the actor-is-
+// ALWAYS-the-challenger quirk, win or lose) and handleBankruptcy's
+// trade_cancelled {otherPartyId, reason:'bankruptcy'} variant (the one
+// trade_cancelled shape with a DIFFERENT opponent field name).
+// ---------------------------------------------------------------------------
+
+describe('real-reducer contract (events produced by actual Game.js moves)', () => {
+  function freshEngineG(numPlayers = 2) {
+    const ctx = { numPlayers, playOrder: Array.from({ length: numPlayers }, (_, i) => String(i)) };
+    const G = Monopoly.setup(ctx);
+    G.phase = 'play';
+    return G;
+  }
+
+  function valForDie(n) {
+    return (n - 1) / 6 + 0.01;
+  }
+
+  // respondDuel's pinned roll order (Game.js): challenger d1, d2, then
+  // defender d1, d2 — same helper shape as engine-duel.test.js.
+  function ctxWithDice(currentPlayer, dice) {
+    let i = 0;
+    const values = dice.length ? dice.map(valForDie) : [0.5];
+    return {
+      currentPlayer,
+      numPlayers: 2,
+      random: { Number: () => values[i++ % values.length] },
+      events: { endTurn: jest.fn(), setActivePlayers: jest.fn() },
+    };
+  }
+
+  function statChar(stats) {
+    return {
+      id: 'test-char', name: 'Test Character', passive: {},
+      stats: { capital: 5, luck: 0, negotiation: 5, charisma: 5, tech: 5, stamina: 4, ...stats },
+    };
+  }
+
+  test('duel_resolved via real respondDuel — challenger WINS: owner (loser) gains grudge toward the challenger despite actor being the challenger', () => {
+    const G = freshEngineG();
+    G.players[0].character = statChar({ stamina: 10 }); // challenger
+    G.players[1].character = statChar({ stamina: 2 });  // owner/defender
+    G.duel = { phase: 'response', propertyId: 3, ownerId: '1', challengerId: '0', rent: 8 };
+    G.hasRolled = true;
+    G.totalTurns = 5;
+
+    const result = Monopoly.moves.respondDuel(G, ctxWithDice('1', [6, 6, 1, 1])); // 22 vs 4
+    expect(result).not.toBe(INVALID_MOVE);
+    expect(G.events.map(e => e.type)).toEqual(['duel_resolved']); // waived: no rent_paid
+
+    const ledger = applyEvents(createLedgerState(), G.events, RULES);
+    // actor on duel_resolved is ALWAYS the challenger ('0'), but the LOSER is
+    // the owner ('1') — the ledger must attribute the grudge to the loser,
+    // not to the event's actor.
+    expect(getAttitude(ledger, '1', '0').grudge).toBe(RULES.dialogue.weights.duelLostGrudge);
+    expect(getAttitude(ledger, '0', '1')).toEqual({ grudge: 0, trust: 0 });
+
+    const dOwner = buildTurnDigest(G.events, '1', RULES.dialogue.digestWindow);
+    expect(dOwner.duelsLost).toEqual([{ turn: 5, opponentId: '0', propertyId: 3, rent: 8 }]);
+    expect(dOwner.duelsWon).toEqual([]);
+    const dChallenger = buildTurnDigest(G.events, '0', RULES.dialogue.digestWindow);
+    expect(dChallenger.duelsWon).toEqual([{ turn: 5, opponentId: '1', propertyId: 3, rent: 8 }]);
+    expect(dChallenger.rentsPaid).toEqual([]); // waived
+  });
+
+  test('duel_resolved via real respondDuel — challenger LOSES into bankruptcy with a pending trade: full causal chain (duel_resolved -> rent_paid -> bankruptcy -> trade_cancelled {otherPartyId})', () => {
+    const G = freshEngineG();
+    G.players[0].character = statChar({ stamina: 1 });  // challenger
+    G.players[1].character = statChar({ stamina: 10 }); // owner/defender
+    G.players[0].money = 400; // 2x rent(250) = 500 payment -> -100 -> bankrupt
+    G.trade = {
+      proposerId: '0', targetPlayerId: '1',
+      offeredProperties: [], requestedProperties: [], offeredMoney: 0, requestedMoney: 0,
+    };
+    G.duel = { phase: 'response', propertyId: 3, ownerId: '1', challengerId: '0', rent: 250 };
+    G.hasRolled = true;
+    G.totalTurns = 7;
+
+    const result = Monopoly.moves.respondDuel(G, ctxWithDice('1', [1, 1, 6, 6])); // 3 vs 22
+    expect(result).not.toBe(INVALID_MOVE);
+    // The real reducer emits the full chain in this order:
+    expect(G.events.map(e => e.type)).toEqual(['duel_resolved', 'rent_paid', 'bankruptcy', 'trade_cancelled']);
+    // and the bankruptcy-path trade_cancelled uses the otherPartyId shape
+    // (handleBankruptcy, Game.js ~480), NOT cancelTrade's targetPlayerId:
+    const cancelled = G.events.find(e => e.type === 'trade_cancelled');
+    expect(cancelled.actor).toBe('0');
+    expect(cancelled.data).toEqual({ otherPartyId: '1', reason: 'bankruptcy' });
+
+    const ledger = applyEvents(createLedgerState(), G.events, RULES);
+    // duel lost (+2) + big rent 500 >= 200 (+1) + bankrupted by '1' (+3) = 6.
+    // Stacking magnitude is a config-knob question for owner sign-off (see
+    // T1 report concern #5) — this asserts the MECHANISM against real
+    // reducer output, with all weights read from RULES.dialogue.
+    const w = RULES.dialogue.weights;
+    expect(getAttitude(ledger, '0', '1').grudge).toBe(w.duelLostGrudge + w.bigRentGrudge + w.bankruptedByGrudge);
+    expect(getAttitude(ledger, '1', '0')).toEqual({ grudge: 0, trust: 0 });
+
+    const dChallenger = buildTurnDigest(G.events, '0', RULES.dialogue.digestWindow);
+    expect(dChallenger.duelsLost).toEqual([{ turn: 7, opponentId: '1', propertyId: 3, rent: 250 }]);
+    expect(dChallenger.rentsPaid).toEqual([{ turn: 7, opponentId: '1', propertyId: 3, amount: 500 }]);
+    expect(dChallenger.wasBankrupted).toEqual([{ turn: 7, creditorId: '1' }]);
+    expect(dChallenger.tradesCancelled).toEqual([{ turn: 7, opponentId: '1', reason: 'bankruptcy' }]);
+
+    const dOwner = buildTurnDigest(G.events, '1', RULES.dialogue.digestWindow);
+    expect(dOwner.duelsWon).toEqual([{ turn: 7, opponentId: '0', propertyId: 3, rent: 250 }]);
+    expect(dOwner.rentsCollected).toEqual([{ turn: 7, opponentId: '0', propertyId: 3, amount: 500 }]);
+    expect(dOwner.bankruptciesCaused).toEqual([{ turn: 7, victimId: '0' }]);
+    expect(dOwner.tradesCancelled).toEqual([{ turn: 7, opponentId: '0', reason: 'bankruptcy' }]);
   });
 });

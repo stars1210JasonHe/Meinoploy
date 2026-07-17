@@ -97,7 +97,27 @@ export const DEFAULT_RULES = {
   // mods/dominion/rules.js's `dialogue` block (see src/dialogue/memory.js
   // DEFAULT_DIALOGUE_RULES for the full field-by-field rationale) so ANY
   // mod loaded via loadMod() with no `dialogue` key in its rules.json still
-  // resolves a complete, NaN-free config.
+  // resolves a complete, NaN-free config. A drift-guard test
+  // (dialogue-memory.test.js "defaults drift guard") asserts all three
+  // copies stay equal — a new field must land in all three or it fails.
+  //
+  // KNOWN HAZARD (pre-existing deepAssignInto pattern, noted for future
+  // JSON mods, not dialogue-specific): when setActiveModObject (src/Game.js
+  // ~90-98) installs a mod whose pristine rules LACK a top-level block
+  // (e.g. no `dialogue` key), deepMerge's `{...source}` spread carries that
+  // block into `resolved` BY REFERENCE to THIS singleton, and deepAssignInto
+  // then assigns it into the freshly-cleared live RULES object — again by
+  // reference (`target[key] = sv` when target has no such key). From that
+  // moment `RULES.dialogue === DEFAULT_RULES.dialogue`, so any in-place
+  // mutation of the live RULES.dialogue (tests mutate other RULES buckets
+  // in place routinely) would silently corrupt these defaults for every
+  // later mod switch. The aliasing genuinely occurs today — only dominion's
+  // rules.js defines a dialogue block; switching to terra-titans etc.
+  // aliases RULES.dialogue to this object. It stays harmless ONLY because
+  // nothing currently mutates RULES.dialogue in place (T1 reads it, never
+  // writes), and PRISTINE re-seeding cannot repair THIS object if that ever
+  // changes. A future fix should deep-clone at deepAssignInto's leaf
+  // assignment or at setActiveModObject's resolve step.
   dialogue: {
     digestWindow: {
       maxEvents: 60,
