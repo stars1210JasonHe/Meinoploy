@@ -80,6 +80,25 @@ export function chipDetailHtml(d) {
     </div>`;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Dialogue system UI (MT2-SP4 direction B, T3) — speech bubble content.
+// Keyless-safe (reads only strings App already resolved off the live
+// dialogueLedger — no network, no engine access).
+// ─────────────────────────────────────────────────────────────────────────
+
+// d: { idx (player index, matches chipHtml's data-chip), seq (monotonic bubble
+// counter — App uses this to decide whether an existing DOM node can be left
+// alone or must be replaced, so its own CSS pop-in animation doesn't restart
+// on unrelated re-renders), text, color }. App owns ALL positioning (fixed
+// overlay, getBoundingClientRect against the anchor chip) — this builder only
+// returns the bubble's own content, never inline position styles.
+export function bubbleHtml(d) {
+  return `<div class="dbubble" data-bubble-owner="${esc(d.idx)}" data-bubble-seq="${esc(d.seq)}" style="--pc:${esc(d.color || '')}">
+    <div class="dbubble__text">${esc(d.text)}</div>
+    <div class="dbubble__tail"></div>
+  </div>`;
+}
+
 // Resolve the tile popover's `description` field (ticket: classic-board place
 // descriptions in the tile popover). App.js's _tileDetailData previously only
 // ever surfaced `place.description` (the atlas world-place lookup, gated on

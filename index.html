@@ -623,6 +623,44 @@
     .app--game #drawer-tabs { z-index:46; } /* above the chrome bars if they ever meet the right edge */
     .app--game .drawer { z-index:55; } /* above the floating chrome (45) when open */
 
+    /* Speech bubbles (T3, MT2-SP4 direction B: character AI reaction/banter/
+       diary text, anchored to that character's portrait chip). A SIBLING
+       fixed overlay (#dialogue-bubbles), NOT a child of #player-info/.pcard--chip —
+       renderPlayerInfo fully rewrites #player-info's innerHTML on every
+       update() tick (any move, by any seat), which would restart a nested
+       bubble's CSS animation every tick (a strobe, same class of bug
+       _writeTurnbox's doc comment describes for the turnbox). App.js's
+       _renderBubbles() instead positions each bubble via getBoundingClientRect
+       against the live chip element and only replaces a bubble's DOM node
+       when its data-bubble-seq actually changes — see that method's doc
+       comment for the full "anchor to event seq" design. pointer-events:none
+       at both the container and bubble level — bubbles must never block a
+       chip/token click underneath them. z-index 47: above the floating chip/
+       action chrome (45) and drawer-tabs (46), below the dice tumble (50)
+       and drawer (55) so neither ever gets visually buried by chatter. */
+    .dialogue-bubbles { position:fixed; inset:0; z-index:47; pointer-events:none; }
+    .dbubble { position:fixed; transform:translate(-50%, -100%); pointer-events:none;
+      max-width:200px; background:var(--bg2); border:2px solid var(--pc, var(--line));
+      box-shadow:var(--bevel), var(--drop); padding:6px 9px; margin-top:-8px;
+      font-family:var(--body); font-size:13px; line-height:1.35; color:var(--ink); }
+    .dbubble__text { overflow-wrap:break-word; }
+    .dbubble__tail { position:absolute; left:50%; bottom:-7px; transform:translateX(-50%);
+      width:0; height:0; border-left:6px solid transparent; border-right:6px solid transparent;
+      border-top:7px solid var(--pc, var(--line)); }
+    /* Pop-in/pop-out use the same steps() pixel-easing language as the R4 cut
+       animations (victoryPop/duelFlash) — a brief, discrete-feeling snap, not a
+       smooth tween. Reduced motion: no animation classes apply at all (the
+       base .dbubble rule above already renders fully opaque/in-place with no
+       transform delta), so a reduced-motion user still sees the bubble
+       appear/disappear plainly and instantly — "no animation, still readable". */
+    @media (prefers-reduced-motion: no-preference) {
+      .dbubble { animation:dbubblePop .25s steps(4) both; }
+      .dbubble--out { animation:dbubbleOut .2s steps(3) both; }
+    }
+    @keyframes dbubblePop { 0% { opacity:0; transform:translate(-50%,-88%) scale(.82); }
+      100% { opacity:1; transform:translate(-50%,-100%) scale(1); } }
+    @keyframes dbubbleOut { 0% { opacity:1; } 100% { opacity:0; } }
+
     /* ============ WIDE-SCREEN GUTTER MODE (owner acceptance fix wave, Fix 3) ============
        Owner's choice for the horizontal voids beside the height-driven square board on
        wide monitors: fill them with UI instead of leaving them blank. App.js

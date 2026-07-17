@@ -137,6 +137,7 @@ export const DEFAULT_RULES = {
       grudgeTiers: [3, 6, 9],
       trustTiers: [3, 6, 9],
     },
+    bubbleMs: 6000,
     botAttitudeEnabled: true,
     banterEnabled: true,
     diaryEnabled: true,

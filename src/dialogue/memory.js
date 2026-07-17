@@ -56,6 +56,10 @@ export const DEFAULT_DIALOGUE_RULES = {
     grudgeTiers: [3, 6, 9],
     trustTiers: [3, 6, 9],
   },
+  // T3 (speech bubbles): how long an already-shown bubble lingers before
+  // auto-dismissing, in ms. Bubbles reuse the SAME isEnabled()/verbosity
+  // gate reactions already use — this field only controls dwell time.
+  bubbleMs: 6000,
   // Gates for T2/T4 to consume; T1 does not read these itself.
   botAttitudeEnabled: true,
   banterEnabled: true,
@@ -101,7 +105,7 @@ export const DEFAULT_DIALOGUE_RULES = {
 // (core/buildings/...) into the resolved output.
 const DIALOGUE_RULE_KEYS = [
   'digestWindow', 'weights', 'caps', 'decayPerSeason', 'rentGrudgeThreshold',
-  'attitudeDisplay', 'botAttitudeEnabled', 'banterEnabled', 'diaryEnabled',
+  'attitudeDisplay', 'bubbleMs', 'botAttitudeEnabled', 'banterEnabled', 'diaryEnabled',
   'diaryPromptLines', 'diaryHistoryCap', 'costBudgetUSD', 'maxCallsPerSession',
   'callPriceUSD',
 ];

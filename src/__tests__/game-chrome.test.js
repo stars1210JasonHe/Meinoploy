@@ -1,4 +1,6 @@
 import { chipHtml, chipDetailHtml, drawerShellHtml, tokenVisual, tileDetailHtml, nodeGlow, NODE_GLOW_COLORS, legendHtml, resolveTileDescription } from '../game-chrome';
+// T3 (MT2-SP4 direction B), deliverable 1 (speech bubbles).
+import { bubbleHtml } from '../game-chrome';
 import { setLocale } from '../i18n';
 
 // Task 3 (i18n): game-chrome now renders its static labels through t(), whose
@@ -176,6 +178,32 @@ describe('chipDetailHtml', () => {
     const base = { name: 'H', title: 'T', color: '#fff', portraitUrl: null, moneyHtml: '$1', deeds: 2 };
     const h = chipDetailHtml(base);
     expect(h).not.toContain('chip-detail__lore');
+  });
+});
+
+describe('bubbleHtml', () => {
+  test('carries owner/seq data attributes for App.js seq-diffing', () => {
+    const h = bubbleHtml({ idx: '2', seq: 7, text: 'Hello', color: '#e8a33d' });
+    expect(h).toContain('data-bubble-owner="2"');
+    expect(h).toContain('data-bubble-seq="7"');
+    expect(h).toContain('dbubble');
+  });
+
+  test('text is escaped (hostile content safe)', () => {
+    const h = bubbleHtml({ idx: '0', seq: 1, text: '<script>x</script>', color: '#fff' });
+    expect(h).not.toContain('<script>x</script>');
+    expect(h).toContain('&lt;script&gt;');
+  });
+
+  test('missing color falls back gracefully (no "undefined" leaking into style)', () => {
+    const h = bubbleHtml({ idx: '0', seq: 1, text: 'hi' });
+    expect(h).not.toContain('undefined');
+  });
+
+  test('carries a tail element for the pixel speech-bubble pointer', () => {
+    const h = bubbleHtml({ idx: '0', seq: 1, text: 'hi', color: '#fff' });
+    expect(h).toContain('dbubble__tail');
+    expect(h).toContain('dbubble__text');
   });
 });
 

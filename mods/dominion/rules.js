@@ -243,6 +243,11 @@ export const RULES = {
       grudgeTiers: [3, 6, 9],
       trustTiers: [3, 6, 9],
     },
+    // T3: how long a speech bubble (portrait-chip-anchored, reaction/banter/
+    // diary text) stays on screen before auto-dismissing, in ms. Bubbles are
+    // gated by the SAME verbosity setting as reactions (characterAI.isEnabled())
+    // — this only controls how long an ALREADY-shown bubble lingers.
+    bubbleMs: 6000,
     // Gates for later tasks; T1 itself does not read these.
     botAttitudeEnabled: true, // T4: bot-driver.js trade-response tilt (local bot paths only, sim stays pure)
     banterEnabled: true,      // T2/T3: duel/auction/trade banter reply-pairs

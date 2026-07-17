@@ -30,6 +30,10 @@ import { createAudio } from './audio';
 import { initLocale, getLocale, setLocale, onLocaleChange, t } from './i18n';
 import { renderLogLines } from './i18n-log';
 import { chipHtml, chipDetailHtml, tileDetailHtml, drawerShellHtml, tokenVisual, nodeGlow, legendHtml, NODE_GLOW_COLORS, resolveTileDescription } from './game-chrome';
+// T3 (MT2-SP4 direction B), deliverable 1 (speech bubbles): the bubble
+// content builder — its own import line so this commit doesn't also touch
+// deliverable 2's imports below.
+import { bubbleHtml } from './game-chrome';
 import { resolveBoardBg, starfieldDataUri } from './board-bg';
 import { bloomSprite } from './wr-bloom';
 // Local computer players (Task 2 wiring): bot-driver.js is the engine-decoupled
@@ -97,6 +101,15 @@ const CHROME_GUTTER_MARGIN = 12;  // 8 fixed offset + 4 gap — no floating bar 
 // _syncGutterMode's doc comment for why this can't reuse the classic square
 // board's analytic (centered-leftover) derivation.
 const GUTTER_RAIL_W = 300;
+// Speech-bubble fade-out hold (T3, MT2-SP4 direction B) — how long
+// _dismissBubble waits after adding the .dbubble--out class (CSS dbubbleOut
+// animation, index.html) before actually deleting the bubble/removing its
+// DOM node. A private UI-polish constant, NOT a RULES.dialogue tunable —
+// RULES.dialogue.bubbleMs (owner-facing: "how long a bubble stays readable")
+// is the one dial that matters; this is just the exit transition's own
+// duration and must stay in lockstep with index.html's `.dbubble--out`
+// animation-duration (.2s) or the node would vanish mid-fade.
+const DBUBBLE_EXIT_MS = 200;
 
 // ─────────────────────────────────────────────────────────────
 // Pixel UI primitives (vanilla DOM → HTML strings)
@@ -293,6 +306,18 @@ class MonopolyBoard {
     // dialogueLedger at every exitToMenu/loadGame (same "per-GAME, not
     // per-boot" reasoning).
     this.dialogueDiaries = createDiaryState();
+    // Speech-bubble transient display state (T3). Keyed by player id (String
+    // index, matches chipHtml's data-chip / player.id — see _showSpeechBubble's
+    // doc comment). _bubbles holds the CURRENTLY-shown bubble per player;
+    // _bubbleTimers holds that bubble's pending dismiss/cleanup setTimeout
+    // handle so a NEW bubble for the same player can cancel a stale one
+    // ("stacking = newest replaces"); _bubbleSeq is a global monotonic
+    // counter stamped onto every bubble so _renderBubbles can tell "still the
+    // same bubble, just repositioning" from "a genuinely new bubble arrived"
+    // without ever needing to compare bubble TEXT (duplicate lines are legal).
+    this._bubbles = {};
+    this._bubbleTimers = {};
+    this._bubbleSeq = 0;
 
     // Audio + animator: constructed exactly ONCE, here at app-boot — not per-game-start.
     // this.mapData already exists (setMap() ran above); this.boardEl/tokenLayer don't exist
@@ -473,6 +498,7 @@ class MonopolyBoard {
             <div id="results-area" style="display:none;"></div>
             <div id="game-area" class="screen screen--game" style="display:none;">
               <div class="game__chips"><div id="player-info"></div></div>
+              <div id="dialogue-bubbles" class="dialogue-bubbles"></div>
               <div class="game__center">
                 <div id="route-banner">${t('turnbox.chooseRoute')}</div>
                 <div id="board" class="board"></div>
@@ -510,6 +536,25 @@ class MonopolyBoard {
     this.resultsEl = document.getElementById('results-area');
     this.gameAreaEl = document.getElementById('game-area');
     this.playerInfoEl = document.getElementById('player-info');
+    // Speech-bubble overlay (T3, MT2-SP4 direction B) — a SIBLING of #player-info,
+    // never a child of it (see the .dialogue-bubbles CSS doc comment for why:
+    // #player-info gets fully rewritten every renderPlayerInfo tick, which would
+    // restart any nested bubble's CSS animation on every unrelated move).
+    this.dialogueBubblesEl = document.getElementById('dialogue-bubbles');
+    // Test-only injection seam (tests/e2e/dialogue.spec.js bubble smoke case)
+    // — pushes an ALREADY-RESOLVED line through the exact _showSpeechBubble
+    // path a real reaction/banter/diary line would take, with zero network
+    // call. Named __MP_ per the existing __MP_FAST_ROLL/__MP_LIVE_CLIENTS
+    // test-hook convention (this file). Still honors the real verbosity gate
+    // (_showSpeechBubble's own isEnabled() check) — a test must set an API
+    // key (never actually used for a fetch by this path) for the injected
+    // bubble to show, same as a real reaction would require. No-op outside a
+    // live game (this._lastG unset) or an unknown player id.
+    window.__MP_TEST_BUBBLE = (playerId, text) => {
+      const g = this._lastG;
+      const p = g && g.players && g.players.find(pl => pl.id === String(playerId));
+      if (p && p.character) this._showSpeechBubble(p.id, p.character, text);
+    };
     // Chip click -> detail popover. Delegated on the persistent #player-info
     // (its children are fully rebuilt every renderPlayerInfo call). Reads
     // this._chipDetail[idx], rebuilt every renderPlayerInfo alongside the
@@ -1415,6 +1460,11 @@ class MonopolyBoard {
     this._renderLegend(G, ctx);
     this.renderTokens(G, ctx);
     this.renderPlayerInfo(G, ctx);
+    // T3: repositions (never recreates unchanged) any active speech bubbles
+    // against this render's fresh chip DOM — see _renderBubbles' doc comment
+    // for why this must run AFTER renderPlayerInfo on every tick yet still
+    // never restarts an unrelated bubble's CSS animation.
+    this._renderBubbles();
     this.renderTurnbox(G, ctx);
     this.renderManage(G, ctx);
     const logLines = this.renderMessages(G);
@@ -3848,7 +3898,7 @@ class MonopolyBoard {
 
     for (const event of newEvents) {
       const mapped = mapEngineEventToAi(event, G);
-      if (mapped) this._triggerAIResponse(char, mapped.eventType, mapped.eventData, gameState, G);
+      if (mapped) this._triggerAIResponse(char, mapped.eventType, mapped.eventData, gameState, G, player.id);
       // Diary/banter (T2): independent of the reaction dispatch above — both
       // duel_resolved and season_changed already produce a reaction (via
       // mapEngineEventToAi) AND may separately trigger diary/banter for
@@ -3864,7 +3914,7 @@ class MonopolyBoard {
     }
   }
 
-  async _triggerAIResponse(char, eventType, eventData, gameState, G) {
+  async _triggerAIResponse(char, eventType, eventData, gameState, G, playerId) {
     const lore = this.activeMod.getLoreById(char.id);
     const dialogueContext = G ? this._buildDialogueContext(char.id, G) : null;
     this._nextAIId = (this._nextAIId || 0) + 1;
@@ -3880,6 +3930,9 @@ class MonopolyBoard {
     }
     if (this.aiResponses.length > 8) this.aiResponses = this.aiResponses.slice(-8);
     this._renderAIResponses();
+    // T3: additive display only — the chat-panel/council-chatter feed above
+    // is completely unaffected by this call, same resolved `text`.
+    if (text) this._showSpeechBubble(playerId, char, text);
   }
 
   // Pushes an ALREADY-RESOLVED line straight into the existing council-
@@ -3887,12 +3940,15 @@ class MonopolyBoard {
   // reaction plumbing" instruction for banter (T2): no new UI surface, just
   // another entry in the same bubble strip _triggerAIResponse already
   // renders into. No loading placeholder (banter's two legs are already
-  // sequential awaits by the time this is called).
-  _pushAIResponse(char, text) {
+  // sequential awaits by the time this is called). `playerId` is optional
+  // (T3): when provided, also shows a speech bubble on that player's chip —
+  // additive display, the chatter feed push above is unaffected either way.
+  _pushAIResponse(char, text, playerId) {
     this._nextAIId = (this._nextAIId || 0) + 1;
     this.aiResponses.push({ id: this._nextAIId, charName: char.name, charColor: char.color, portrait: char.portrait, text });
     if (this.aiResponses.length > 8) this.aiResponses = this.aiResponses.slice(-8);
     this._renderAIResponses();
+    if (playerId != null) this._showSpeechBubble(playerId, char, text);
   }
 
   // ─────────────────────────────────────────────────────────
@@ -3924,6 +3980,9 @@ class MonopolyBoard {
       seasonName: data.seasonName,
       text,
     }, RULES.dialogue);
+    // T3: additive display — the diary STORE write above (and its "心路" tab
+    // in the lore modal) is unaffected by whether a bubble is ever shown.
+    this._showSpeechBubble(player.id, char, text);
   }
 
   // ─────────────────────────────────────────────────────────
@@ -3952,14 +4011,14 @@ class MonopolyBoard {
       firstPlayer.character, this.activeMod.getLoreById(firstPlayer.character.id), firstContext, situations.first
     );
     if (!firstLine) return; // skip the whole pair — never a lone half-pair
-    this._pushAIResponse(firstPlayer.character, firstLine);
+    this._pushAIResponse(firstPlayer.character, firstLine, firstPlayer.id);
 
     const secondContext = this._buildDialogueContext(secondPlayer.id, G);
     const secondLine = await this.characterAI.banterLine(
       secondPlayer.character, this.activeMod.getLoreById(secondPlayer.character.id), secondContext, situations.second
     );
     if (!secondLine) return;
-    this._pushAIResponse(secondPlayer.character, secondLine);
+    this._pushAIResponse(secondPlayer.character, secondLine, secondPlayer.id);
   }
 
   _renderAIResponses() {
@@ -3976,6 +4035,115 @@ class MonopolyBoard {
       items += `<div class="aibubble">${avatar}<div class="aibubble__body"><div class="aibubble__name" style="color:${readableNameColor(r.charColor)}">${esc(r.charName)}</div>${textHtml}</div></div>`;
     });
     this.aiResponsesEl.innerHTML = `<div class="airesp"><div class="airesp__title">${t('ai.councilChatter')}</div><div class="airesp__list">${items}</div></div>`;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Speech bubbles (T3, MT2-SP4 direction B) — a transient pixel bubble
+  // anchored to a character's portrait chip, showing the SAME text a
+  // reaction/banter/diary line already produced (no new API calls; this is
+  // purely an additional display surface — the chat-panel/council-chatter
+  // feed's own behavior is completely unchanged).
+  //
+  // Lifecycle: trigger (_showSpeechBubble) -> render (_renderBubbles, keyed
+  // by a monotonic seq so unrelated re-renders reposition WITHOUT recreating
+  // the DOM node / restarting its CSS pop animation) -> dismiss
+  // (_dismissBubble, fired by a setTimeout armed at trigger time for
+  // RULES.dialogue.bubbleMs) -> replace (a new bubble for the SAME player
+  // cancels the pending dismiss timer and stamps a new seq — "stacking =
+  // newest replaces that character's existing bubble", never two bubbles on
+  // one chip at once).
+  // ─────────────────────────────────────────────────────────
+
+  // Gated by the SAME verbosity setting reactions already use
+  // (characterAI.isEnabled() = has an API key AND verbosity !== OFF) — even
+  // though the text passed in was already generated under that same gate
+  // upstream, this re-checks at DISPLAY time so a verbosity flip mid-flight
+  // (async gap between "call started" and "text arrived") can't show a
+  // bubble the user just turned off. playerId must match chipHtml's
+  // data-chip / player.id (a String index) so _renderBubbles can find the
+  // anchor chip via `[data-chip="<playerId>"]`.
+  _showSpeechBubble(playerId, char, text) {
+    if (!text || !char || playerId == null) return;
+    if (!this.characterAI.isEnabled()) return;
+    const key = String(playerId);
+    if (this._bubbleTimers[key]) { clearTimeout(this._bubbleTimers[key]); delete this._bubbleTimers[key]; }
+    this._bubbleSeq += 1;
+    const seq = this._bubbleSeq;
+    this._bubbles[key] = { seq, text, color: char.color };
+    this._renderBubbles();
+    const ms = Number.isFinite(RULES.dialogue.bubbleMs) && RULES.dialogue.bubbleMs > 0
+      ? RULES.dialogue.bubbleMs : 6000;
+    this._bubbleTimers[key] = setTimeout(() => this._dismissBubble(key, seq), ms);
+  }
+
+  // Only dismisses if `seq` still matches the CURRENTLY-shown bubble for this
+  // player — a stale timer from a bubble that's already been replaced (see
+  // _showSpeechBubble's clearTimeout above) is a no-op here defensively, even
+  // though the clearTimeout should already have prevented it from firing at all.
+  _dismissBubble(key, seq) {
+    delete this._bubbleTimers[key];
+    if (!this._bubbles[key] || this._bubbles[key].seq !== seq) return;
+    const node = this.dialogueBubblesEl && this.dialogueBubblesEl.querySelector(`[data-bubble-owner="${key}"]`);
+    const reduced = typeof window !== 'undefined' && window.matchMedia
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (node && !reduced) {
+      // Reduced motion: skip the fade-out class entirely (no animation at
+      // all, per spec) and remove immediately below — "still readable" means
+      // the bubble was plainly visible the whole time, not that it lingers
+      // longer than a motion-enabled user's bubble would.
+      node.classList.add('dbubble--out');
+      setTimeout(() => { delete this._bubbles[key]; this._renderBubbles(); }, DBUBBLE_EXIT_MS);
+    } else {
+      delete this._bubbles[key];
+      this._renderBubbles();
+    }
+  }
+
+  // Positions/creates/removes bubble DOM nodes in the #dialogue-bubbles
+  // overlay (a SIBLING of #player-info, never a child — see that element's
+  // CSS doc comment). Safe to call on every update() tick: a bubble whose
+  // data-bubble-seq already matches this._bubbles[key].seq is ONLY
+  // repositioned (style.left/top), never recreated, so its CSS pop-in
+  // animation is never restarted by an unrelated move/render elsewhere in
+  // the game — this is the "anchor to event seq" discipline the brief calls
+  // for, the same class of fix _writeTurnbox's doc comment describes for the
+  // turnbox (rewrite only when content actually changed).
+  _renderBubbles() {
+    if (!this.dialogueBubblesEl || !this.playerInfoEl) return;
+    // Drop any DOM node whose owner no longer has an active bubble (dismissed
+    // since the last render, or the chip strip momentarily lacks that idx).
+    Array.from(this.dialogueBubblesEl.children).forEach(node => {
+      const owner = node.dataset.bubbleOwner;
+      if (!this._bubbles[owner]) node.remove();
+    });
+    Object.keys(this._bubbles).forEach(key => {
+      const bubble = this._bubbles[key];
+      const chipEl = this.playerInfoEl.querySelector(`[data-chip="${key}"]`);
+      if (!chipEl) return; // chip not in this render's DOM (phase transition) — leave absent, next tick retries
+      let node = this.dialogueBubblesEl.querySelector(`[data-bubble-owner="${key}"]`);
+      if (!node || node.dataset.bubbleSeq !== String(bubble.seq)) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = bubbleHtml({ idx: key, seq: bubble.seq, text: bubble.text, color: bubble.color });
+        const fresh = tmp.firstElementChild;
+        if (node) node.replaceWith(fresh); else this.dialogueBubblesEl.appendChild(fresh);
+        node = fresh;
+      }
+      const rect = chipEl.getBoundingClientRect();
+      node.style.left = (rect.left + rect.width / 2) + 'px';
+      node.style.top = rect.top + 'px';
+    });
+  }
+
+  // Cancels every pending dismiss timer and clears all bubble state/DOM —
+  // called from exitToMenu/loadGame (same "per-GAME, not per-boot" treatment
+  // as dialogueLedger/dialogueDiaries just above them) so a finished or
+  // about-to-be-replaced game can never leave a stray setTimeout firing into
+  // the NEXT game's chip strip.
+  _clearBubbles() {
+    Object.keys(this._bubbleTimers).forEach(key => clearTimeout(this._bubbleTimers[key]));
+    this._bubbleTimers = {};
+    this._bubbles = {};
+    if (this.dialogueBubblesEl) this.dialogueBubblesEl.innerHTML = '';
   }
 
   _escapeHtml(text) { return esc(text); }
@@ -4130,6 +4298,7 @@ class MonopolyBoard {
     this.dialogueLedger = createLedgerState();
     this._lastLedgerSeq = undefined;
     this.dialogueDiaries = createDiaryState();
+    this._clearBubbles();
     this.characterAI.resetCostEstimate();
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
@@ -4220,6 +4389,7 @@ class MonopolyBoard {
     this.dialogueLedger = dm.ledger;
     this._lastLedgerSeq = undefined; // lazy re-init against savedG.events, mirroring _lastEventSeq
     this.dialogueDiaries = dm.diaries;
+    this._clearBubbles(); // a loaded game's chip strip starts with no stray bubbles from whatever was showing before
     // The $3 cap is per-GAME (see saveGame's comment) — a loaded game
     // resumes counting from its own saved spend rather than getting a fresh
     // budget. setCostEstimate clamps to max(current, loaded) — session-
