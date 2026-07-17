@@ -90,7 +90,11 @@ export function chipDetailHtml(d) {
         // modal's new "diary" tab (stored diary lines, keyless-hidden) is ever
         // reachable at all once a game is in progress. App wires the click
         // handler right after injecting this html (same pattern as btn-lore-close).
-        d.charId ? `<div class="chip-detail__lorelink"><button id="btn-chip-lore" class="pix-btn pix-btn--ghost pix-btn--sm" data-char-id="${esc(d.charId)}">${t('charselect.viewLore')}</button></div>` : ''
+        // Gated on BOTH charId AND hasLore (T3-review SHOULD-FIX 3):
+        // showLoreModal silently no-ops when the mod has no lore for this
+        // character, which would leave a dead button — App resolves hasLore
+        // upstream (getLoreById truthiness) since this module has no mod access.
+        (d.charId && d.hasLore) ? `<div class="chip-detail__lorelink"><button id="btn-chip-lore" class="pix-btn pix-btn--ghost pix-btn--sm" data-char-id="${esc(d.charId)}">${t('charselect.viewLore')}</button></div>` : ''
       }
     </div>`;
 }

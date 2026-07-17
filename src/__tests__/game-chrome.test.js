@@ -198,11 +198,25 @@ describe('chipDetailHtml', () => {
 
   // T3: mid-game entry point into the full lore modal (showLoreModal), needed
   // so the modal's new Diary tab is ever reachable outside character-select.
-  test('charId present -> renders the view-lore button with the char id', () => {
+  // Review SHOULD-FIX 3: gated on BOTH charId AND hasLore — showLoreModal
+  // no-ops when the mod carries no lore for this character, so a
+  // charId-without-lore button would be dead on click.
+  test('charId + hasLore -> renders the view-lore button with the char id', () => {
     const base = { name: 'H', title: 'T', color: '#fff', portraitUrl: null, moneyHtml: '$1', deeds: 2 };
-    const h = chipDetailHtml({ ...base, charId: 'marcus-kodak' });
+    const h = chipDetailHtml({ ...base, charId: 'marcus-kodak', hasLore: true });
     expect(h).toContain('id="btn-chip-lore"');
     expect(h).toContain('data-char-id="marcus-kodak"');
+  });
+
+  test('charId without hasLore (absent or false) -> no dead view-lore button', () => {
+    const base = { name: 'H', title: 'T', color: '#fff', portraitUrl: null, moneyHtml: '$1', deeds: 2 };
+    expect(chipDetailHtml({ ...base, charId: 'marcus-kodak' })).not.toContain('btn-chip-lore');
+    expect(chipDetailHtml({ ...base, charId: 'marcus-kodak', hasLore: false })).not.toContain('btn-chip-lore');
+  });
+
+  test('hasLore without charId -> still no view-lore button (no target to open)', () => {
+    const base = { name: 'H', title: 'T', color: '#fff', portraitUrl: null, moneyHtml: '$1', deeds: 2 };
+    expect(chipDetailHtml({ ...base, hasLore: true })).not.toContain('btn-chip-lore');
   });
 
   test('charId absent -> no view-lore button', () => {

@@ -3082,8 +3082,12 @@ class MonopolyBoard {
         // the latter so chipDetailHtml can render a "view lore" button that
         // opens showLoreModal(charId) mid-game (previously only reachable
         // from character-select — needed for the diary tab to ever be seen).
+        // hasLore (review SHOULD-FIX 3): showLoreModal no-ops when the mod
+        // has no lore for this character — the builder only renders the
+        // button when a click would actually open something.
         attitudeHtml,
         charId: char ? char.id : null,
+        hasLore: !!(char && this.activeMod.getLoreById && this.activeMod.getLoreById(char.id)),
       };
     });
     this.playerInfoEl.innerHTML = html;
