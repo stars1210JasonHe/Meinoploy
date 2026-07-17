@@ -52,6 +52,41 @@ export function deriveActingSeat(G, ctx) {
   return String(ctx.currentPlayer);
 }
 
+// === State-modal bot gate =====================================================
+// (Adversarial-review scope fix for the "manage/modal gates during bot turns"
+// ticket.) Pure decision for how App.js's renderStateModal treats a blocking
+// state whose ACTING seat (per deriveActingSeat above) is bot-controlled:
+//
+//   'full'              — acting seat is human: render everything as normal.
+//   'trade-cancel-only' — acting seat is a bot AND the blocking state is a
+//                         pending trade proposed by a HUMAN. The trade target
+//                         (the bot) owns accept/reject — its driver dispatches
+//                         those — but Cancel belongs to the PROPOSER (Game.js
+//                         cancelTrade requires proposerId === ctx.currentPlayer).
+//                         Hiding the whole modal here would strand the human
+//                         proposer with zero UI for the pending window — and
+//                         with NO cancel path at all if the bot driver ever
+//                         wedged (e.g. animBusy stuck true) — so the modal
+//                         stays up with only the bot's accept/reject hidden.
+//   'hidden'            — acting seat is a bot in any other blocking state
+//                         (bot's own card prompt, bot bidder's auction turn),
+//                         or a bot-proposed trade pending on a bot target:
+//                         nothing in the modal belongs to a human, hide it.
+//
+// Same injected-predicate convention as createBotDriver's deps.isBot — this
+// module never reads App state directly, so the decision stays unit-testable
+// with plain fixtures.
+export function stateModalBotMode(G, ctx, isBot) {
+  if (!isBot(deriveActingSeat(G, ctx))) return 'full';
+  if (G.trade && G.turnPhase === 'trade') {
+    // Cancel is the proposer's move — if the proposer is ALSO a bot (no such
+    // flow exists today: sim/bot's decideMoves never proposes trades — but
+    // cheap to be exact), no human owns anything in the modal either.
+    return isBot(String(G.trade.proposerId)) ? 'hidden' : 'trade-cancel-only';
+  }
+  return 'hidden';
+}
+
 // === Bot personality styles ===================================================
 // Named PARTIAL policy presets over sim/bot's DEFAULT_POLICY (src/sim/bot.js).
 // Deliberately kept as plain data (not an import of sim/bot's DEFAULT_POLICY)

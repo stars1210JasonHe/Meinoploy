@@ -11,6 +11,7 @@
  */
 import {
   deriveActingSeat,
+  stateModalBotMode,
   BOT_STYLES,
   BOT_DELAYS,
   policyForSeat,
@@ -110,6 +111,85 @@ describe('deriveActingSeat', () => {
     });
     const ctx = makeCtx({ currentPlayer: 0 });
     expect(deriveActingSeat(G, ctx)).toBe('0');
+  });
+});
+
+// Adversarial-review scope fix for the manage/modal bot-gate ticket: the pure
+// decision renderStateModal delegates to. Reviewer noted zero E2E covers the
+// human-proposes-to-bot flow, so this pure seam is the load-bearing coverage.
+describe('stateModalBotMode', () => {
+  // Seat '2' is the bot in most cases below; '0'/'1' human.
+  const botIs2 = (seat) => seat === '2';
+
+  test('human acting seat -> full (gate never engages)', () => {
+    const G = makeG({});
+    expect(stateModalBotMode(G, makeCtx({ currentPlayer: '0' }), botIs2)).toBe('full');
+  });
+
+  test('bot current player (own turn / own card prompt) -> hidden', () => {
+    const G = makeG({});
+    expect(stateModalBotMode(G, makeCtx({ currentPlayer: '2' }), botIs2)).toBe('hidden');
+  });
+
+  test('auction with a BOT current bidder -> hidden, even on a human turn', () => {
+    const G = makeG({
+      auction: {
+        propertyId: 5,
+        currentBid: 0,
+        bidders: [{ playerId: '0', passed: false }, { playerId: '2', passed: false }],
+        currentBidderIndex: 1,
+      },
+    });
+    expect(stateModalBotMode(G, makeCtx({ currentPlayer: '0' }), botIs2)).toBe('hidden');
+  });
+
+  test('HUMAN-proposed trade pending on a BOT target -> trade-cancel-only (the flagged scenario)', () => {
+    const G = makeG({
+      turnPhase: 'trade',
+      trade: {
+        proposerId: '0', targetPlayerId: '2',
+        offeredProperties: [1], requestedProperties: [2],
+        offeredMoney: 0, requestedMoney: 0,
+      },
+    });
+    expect(stateModalBotMode(G, makeCtx({ currentPlayer: '0' }), botIs2)).toBe('trade-cancel-only');
+  });
+
+  test('human-proposed trade to a HUMAN target -> full (no gate)', () => {
+    const G = makeG({
+      turnPhase: 'trade',
+      trade: {
+        proposerId: '0', targetPlayerId: '1',
+        offeredProperties: [1], requestedProperties: [2],
+        offeredMoney: 0, requestedMoney: 0,
+      },
+    });
+    expect(stateModalBotMode(G, makeCtx({ currentPlayer: '0' }), botIs2)).toBe('full');
+  });
+
+  test('BOT-proposed trade on a BOT target -> hidden (no human owns anything in the modal)', () => {
+    const bothBots = (seat) => seat === '1' || seat === '2';
+    const G = makeG({
+      turnPhase: 'trade',
+      trade: {
+        proposerId: '1', targetPlayerId: '2',
+        offeredProperties: [1], requestedProperties: [2],
+        offeredMoney: 0, requestedMoney: 0,
+      },
+    });
+    expect(stateModalBotMode(G, makeCtx({ currentPlayer: '1' }), bothBots)).toBe('hidden');
+  });
+
+  test('defensive: G.trade set but turnPhase not trade -> hidden (modal trade branch would not render anyway)', () => {
+    const G = makeG({
+      turnPhase: 'done',
+      trade: {
+        proposerId: '0', targetPlayerId: '2',
+        offeredProperties: [1], requestedProperties: [2],
+        offeredMoney: 0, requestedMoney: 0,
+      },
+    });
+    expect(stateModalBotMode(G, makeCtx({ currentPlayer: '0' }), botIs2)).toBe('hidden');
   });
 });
 

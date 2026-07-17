@@ -26,7 +26,7 @@ import { bloomSprite } from './wr-bloom';
 // (Atlas Balance Sim's greedy-developer bot), bound per-seat via policyForSeat —
 // exactly the convention task-1-report.md documents the wiring layer as expected
 // to follow (its own decide() never calls resolvePolicy itself).
-import { createBotDriver, deriveActingSeat, policyForSeat } from './bot-driver';
+import { createBotDriver, deriveActingSeat, policyForSeat, stateModalBotMode } from './bot-driver';
 import { decideMoves, decideRoute as decideBotRoute } from './sim/bot';
 
 // Client-side mod registry — static bundle imports (Parcel v1 forces all imports static, so
@@ -3113,6 +3113,15 @@ class MonopolyBoard {
     // it also covers the cross-seat blocking states deriveActingSeat itself
     // resolves (auction bidder / duel-response owner / pending-trade
     // target) even when ctx.currentPlayer is a human.
+    //
+    // DELIBERATE INCONSISTENCY (adversarial review): this gate stays COARSE,
+    // unlike renderStateModal's stateModalBotMode split — during a human-
+    // proposed trade pending on a BOT target it also hides the human
+    // proposer's own manage panel for that window (the engine doesn't gate
+    // asset moves on G.trade, so mortgaging mid-trade is otherwise legal).
+    // Reviewer assessed blanket-hiding manage as the safer default: nothing
+    // here is a recovery path (unlike the trade modal's Cancel), and the
+    // panel returns by itself as soon as the bot responds.
     if (this._isBotSeat(deriveActingSeat(G, ctx))) {
       this.manageEl.innerHTML = '';
       return;
@@ -3273,15 +3282,19 @@ class MonopolyBoard {
   // State-driven modal: event card / auction / trade accept
   // ─────────────────────────────────────────────────────────
   renderStateModal(G, ctx) {
-    // Bot gate (bots-wave post-merge ticket #3: "renderManage/state-modals
-    // lack the bot gate turnbox has"). Same guard as renderManage/renderTurnbox
-    // — deriveActingSeat resolves the actual acting seat for ALL THREE
-    // branches below (pendingCard falls through to ctx.currentPlayer;
-    // auction/trade are exactly the cross-seat cases it special-cases), so
-    // one check covers every branch: without it, a human could accept/redraw
-    // a bot's drawn card, bid/pass an auction on a bot bidder's behalf, or
-    // accept/reject/cancel a trade a bot is the target of.
-    if (this._isBotSeat(deriveActingSeat(G, ctx))) {
+    // Bot gate (bots-wave post-merge ticket #3, scoped by adversarial review):
+    // stateModalBotMode (bot-driver.js — pure, unit-tested) decides how much
+    // of the modal survives while the acting seat per deriveActingSeat is a
+    // bot. 'hidden' = the blanket gate (bot's own card prompt / bot bidder's
+    // auction turn — nothing in those modals belongs to a human, and without
+    // the gate a human could accept/redraw the bot's card or bid/pass on the
+    // bot's behalf). 'trade-cancel-only' keeps the trade modal UP for a
+    // HUMAN-proposed trade pending on a bot target: Cancel is the proposer's
+    // own move (Game.js cancelTrade requires proposerId === ctx.currentPlayer),
+    // and the original blanket gate stranded that human with zero UI — and no
+    // cancel path at all if the bot driver ever wedged (animBusy stuck true).
+    const botMode = stateModalBotMode(G, ctx, (s) => this._isBotSeat(s));
+    if (botMode === 'hidden') {
       this.stateModalEl.classList.remove('open');
       this.stateModalBoxEl.innerHTML = '';
       return;
@@ -3381,13 +3394,23 @@ class MonopolyBoard {
           </div>
           <div class="trade__actions">
             <button class="pix-btn pix-btn--ghost" id="btn-cancel-trade">${t('trade.cancel')}</button>
-            <button class="pix-btn pix-btn--danger" id="btn-reject-trade">${t('trade.reject')}</button>
-            <button class="pix-btn pix-btn--success" id="btn-accept-trade">${t('trade.accept')}</button>
+            ${botMode === 'trade-cancel-only'
+              // trade-cancel-only (see the gate at the top of this method):
+              // accept/reject are the BOT target's decision — its driver
+              // dispatches them on its own pacing; rendering the buttons
+              // would let a human act for the bot (the original ticket).
+              // Cancel stays — it's the human proposer's own move.
+              ? `<span class="trade__botwait">${t('turnbox.botThinking')}</span>`
+              : `<button class="pix-btn pix-btn--danger" id="btn-reject-trade">${t('trade.reject')}</button>
+            <button class="pix-btn pix-btn--success" id="btn-accept-trade">${t('trade.accept')}</button>`}
           </div>
         </div>`;
       this.stateModalEl.classList.add('open');
-      document.getElementById('btn-accept-trade').onclick = () => this.client.moves.acceptTrade();
-      document.getElementById('btn-reject-trade').onclick = () => this.client.moves.rejectTrade();
+      // accept/reject are absent in trade-cancel-only mode — guard the lookups.
+      const acceptBtn = document.getElementById('btn-accept-trade');
+      const rejectBtn = document.getElementById('btn-reject-trade');
+      if (acceptBtn) acceptBtn.onclick = () => this.client.moves.acceptTrade();
+      if (rejectBtn) rejectBtn.onclick = () => this.client.moves.rejectTrade();
       document.getElementById('btn-cancel-trade').onclick = () => this.client.moves.cancelTrade();
       return;
     }
