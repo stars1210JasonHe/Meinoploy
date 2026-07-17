@@ -3102,6 +3102,21 @@ class MonopolyBoard {
 
   // Property management list
   renderManage(G, ctx) {
+    // Bot gate (bots-wave post-merge ticket #3: "renderManage/state-modals
+    // lack the bot gate turnbox has"). Mirrors renderTurnbox's identical
+    // guard verbatim (same deriveActingSeat call, same reasoning — see its
+    // doc comment): without this, a human could mortgage/upgrade/sell a
+    // BOT's own properties mid-bot-turn — `player` below is
+    // G.players[ctx.currentPlayer], and hot-seat has no seat authorization
+    // at all, so nothing else here discriminates "is the CURRENT actor a
+    // bot" from "is it my turn to look at MY properties". Checked first, so
+    // it also covers the cross-seat blocking states deriveActingSeat itself
+    // resolves (auction bidder / duel-response owner / pending-trade
+    // target) even when ctx.currentPlayer is a human.
+    if (this._isBotSeat(deriveActingSeat(G, ctx))) {
+      this.manageEl.innerHTML = '';
+      return;
+    }
     const player = G.players[ctx.currentPlayer];
     const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
     if (!isMyTurn || !G.hasRolled || G.canBuy || G.pendingCard || player.properties.length === 0) {
@@ -3258,6 +3273,19 @@ class MonopolyBoard {
   // State-driven modal: event card / auction / trade accept
   // ─────────────────────────────────────────────────────────
   renderStateModal(G, ctx) {
+    // Bot gate (bots-wave post-merge ticket #3: "renderManage/state-modals
+    // lack the bot gate turnbox has"). Same guard as renderManage/renderTurnbox
+    // — deriveActingSeat resolves the actual acting seat for ALL THREE
+    // branches below (pendingCard falls through to ctx.currentPlayer;
+    // auction/trade are exactly the cross-seat cases it special-cases), so
+    // one check covers every branch: without it, a human could accept/redraw
+    // a bot's drawn card, bid/pass an auction on a bot bidder's behalf, or
+    // accept/reject/cancel a trade a bot is the target of.
+    if (this._isBotSeat(deriveActingSeat(G, ctx))) {
+      this.stateModalEl.classList.remove('open');
+      this.stateModalBoxEl.innerHTML = '';
+      return;
+    }
     const isMyTurn = !this.onlinePlayerID || ctx.currentPlayer === this.onlinePlayerID;
 
     if (G.pendingCard) {
