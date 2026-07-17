@@ -3095,7 +3095,42 @@ class MonopolyBoard {
   // so no button ever ends up unbound. Nothing about wireActions' own
   // behavior changes; only the frequency of turnboxEl DOM churn does.
   _writeTurnbox(html) {
+    // Mid-tumble write hazard (adversarial-review fix): on ATLAS boards the
+    // turnbox embeds _centerSlotHtml — i.e. the very `.centerslot__dice` node
+    // _animateRollThenMove mutates every ~55-200ms for ~0.9s. A turnbox
+    // rewrite while that tumble runs replaces the node out from under the
+    // animation and freezes it (classic boards keep the dice in the board
+    // center, so they were never exposed — but the write is skipped there
+    // too, harmlessly, for the same window). Mid-tumble renders are rare
+    // (it's the roller's own turn) but real: an online opponent's cross-seat
+    // move arriving, or an AI/chat-driven repaint.
+    //
+    // Guard note — deliberate deviation from the review prescription's
+    // literal mechanics ("skip while this._rolling is true"): update()
+    // releases this._rolling BEFORE any render call (see the lock-release
+    // comment at the top of update()), so by the time an update()-driven
+    // render reaches this method the flag is ALREADY false and a _rolling
+    // check alone would be dead code. this._rollTimer is the discriminator
+    // that actually spans the tumble window (armed per tick in
+    // _animateRollThenMove, nulled in its fire() and in _cancelRoll);
+    // _rolling is still checked as belt-and-braces for any future caller
+    // that isn't downstream of update()'s release.
+    //
+    // The skipped write must NOT touch the cache: the post-roll update
+    // always follows with html that differs from the cached pre-tumble
+    // string (G.lastDice/G.hasRolled changed), so the turnbox self-heals on
+    // the very next real render — a cache poisoned with the skipped string
+    // would defeat exactly that comparison.
+    if (this._rolling || this._rollTimer) return;
     if (html === this._turnboxHtml) return;
+    // String-equality keying edge (review NIT, theoretical): a duel-result
+    // strip only re-flashes because SOME turnbox render between two duels
+    // differs (roll buttons, phase hints — always true today: a duel needs
+    // rolls in between). If two byte-identical turnbox strings could ever
+    // arrive back-to-back with nothing written between them, the second
+    // appear-animation would be skipped; keying the strip on the
+    // duel_resolved event seq (data-seq attr changing the string) is the
+    // future-proof alternative if that ever becomes reachable.
     this._turnboxHtml = html;
     this.turnboxEl.innerHTML = html;
   }
@@ -3215,6 +3250,13 @@ class MonopolyBoard {
   // Cosmetic dice roll: tumble random faces (shake+rotate via .die--rolling), easing
   // out, THEN dispatch the real move so the dice visibly "land" on the result. The
   // engine roll is unchanged; works on every map (all render via .centerslot__dice).
+  //
+  // DEFENSIVE NOTE (adversarial-review fix, see _writeTurnbox): on atlas
+  // boards `wrap` below lives INSIDE the turnbox (_centerSlotHtml is embedded
+  // in renderTurnbox's html there), so any turnbox innerHTML rewrite during
+  // the ~0.9s tumble detaches this node and freezes the animation.
+  // _writeTurnbox skips turnbox writes while this._rollTimer is armed — if a
+  // second tumble-driving surface is ever added, it needs the same guard.
   _animateRollThenMove() {
     if (this._rolling) return; // ignore re-clicks mid-roll
     const wrap = this.rootElement.querySelector('.centerslot__dice');
