@@ -9,6 +9,11 @@ import { RULES } from '../mods/active-rules';
 import { Lobby } from './Lobby';
 import { loadMap, getGridDimensions, positionsToGrid } from './map-loader';
 import { CharacterAI, VERBOSITY, mapEngineEventToAi, consumeNewEvents } from './character-ai';
+// MT2-SP4 direction B (T2): T1's pure memory core (attitude ledger + turn
+// digest, zero engine changes, lives client-side beside botSeats). App.js
+// owns the LIVE ledger (folded from G.events every render, independent of
+// whether the AI is enabled — "no key = ledger still accumulates").
+import { createLedgerState, applyEvents, buildTurnDigest } from './dialogue/memory';
 import { loadWorld } from './world-loader';
 import { routeChoices } from './atlas-movement';
 import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
@@ -263,11 +268,19 @@ class MonopolyBoard {
     // AI system
     const savedKey = localStorage.getItem('meinopoly_ai_key') || '';
     const savedVerbosity = localStorage.getItem('meinopoly_ai_verbosity') || VERBOSITY.MAJOR;
-    this.characterAI = new CharacterAI(savedKey, { verbosity: savedVerbosity });
+    this.characterAI = new CharacterAI(savedKey, { verbosity: savedVerbosity, dialogueRules: RULES.dialogue });
     this.aiResponses = [];
     this.chatHistories = {};
     this.activeChatCharId = null;
     this._lastEventSeq = undefined;
+    // MT2-SP4 direction B (T2): the live attitude ledger, folded from
+    // G.events by _updateDialogueLedger every render — see its own doc
+    // comment for why this runs UNCONDITIONALLY (not gated on
+    // characterAI.isEnabled(), unlike the AI-reaction cursor above), and
+    // exitToMenu/loadGame for the reset/restore points. _lastLedgerSeq is a
+    // SEPARATE lazy cursor from _lastEventSeq for exactly that reason.
+    this.dialogueLedger = createLedgerState();
+    this._lastLedgerSeq = undefined;
 
     // Audio + animator: constructed exactly ONCE, here at app-boot — not per-game-start.
     // this.mapData already exists (setMap() ran above); this.boardEl/tokenLayer don't exist
@@ -1384,6 +1397,7 @@ class MonopolyBoard {
     }
 
     this._showScreen('game');
+    this._updateDialogueLedger(G, ctx);
     this.detectAndTriggerAI(G, ctx);
     this.renderBoard(G, ctx);
     this._renderLegend(G, ctx);
@@ -3737,6 +3751,42 @@ class MonopolyBoard {
   }
 
   // ─────────────────────────────────────────────────────────
+  // Dialogue memory — MT2-SP4 direction B (T2). Pure/deterministic, code-
+  // driven, ALWAYS runs (independent of characterAI.isEnabled()) so the
+  // attitude ledger keeps accumulating even with no API key configured —
+  // "no key = no breakage" (spec shared invariant): the ledger and any
+  // future keyless UI reading it (T3) must work offline. Its own lazy
+  // cursor (_lastLedgerSeq) is intentionally separate from
+  // detectAndTriggerAI's _lastEventSeq below, which IS gated on
+  // isEnabled() — sharing one cursor would silently stop the ledger from
+  // updating whenever AI responses are off/keyless.
+  // ─────────────────────────────────────────────────────────
+  _updateDialogueLedger(G, ctx) {
+    if (!G || G.phase !== 'play') return;
+    const { newEvents, nextSeq } = consumeNewEvents(G.events, this._lastLedgerSeq);
+    this._lastLedgerSeq = nextSeq;
+    if (newEvents.length === 0) return;
+    this.dialogueLedger = applyEvents(this.dialogueLedger, newEvents, RULES.dialogue);
+  }
+
+  // Assembles the {ledgerState, opponents, digest, diaryLines, dialogueRules}
+  // bundle CharacterAI's buildDialoguePromptExtras consumes. `opponents` is
+  // every OTHER seated character (id+name) — used both to resolve names in
+  // the turn-digest text and as the attitude table's row list. Diary lines
+  // are wired in by a later commit (T2's diary/banter task); until then this
+  // intentionally omits diaryLines (formatDiaryLines(undefined) -> '').
+  _buildDialogueContext(charId, G) {
+    if (!G) return null;
+    const opponents = G.players.filter(p => p.character).map(p => ({ id: p.id, name: p.character.name }));
+    return {
+      ledgerState: this.dialogueLedger,
+      opponents,
+      digest: buildTurnDigest(G.events, charId, RULES.dialogue.digestWindow),
+      dialogueRules: RULES.dialogue,
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────
   // AI event detection — event-driven (lazy seq cursor over G.events;
   // see mapEngineEventToAi/consumeNewEvents in character-ai.js and spec
   // §2.4). String-sniffing over G.messages retired.
@@ -3766,19 +3816,19 @@ class MonopolyBoard {
 
     for (const event of newEvents) {
       const mapped = mapEngineEventToAi(event, G);
-      if (!mapped) continue;
-      this._triggerAIResponse(char, mapped.eventType, mapped.eventData, gameState);
+      if (mapped) this._triggerAIResponse(char, mapped.eventType, mapped.eventData, gameState, G);
     }
   }
 
-  async _triggerAIResponse(char, eventType, eventData, gameState) {
+  async _triggerAIResponse(char, eventType, eventData, gameState, G) {
     const lore = this.activeMod.getLoreById(char.id);
+    const dialogueContext = G ? this._buildDialogueContext(char.id, G) : null;
     this._nextAIId = (this._nextAIId || 0) + 1;
     const loadingId = this._nextAIId;
     this.aiResponses.push({ id: loadingId, charName: char.name, charColor: char.color, portrait: char.portrait, text: null });
     this._renderAIResponses();
 
-    const text = await this.characterAI.respondToEvent(char, lore, eventType, eventData, gameState);
+    const text = await this.characterAI.respondToEvent(char, lore, eventType, eventData, gameState, dialogueContext);
     const entry = this.aiResponses.find(r => r.id === loadingId);
     if (entry) {
       if (text) entry.text = text;
@@ -3884,7 +3934,8 @@ class MonopolyBoard {
       lastEvent: G.messages.length > 0 ? G.messages[G.messages.length - 1] : '',
     };
 
-    const response = await this.characterAI.chat(char, lore, userMessage, history.slice(0, -1), gameState);
+    const dialogueContext = this._buildDialogueContext(charId, G);
+    const response = await this.characterAI.chat(char, lore, userMessage, history.slice(0, -1), gameState, dialogueContext);
     // Localized at PUSH time (stored in history) — a later LANG flip won't retranslate
     // this one line; acceptable, it's transient client-local feedback, not wire data.
     history.push({ role: 'assistant', content: response || t('chat.noResponse') });
@@ -3942,6 +3993,12 @@ class MonopolyBoard {
     this.chatHistories = {};
     this.activeChatCharId = null;
     this._lastEventSeq = undefined;
+    // Dialogue memory is per-GAME, not per-boot (MT2-SP4 T2): a fresh game
+    // (including "Play Again", which routes here) starts with a clean
+    // attitude ledger — grudges from a finished match must never leak into
+    // the next one, same treatment as botSeats/aiResponses/chatHistories.
+    this.dialogueLedger = createLedgerState();
+    this._lastLedgerSeq = undefined;
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
     this.closeUiModal();
@@ -4011,6 +4068,12 @@ class MonopolyBoard {
     this._logSeenCount = 0;
     this.activeChatCharId = null;
     this._lastEventSeq = undefined;
+    // MT2-SP4 T2: dialogue memory restoration from the save envelope lands in
+    // a later commit (persistence); until then every load starts a fresh
+    // ledger, same as exitToMenu — never worse than "memory absent", never
+    // stale/wrong.
+    this.dialogueLedger = createLedgerState();
+    this._lastLedgerSeq = undefined;
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
     const savedG = saveData.G;

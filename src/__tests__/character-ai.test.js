@@ -1,4 +1,9 @@
-const { CharacterAI, EVENT_TYPES, VERBOSITY, mapEngineEventToAi, consumeNewEvents } = require('../character-ai');
+const {
+  CharacterAI, EVENT_TYPES, VERBOSITY, mapEngineEventToAi, consumeNewEvents,
+  formatAttitudeTable, formatTurnDigest, formatDiaryLines, localeInstruction,
+} = require('../character-ai');
+const { createLedgerState, applyEvent, buildTurnDigest, DEFAULT_DIALOGUE_RULES } = require('../dialogue/memory');
+const { setLocale, getLocale } = require('../i18n');
 
 // Mock character and lore data
 const mockCharacter = {
@@ -175,6 +180,71 @@ describe('CharacterAI', () => {
       expect(prompt).toBeTruthy();
       expect(prompt).toContain('Albert Victor');
     });
+
+    // --- MT2-SP4 T2: memory-aware dialogue extras ---
+
+    test('always appends a reply-language instruction, even with no dialogueContext', () => {
+      setLocale('en');
+      const ai = new CharacterAI('');
+      const prompt = ai.buildSystemPrompt(mockCharacter, null);
+      expect(prompt).toContain('Reply in English');
+    });
+
+    test('reply-language instruction follows the live i18n locale', () => {
+      setLocale('zh');
+      const ai = new CharacterAI('');
+      const prompt = ai.buildSystemPrompt(mockCharacter, null);
+      expect(prompt).toContain('Reply in Simplified Chinese');
+      setLocale('en');
+    });
+
+    test('cites real attitude numbers, opponent name, and digest amounts/counts when dialogueContext is supplied', () => {
+      let ledger = createLedgerState();
+      // albert-victor loses a duel to lia-frost twice, then pays a big rent.
+      ledger = applyEvent(ledger, { type: 'duel_resolved', actor: 'albert-victor', data: { propertyId: 1, ownerId: 'lia-frost', winnerId: 'lia-frost' } });
+      ledger = applyEvent(ledger, { type: 'duel_resolved', actor: 'albert-victor', data: { propertyId: 2, ownerId: 'lia-frost', winnerId: 'lia-frost' } });
+      const events = [
+        { seq: 0, turn: 1, type: 'duel_resolved', actor: 'albert-victor', data: { propertyId: 1, ownerId: 'lia-frost', winnerId: 'lia-frost' } },
+        { seq: 1, turn: 2, type: 'duel_resolved', actor: 'albert-victor', data: { propertyId: 2, ownerId: 'lia-frost', winnerId: 'lia-frost' } },
+        { seq: 2, turn: 3, type: 'rent_paid', actor: 'albert-victor', data: { propertyId: 5, ownerId: 'lia-frost', amount: 310 } },
+      ];
+      const digest = buildTurnDigest(events, 'albert-victor', DEFAULT_DIALOGUE_RULES.digestWindow);
+      const ai = new CharacterAI('');
+      const prompt = ai.buildSystemPrompt(mockCharacter, null, {
+        ledgerState: ledger,
+        opponents: [{ id: 'lia-frost', name: 'Lia Frost' }],
+        digest,
+      });
+      // Attitude table: opponent name + real grudge number (2 duel losses x
+      // duelLostGrudge weight 2 each = 4).
+      expect(prompt).toContain('Lia Frost');
+      expect(prompt).toContain('grudge 4');
+      // Turn digest: count + real dollar amount.
+      expect(prompt).toContain('Lost 2 duel(s)');
+      expect(prompt).toContain('$310');
+    });
+
+    test('cites past diary lines verbatim when supplied', () => {
+      const ai = new CharacterAI('');
+      const prompt = ai.buildSystemPrompt(mockCharacter, null, {
+        diaryLines: [{ turn: 5, seasonName: 'Summer', text: '陈留连失两城，袁本初欺人太甚——记下了。' }],
+      });
+      expect(prompt).toContain('陈留连失两城');
+    });
+
+    test('omits the attitude/digest/diary blocks (but keeps the locale line) when no history exists yet', () => {
+      const ai = new CharacterAI('');
+      const prompt = ai.buildSystemPrompt(mockCharacter, null, {
+        ledgerState: createLedgerState(),
+        opponents: [{ id: 'lia-frost', name: 'Lia Frost' }],
+        digest: buildTurnDigest([], 'albert-victor', DEFAULT_DIALOGUE_RULES.digestWindow),
+        diaryLines: [],
+      });
+      expect(prompt).not.toContain('standing with other council members');
+      expect(prompt).not.toContain('Recent history');
+      expect(prompt).not.toContain('past diary entries');
+      expect(prompt).toContain('Reply in');
+    });
   });
 
   describe('_formatEventContext', () => {
@@ -270,6 +340,26 @@ describe('CharacterAI', () => {
       );
       expect(result).toBeNull();
     });
+
+    test('the API-bound system prompt includes the dialogueContext memory blocks (6th param)', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
+      });
+      let ledger = createLedgerState();
+      ledger = applyEvent(ledger, { type: 'bankruptcy', actor: 'albert-victor', data: { creditorId: 'lia-frost' } });
+
+      const ai = new CharacterAI('sk-test', { verbosity: VERBOSITY.MAJOR });
+      await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, { spaceName: 'Park Place', price: 350 }, {}, {
+        ledgerState: ledger,
+        opponents: [{ id: 'lia-frost', name: 'Lia Frost' }],
+      });
+
+      const body = JSON.parse(fetch.mock.calls[0][1].body);
+      const systemPrompt = body.messages[0].content;
+      expect(systemPrompt).toContain('Lia Frost');
+      expect(systemPrompt).toContain('grudge 3'); // bankruptedByGrudge default weight
+    });
   });
 
   describe('chat', () => {
@@ -330,6 +420,26 @@ describe('CharacterAI', () => {
       expect(systemPrompt).toContain('Turn 15');
       expect(systemPrompt).toContain('Autumn');
       expect(systemPrompt).toContain('$500');
+    });
+
+    test('includes dialogueContext memory blocks (6th param) in the system prompt', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'Response.' } }] }),
+      });
+      const digest = buildTurnDigest(
+        [{ seq: 0, turn: 1, type: 'trade_accepted', actor: 'albert-victor', data: { proposerId: 'lia-frost' } }],
+        'albert-victor',
+        DEFAULT_DIALOGUE_RULES.digestWindow
+      );
+
+      const ai = new CharacterAI('sk-test');
+      await ai.chat(mockCharacter, mockLore, 'Hi', [], {}, { digest, opponents: [{ id: 'lia-frost', name: 'Lia Frost' }] });
+
+      const body = JSON.parse(fetch.mock.calls[0][1].body);
+      const systemPrompt = body.messages[0].content;
+      expect(systemPrompt).toContain('Completed 1 trade(s)');
+      expect(systemPrompt).toContain('Lia Frost');
     });
   });
 
@@ -620,5 +730,110 @@ describe('consumeNewEvents', () => {
     const { newEvents, nextSeq } = consumeNewEvents(events, 5);
     expect(newEvents.map(e => e.seq)).toEqual([100, 101, 102]);
     expect(nextSeq).toBe(102);
+  });
+});
+
+// --- MT2-SP4 T2: dialogue-memory prompt-assembly pure formatters ---
+
+describe('formatAttitudeTable', () => {
+  const opponents = [{ id: 'lia-frost', name: 'Lia Frost' }, { id: 'marcus-kodak', name: 'Marcus Kodak' }];
+
+  test('empty ledger / no history -> \'\'', () => {
+    expect(formatAttitudeTable('albert-victor', createLedgerState(), opponents, DEFAULT_DIALOGUE_RULES)).toBe('');
+  });
+
+  test('omits neutral (0/0) pairs but includes non-neutral ones with real numbers', () => {
+    let ledger = createLedgerState();
+    ledger = applyEvent(ledger, { type: 'duel_resolved', actor: 'albert-victor', data: { propertyId: 1, ownerId: 'lia-frost', winnerId: 'lia-frost' } });
+    const table = formatAttitudeTable('albert-victor', ledger, opponents, DEFAULT_DIALOGUE_RULES);
+    expect(table).toContain('Lia Frost');
+    expect(table).toContain('grudge 2');
+    expect(table).not.toContain('Marcus Kodak'); // still 0/0, omitted
+  });
+
+  test('tier glyphs scale with configured thresholds', () => {
+    let ledger = createLedgerState();
+    // 3 duel losses -> grudge 6, crosses tiers[0]=3 and tiers[1]=6 -> two ▲.
+    for (let i = 0; i < 3; i++) {
+      ledger = applyEvent(ledger, { type: 'duel_resolved', actor: 'albert-victor', data: { propertyId: i, ownerId: 'lia-frost', winnerId: 'lia-frost' } });
+    }
+    const table = formatAttitudeTable('albert-victor', ledger, opponents, DEFAULT_DIALOGUE_RULES);
+    expect(table).toContain('grudge 6 ▲▲');
+  });
+
+  test('null/undefined charId or empty opponents -> \'\'', () => {
+    expect(formatAttitudeTable(null, createLedgerState(), opponents, DEFAULT_DIALOGUE_RULES)).toBe('');
+    expect(formatAttitudeTable('albert-victor', createLedgerState(), [], DEFAULT_DIALOGUE_RULES)).toBe('');
+    expect(formatAttitudeTable('albert-victor', createLedgerState(), null, DEFAULT_DIALOGUE_RULES)).toBe('');
+  });
+});
+
+describe('formatTurnDigest', () => {
+  test('empty digest -> \'\'', () => {
+    const digest = buildTurnDigest([], 'albert-victor', DEFAULT_DIALOGUE_RULES.digestWindow);
+    expect(formatTurnDigest(digest, {})).toBe('');
+  });
+
+  test('null digest -> \'\'', () => {
+    expect(formatTurnDigest(null, {})).toBe('');
+  });
+
+  test('resolves opponent ids to names and includes real dollar amounts + counts', () => {
+    const events = [
+      { seq: 0, turn: 1, type: 'rent_paid', actor: 'albert-victor', data: { propertyId: 1, ownerId: 'lia-frost', amount: 150 } },
+      { seq: 1, turn: 2, type: 'rent_paid', actor: 'albert-victor', data: { propertyId: 2, ownerId: 'lia-frost', amount: 90 } },
+    ];
+    const digest = buildTurnDigest(events, 'albert-victor', DEFAULT_DIALOGUE_RULES.digestWindow);
+    const text = formatTurnDigest(digest, { 'lia-frost': 'Lia Frost' });
+    expect(text).toContain('Paid 2 rent payment(s) totaling $240');
+    expect(text).toContain('Lia Frost');
+  });
+
+  test('unresolvable opponent id falls back to "someone" rather than "undefined"', () => {
+    const events = [{ seq: 0, turn: 1, type: 'rent_paid', actor: 'albert-victor', data: { propertyId: 1, ownerId: 'ghost', amount: 50 } }];
+    const digest = buildTurnDigest(events, 'albert-victor', DEFAULT_DIALOGUE_RULES.digestWindow);
+    const text = formatTurnDigest(digest, {});
+    expect(text).toContain('someone');
+    expect(text).not.toContain('undefined');
+  });
+});
+
+describe('formatDiaryLines', () => {
+  test('empty/undefined -> \'\'', () => {
+    expect(formatDiaryLines([])).toBe('');
+    expect(formatDiaryLines(undefined)).toBe('');
+    expect(formatDiaryLines(null)).toBe('');
+  });
+
+  test('includes each entry\'s text verbatim, oldest first', () => {
+    const text = formatDiaryLines([
+      { turn: 5, seasonName: 'Summer', text: 'First entry.' },
+      { turn: 15, seasonName: 'Autumn', text: 'Second entry.' },
+    ]);
+    expect(text.indexOf('First entry.')).toBeLessThan(text.indexOf('Second entry.'));
+  });
+});
+
+describe('localeInstruction', () => {
+  afterEach(() => setLocale('en'));
+
+  test('zh override -> Chinese instruction', () => {
+    expect(localeInstruction('zh')).toContain('Simplified Chinese');
+  });
+
+  test('en override -> English instruction', () => {
+    expect(localeInstruction('en')).toContain('English');
+  });
+
+  test('no override -> follows the live i18n locale', () => {
+    setLocale('zh');
+    expect(localeInstruction()).toContain('Simplified Chinese');
+    setLocale('en');
+    expect(localeInstruction()).toContain('English');
+  });
+
+  test('invalid override falls back to the live locale rather than throwing', () => {
+    setLocale('en');
+    expect(localeInstruction('fr')).toContain('English');
   });
 });

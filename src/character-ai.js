@@ -1,6 +1,13 @@
 // CharacterAI — AI integration module for character responses and chat
 // Calls OpenAI API to generate in-character dialogue based on lore + game state
 import { playerName } from './events';
+// MT2-SP4 direction B (T2): memory-aware prompt assembly. resolveDialogueRules/
+// getAttitude are T1's pure core (src/dialogue/memory.js) — read-only here,
+// never mutated. getLocale is the i18n singleton (src/i18n.js) — read directly
+// rather than threaded through every call site, matching i18n.js's own
+// documented "small pure helper imported everywhere" convention.
+import { resolveDialogueRules, getAttitude } from './dialogue/memory';
+import { getLocale } from './i18n';
 
 // Event types that trigger AI responses
 export const EVENT_TYPES = {
@@ -197,6 +204,126 @@ export function consumeNewEvents(events, lastSeq) {
   return { newEvents, nextSeq };
 }
 
+// ---------------------------------------------------------------------------
+// Dialogue-memory prompt assembly (MT2-SP4 direction B, T2). Pure formatters
+// that turn T1's structured memory core (attitude ledger + turn digest) plus
+// this task's diary lines into short, LLM-legible prompt text blocks. Kept
+// pure/exported so prompt CONTENT can be asserted directly in tests without
+// calling any API (spec requirement — "verify by asserting prompt content in
+// tests, not by calling any API").
+// ---------------------------------------------------------------------------
+
+// Repeated-glyph "tier word" for a value against a 3-step threshold array
+// (RULES.dialogue.attitudeDisplay.{grudge,trust}Tiers) — e.g. value 6 against
+// [3,6,9] crosses 2 thresholds -> glyph repeated twice. Distinct glyphs per
+// axis (grudge ▲, trust ●) so the two numbers next to each other in a table
+// row stay visually distinguishable; independent of T3's own UI chip glyphs
+// (a separate, later concern — T3 renders its own chips off the same RULES
+// thresholds but is not required to reuse this exact formatting).
+function tierGlyphs(value, tiers, glyph) {
+  if (!Array.isArray(tiers) || !(value > 0)) return '';
+  let n = 0;
+  for (const t of tiers) if (value >= t) n++;
+  return n > 0 ? ' ' + glyph.repeat(n) : '';
+}
+
+// One line per opponent this character has ANY non-neutral standing with
+// (grudge>0 or trust>0) — neutral (0/0) pairs are omitted to keep the prompt
+// compact; a freshly-started game with no history yet correctly produces ''
+// (block omitted entirely by buildDialoguePromptExtras). `opponents` is
+// [{id, name}], typically every OTHER character currently in the match.
+export function formatAttitudeTable(charId, ledgerState, opponents, dialogueRules) {
+  if (charId == null || !Array.isArray(opponents) || opponents.length === 0) return '';
+  const rules = resolveDialogueRules(dialogueRules);
+  const lines = [];
+  for (const opp of opponents) {
+    if (!opp || opp.id == null || opp.id === charId) continue;
+    const { grudge, trust } = getAttitude(ledgerState, charId, opp.id);
+    if (grudge <= 0 && trust <= 0) continue;
+    const gGlyph = tierGlyphs(grudge, rules.attitudeDisplay.grudgeTiers, '▲');
+    const tGlyph = tierGlyphs(trust, rules.attitudeDisplay.trustTiers, '●');
+    lines.push(`- ${opp.name}: grudge ${grudge}${gGlyph}, trust ${trust}${tGlyph}`);
+  }
+  if (lines.length === 0) return '';
+  return 'Your standing with other council members (grudge = resentment, trust = goodwill; both 0-10):\n' + lines.join('\n');
+}
+
+// Turns T1's buildTurnDigest() output into short, citable prose lines —
+// amounts, opponent NAMES (resolved via nameById, {id: name}), and counts, so
+// a character can reference real history ("paid $310 to X three times")
+// rather than vague generalities. Categories with zero entries are omitted;
+// an entirely-empty/fresh digest correctly returns ''.
+export function formatTurnDigest(digest, nameById) {
+  if (!digest) return '';
+  const name = (id) => (id != null && nameById && nameById[id]) || 'someone';
+  const names = (ids) => [...new Set(ids.map(name))].join(', ');
+  const sum = (arr, key) => arr.reduce((s, e) => s + (e[key] || 0), 0);
+  const lines = [];
+
+  if (digest.rentsPaid.length) {
+    lines.push(`Paid ${digest.rentsPaid.length} rent payment(s) totaling $${sum(digest.rentsPaid, 'amount')} to ${names(digest.rentsPaid.map(r => r.opponentId))}.`);
+  }
+  if (digest.rentsCollected.length) {
+    lines.push(`Collected ${digest.rentsCollected.length} rent payment(s) totaling $${sum(digest.rentsCollected, 'amount')} from ${names(digest.rentsCollected.map(r => r.opponentId))}.`);
+  }
+  if (digest.duelsWon.length) {
+    lines.push(`Won ${digest.duelsWon.length} duel(s) against ${names(digest.duelsWon.map(d => d.opponentId))}.`);
+  }
+  if (digest.duelsLost.length) {
+    lines.push(`Lost ${digest.duelsLost.length} duel(s) to ${names(digest.duelsLost.map(d => d.opponentId))}.`);
+  }
+  if (digest.tradesCompleted.length) {
+    lines.push(`Completed ${digest.tradesCompleted.length} trade(s) with ${names(digest.tradesCompleted.map(t => t.opponentId))}.`);
+  }
+  if (digest.tradesRejected.length) {
+    lines.push(`Had ${digest.tradesRejected.length} trade(s) rejected involving ${names(digest.tradesRejected.map(t => t.opponentId))}.`);
+  }
+  if (digest.auctionsWon.length) {
+    lines.push(`Won ${digest.auctionsWon.length} auction(s) for $${sum(digest.auctionsWon, 'amount')} total.`);
+  }
+  if (digest.auctionsLost.length) {
+    lines.push(`Lost ${digest.auctionsLost.length} auction(s) to ${names(digest.auctionsLost.map(a => a.winnerId))}.`);
+  }
+  if (digest.propertiesTakenFrom.length) {
+    lines.push(`Had ${digest.propertiesTakenFrom.length} propert${digest.propertiesTakenFrom.length === 1 ? 'y' : 'ies'} taken by ${names(digest.propertiesTakenFrom.map(p => p.byId))}.`);
+  }
+  if (digest.propertiesTaken.length) {
+    lines.push(`Took ${digest.propertiesTaken.length} propert${digest.propertiesTaken.length === 1 ? 'y' : 'ies'} from ${names(digest.propertiesTaken.map(p => p.fromId))}.`);
+  }
+  if (digest.wasBankrupted.length) {
+    const creditors = digest.wasBankrupted.map(b => b.creditorId).filter(id => id != null);
+    lines.push(creditors.length ? `Went bankrupt, creditor: ${names(creditors)}.` : 'Went bankrupt.');
+  }
+  if (digest.bankruptciesCaused.length) {
+    lines.push(`Bankrupted ${names(digest.bankruptciesCaused.map(b => b.victimId))}.`);
+  }
+  if (digest.cardsSuffered.length) {
+    lines.push(`Paid $${sum(digest.cardsSuffered, 'amount')} from ${digest.cardsSuffered.length} card event(s).`);
+  }
+
+  if (lines.length === 0) return '';
+  return 'Recent history (this season and last):\n' + lines.map(l => '- ' + l).join('\n');
+}
+
+// `diaryLines`: [{turn, seasonName, text}, ...] — already capped/ordered by
+// the caller (App.js, via T1-extended getRecentDiaryLines). Oldest-first so
+// the LLM reads them as a chronological arc, most recent last.
+export function formatDiaryLines(diaryLines) {
+  if (!Array.isArray(diaryLines) || diaryLines.length === 0) return '';
+  return 'Your own past diary entries (oldest first):\n' + diaryLines.map(d => `- "${d.text}"`).join('\n');
+}
+
+// Reply-language instruction, read from the live i18n locale unless a caller
+// passes an explicit override (e.g. a future server-side/test context that
+// isn't the DOM singleton). Always returns non-empty — this line is always
+// appended, never conditionally omitted.
+export function localeInstruction(locale) {
+  const loc = (locale === 'zh' || locale === 'en') ? locale : getLocale();
+  return loc === 'zh'
+    ? 'Reply in Simplified Chinese (中文), in character.'
+    : 'Reply in English, in character.';
+}
+
 export class CharacterAI {
   constructor(apiKey, options = {}) {
     this.apiKey = apiKey || '';
@@ -205,6 +332,16 @@ export class CharacterAI {
     this.verbosity = options.verbosity || VERBOSITY.MAJOR;
     this._pendingRequests = 0;
     this.maxConcurrent = 2;
+    // MT2-SP4 direction B (T2): resolved once at construction (and whenever
+    // setDialogueRules is called, e.g. after a mod switch) via T1's own
+    // fallback layer — resolveDialogueRules(undefined) yields a fully
+    // populated, NaN-free config even if the caller (a standalone unit test,
+    // or App.js before RULES is ready) never passes one.
+    this.dialogueRules = resolveDialogueRules(options.dialogueRules);
+  }
+
+  setDialogueRules(rulesLike) {
+    this.dialogueRules = resolveDialogueRules(rulesLike);
   }
 
   isEnabled() {
@@ -228,8 +365,13 @@ export class CharacterAI {
     }
   }
 
-  // Build a system prompt from character data + lore
-  buildSystemPrompt(character, lore) {
+  // Build a system prompt from character data + lore, plus (MT2-SP4 T2) the
+  // memory-aware dialogue extras — attitude table, turn digest, diary lines,
+  // reply-language instruction — appended at the end. `dialogueContext` is
+  // optional and defaults to {} (locale instruction still always appended;
+  // the other three blocks degrade to '' when their inputs are absent, e.g.
+  // introduce() at character-select time has no live G/ledger yet).
+  buildSystemPrompt(character, lore, dialogueContext) {
     const parts = [];
 
     parts.push(`You are ${character.name}, ${character.title}.`);
@@ -277,7 +419,25 @@ export class CharacterAI {
     parts.push('- Use your character\'s speaking style (formal/casual/cryptic/bold as fits your personality)');
     parts.push('- You may use Chinese expressions or mix languages to reflect your identity');
 
-    return parts.join('\n');
+    return parts.join('\n') + this.buildDialoguePromptExtras(character.id, dialogueContext || {});
+  }
+
+  // Assembles the three memory blocks (attitude table / turn digest / diary
+  // lines) plus the reply-language instruction into one appended string.
+  // `ctx`: { ledgerState, opponents: [{id,name}], digest, diaryLines, locale }.
+  // Every field is optional — missing inputs simply omit that block rather
+  // than erroring, so this is safe to call with `{}` (no dialogue context
+  // available yet, e.g. character-select intro chat).
+  buildDialoguePromptExtras(charId, ctx) {
+    const c = ctx || {};
+    const blocks = [
+      formatAttitudeTable(charId, c.ledgerState, c.opponents, this.dialogueRules),
+      formatTurnDigest(c.digest, (c.opponents || []).reduce((m, o) => { m[o.id] = o.name; return m; }, {})),
+      formatDiaryLines(c.diaryLines),
+    ].filter(Boolean);
+    const sections = blocks.length ? [blocks.join('\n\n')] : [];
+    sections.push(localeInstruction(c.locale));
+    return '\n\n' + sections.join('\n\n');
   }
 
   // Format game event context for the AI
@@ -393,11 +553,13 @@ export class CharacterAI {
     }
   }
 
-  // Generate an event response (1-2 sentences, fast model)
-  async respondToEvent(character, lore, eventType, eventData, gameState) {
+  // Generate an event response (1-2 sentences, fast model). `dialogueContext`
+  // (MT2-SP4 T2, optional, 6th param — backward compatible with all existing
+  // 5-arg call sites/tests) feeds buildSystemPrompt's memory blocks.
+  async respondToEvent(character, lore, eventType, eventData, gameState, dialogueContext) {
     if (!this.shouldRespond(eventType)) return null;
 
-    const systemPrompt = this.buildSystemPrompt(character, lore);
+    const systemPrompt = this.buildSystemPrompt(character, lore, dialogueContext);
     const eventContext = this._formatEventContext(eventType, eventData, gameState);
 
     const messages = [
@@ -413,11 +575,13 @@ export class CharacterAI {
     }
   }
 
-  // Multi-turn chat conversation (uses better model)
-  async chat(character, lore, userMessage, history, gameState) {
+  // Multi-turn chat conversation (uses better model). `dialogueContext`
+  // (MT2-SP4 T2, optional, 6th param) — same memory blocks as respondToEvent,
+  // so chat replies can cite the same real history as event reactions.
+  async chat(character, lore, userMessage, history, gameState, dialogueContext) {
     if (!this.apiKey) return null;
 
-    const systemPrompt = this.buildSystemPrompt(character, lore) +
+    const systemPrompt = this.buildSystemPrompt(character, lore, dialogueContext) +
       this._formatGameStateContext(gameState) +
       '\n\nThe player is chatting with you. Respond conversationally but in-character. You can give game advice based on your personality and strategy style.';
 
