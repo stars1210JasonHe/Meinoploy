@@ -4111,10 +4111,16 @@ class MonopolyBoard {
     // (including "Play Again", which routes here) starts with a clean
     // attitude ledger AND diary store — grudges/entries from a finished
     // match must never leak into the next one, same treatment as
-    // botSeats/aiResponses/chatHistories.
+    // botSeats/aiResponses/chatHistories. The $3 cost-cap counter is the
+    // same story: it persists across save/load WITHIN a game (loadGame
+    // restores it), but a genuinely NEW game must start with a fresh $3,
+    // not inherit whatever a previous unrelated match already spent —
+    // otherwise unlimited "start new game" cycling would eventually starve
+    // every game of budget from the FIRST call.
     this.dialogueLedger = createLedgerState();
     this._lastLedgerSeq = undefined;
     this.dialogueDiaries = createDiaryState();
+    this.characterAI.resetCostEstimate();
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
     this.closeUiModal();
