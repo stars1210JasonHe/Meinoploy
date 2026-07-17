@@ -225,6 +225,33 @@ describe('CharacterAI', () => {
       expect(prompt).toContain('$310');
     });
 
+    // T3 review fix (seat-id keying): the LIVE ledger is keyed by seat ids
+    // ('0','1' — engine event actors), not character ids. When the context
+    // bundle carries seatId (App.js's _buildDialogueContext always sets it),
+    // the attitude lookup must use IT — character.id matches no ledger key
+    // and would silently produce an empty attitude block.
+    test('attitude table keys by ctx.seatId (seat-keyed live ledger), not character.id', () => {
+      let ledger = createLedgerState();
+      // Seat '0' (playing albert-victor) loses two duels to seat '1'.
+      ledger = applyEvent(ledger, { type: 'duel_resolved', actor: '0', data: { propertyId: 1, ownerId: '1', winnerId: '1' } });
+      ledger = applyEvent(ledger, { type: 'duel_resolved', actor: '0', data: { propertyId: 2, ownerId: '1', winnerId: '1' } });
+      const ai = new CharacterAI('');
+      const prompt = ai.buildSystemPrompt(mockCharacter, null, {
+        seatId: '0',
+        ledgerState: ledger,
+        opponents: [{ id: '1', name: 'Lia Frost' }],
+      });
+      expect(prompt).toContain('Lia Frost');
+      expect(prompt).toContain('grudge 4');
+      // Sanity inversion: WITHOUT seatId the charId fallback ('albert-victor')
+      // matches no seat-keyed ledger entry -> block omitted entirely.
+      const promptNoSeat = ai.buildSystemPrompt(mockCharacter, null, {
+        ledgerState: ledger,
+        opponents: [{ id: '1', name: 'Lia Frost' }],
+      });
+      expect(promptNoSeat).not.toContain('grudge');
+    });
+
     test('cites past diary lines verbatim when supplied', () => {
       const ai = new CharacterAI('');
       const prompt = ai.buildSystemPrompt(mockCharacter, null, {

@@ -602,14 +602,22 @@ export class CharacterAI {
 
   // Assembles the three memory blocks (attitude table / turn digest / diary
   // lines) plus the reply-language instruction into one appended string.
-  // `ctx`: { ledgerState, opponents: [{id,name}], digest, diaryLines, locale }.
-  // Every field is optional — missing inputs simply omit that block rather
-  // than erroring, so this is safe to call with `{}` (no dialogue context
-  // available yet, e.g. character-select intro chat).
+  // `ctx`: { seatId, ledgerState, opponents: [{id,name}], digest, diaryLines,
+  // locale }. Every field is optional — missing inputs simply omit that block
+  // rather than erroring, so this is safe to call with `{}` (no dialogue
+  // context available yet, e.g. character-select intro chat).
+  //
+  // T3 review fix (seat-id keying): the live ledger is keyed by SEAT ids
+  // ('0','1' — every engine event's actor is a seat), but `charId` here is a
+  // CHARACTER id (buildSystemPrompt passes character.id) — so the attitude
+  // lookup must prefer ctx.seatId when the caller provides it (App.js's
+  // _buildDialogueContext always does). The charId fallback keeps hand-built
+  // test contexts (which key their fixture ledgers by whatever id they pass)
+  // working unchanged.
   buildDialoguePromptExtras(charId, ctx) {
     const c = ctx || {};
     const blocks = [
-      formatAttitudeTable(charId, c.ledgerState, c.opponents, this.dialogueRules),
+      formatAttitudeTable(c.seatId != null ? c.seatId : charId, c.ledgerState, c.opponents, this.dialogueRules),
       formatTurnDigest(c.digest, (c.opponents || []).reduce((m, o) => { m[o.id] = o.name; return m; }, {})),
       formatDiaryLines(c.diaryLines),
     ].filter(Boolean);

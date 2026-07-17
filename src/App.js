@@ -3019,12 +3019,20 @@ class MonopolyBoard {
       // unconditionally every render by _updateDialogueLedger), works with
       // zero API key. attitudeChipsHtml omits neutral (0/0) rows and returns
       // '' entirely when nothing is non-neutral yet (fresh game, turn 1).
+      //
+      // KEYING (T3 review fix): the ledger is keyed by SEAT ids ('0','1',...,
+      // player.id), NOT character ids — every engine event's actor/ownerId/
+      // winnerId/creditorId is a seat id (Game.js logEvent call sites; T1
+      // report's event-shape table). The first version read with char.id /
+      // op.character.id ('marcus-kodak'), which NEVER matches a ledger key,
+      // so the section was permanently empty. Names/colors still come from
+      // the character; only the LOOKUP keys are seats.
       let attitudeHtml = '';
       if (char) {
         const attitudeRows = [];
         G.players.forEach((op, oi) => {
           if (oi === i || !op.character) return;
-          const att = getAttitude(this.dialogueLedger, char.id, op.character.id);
+          const att = getAttitude(this.dialogueLedger, player.id, op.id);
           attitudeRows.push({ name: op.character.name, color: this._playerColor(G, oi), grudge: att.grudge, trust: att.trust });
         });
         attitudeHtml = attitudeChipsHtml(attitudeRows, RULES.dialogue.attitudeDisplay);
@@ -3672,7 +3680,19 @@ class MonopolyBoard {
     // whole tab rail is omitted (not just the panel) when there are zero
     // entries, so a keyless or fresh game's lore modal renders EXACTLY as
     // before (untabbed single panel) — "hidden entirely" per the brief.
-    const diaryEntries = getRecentDiaryLines(this.dialogueDiaries, charId, RULES.dialogue.diaryHistoryCap);
+    //
+    // KEYING (T3 review fix): the diary store is keyed by SEAT id
+    // (_writeDiaryFor calls appendDiaryEntry(..., player.id, ...)), not
+    // character id — resolve which seat currently plays this character via
+    // the live G (this._lastG). Outside a game (character-select entry
+    // point) _lastG is null -> no diary owner -> no tab, which is correct:
+    // diaries only ever exist during a game.
+    const diaryOwner = this._lastG && this._lastG.players
+      ? this._lastG.players.find(p => p.character && p.character.id === charId)
+      : null;
+    const diaryEntries = diaryOwner
+      ? getRecentDiaryLines(this.dialogueDiaries, diaryOwner.id, RULES.dialogue.diaryHistoryCap)
+      : [];
     const diaryHtml = diaryTabHtml(diaryEntries);
     const hasDiary = !!diaryHtml;
     const tabsHtml = hasDiary ? `
@@ -3910,14 +3930,25 @@ class MonopolyBoard {
   // bundle CharacterAI's buildDialoguePromptExtras consumes. `opponents` is
   // every OTHER seated character (id+name) — used both to resolve names in
   // the turn-digest text and as the attitude table's row list.
-  _buildDialogueContext(charId, G) {
+  //
+  // `seatId` MUST be a seat/player id ('0','1',... = player.id), NEVER a
+  // character id — the ledger, diary store, and event stream are ALL keyed
+  // by seat (T3 review fix: two call sites used to pass character ids and
+  // silently got empty memory blocks; param renamed from `charId` to make
+  // the contract explicit at every call site).
+  _buildDialogueContext(seatId, G) {
     if (!G) return null;
     const opponents = G.players.filter(p => p.character).map(p => ({ id: p.id, name: p.character.name }));
     return {
+      // seatId rides in the bundle so buildDialoguePromptExtras can key the
+      // attitude-table lookup by SEAT — its own charId param is a character
+      // id (buildSystemPrompt passes character.id), which matches no ledger
+      // key (same T3-review keying family as above).
+      seatId,
       ledgerState: this.dialogueLedger,
       opponents,
-      digest: buildTurnDigest(G.events, charId, RULES.dialogue.digestWindow),
-      diaryLines: getRecentDiaryLines(this.dialogueDiaries, charId, RULES.dialogue.diaryPromptLines),
+      digest: buildTurnDigest(G.events, seatId, RULES.dialogue.digestWindow),
+      diaryLines: getRecentDiaryLines(this.dialogueDiaries, seatId, RULES.dialogue.diaryPromptLines),
       dialogueRules: RULES.dialogue,
     };
   }
@@ -3980,7 +4011,14 @@ class MonopolyBoard {
 
   async _triggerAIResponse(char, eventType, eventData, gameState, G, playerId) {
     const lore = this.activeMod.getLoreById(char.id);
-    const dialogueContext = G ? this._buildDialogueContext(char.id, G) : null;
+    // KEYING (T3 review fix, pre-existing T2 wrinkle): _buildDialogueContext's
+    // first arg feeds getAttitude/buildTurnDigest, whose state/events are
+    // keyed by SEAT id — every OTHER context builder (_writeDiaryFor,
+    // _runBanter, _sendChat) already passes player.id; this one passed
+    // char.id ('marcus-kodak'), which matches no seat, so reaction prompts
+    // silently got empty attitude/digest blocks. playerId (added by T3 for
+    // the speech bubble) is the current seat's player.id — use it.
+    const dialogueContext = G ? this._buildDialogueContext(playerId, G) : null;
     this._nextAIId = (this._nextAIId || 0) + 1;
     const loadingId = this._nextAIId;
     this.aiResponses.push({ id: loadingId, charName: char.name, charColor: char.color, portrait: char.portrait, text: null });
@@ -4290,7 +4328,13 @@ class MonopolyBoard {
       lastEvent: G.messages.length > 0 ? G.messages[G.messages.length - 1] : '',
     };
 
-    const dialogueContext = this._buildDialogueContext(charId, G);
+    // KEYING (T3 review fix): charId here is a CHARACTER id (chat tabs key
+    // off c.id) but _buildDialogueContext needs the SEAT id (ledger/diary/
+    // digest are all seat-keyed — see _triggerAIResponse's comment). Resolve
+    // which seat currently plays this character; null (unseated) degrades to
+    // an empty context, never a crash.
+    const chatSeat = G.players.find(p => p.character && p.character.id === charId);
+    const dialogueContext = this._buildDialogueContext(chatSeat ? chatSeat.id : null, G);
     const response = await this.characterAI.chat(char, lore, userMessage, history.slice(0, -1), gameState, dialogueContext);
     // Localized at PUSH time (stored in history) — a later LANG flip won't retranslate
     // this one line; acceptable, it's transient client-local feedback, not wire data.
