@@ -247,6 +247,12 @@ class MonopolyBoard {
     // other per-client render cache in _stopClient() so a stale value from a
     // finished game can never suppress the first real write of the next one.
     this._turnboxHtml = null;
+    // Overlap-cycle tracking (see openUiModal/closeUiModal + the board click
+    // handler's doc comments): space id of the tile whose popover is
+    // CURRENTLY showing in the ui-modal, or null when no tile popover is
+    // open (including "some OTHER kind of modal is open" — openUiModal
+    // resets this for every call, tile or not).
+    this._openTileSpaceId = null;
     // Active mod (default Dominion). All mod CONTENT reads route through this.activeMod;
     // selectMod() swaps it + the engine RULES singleton. availableMaps = the active mod's
     // boards (maps + atlas worlds), the same set the old module-level AVAILABLE_MAPS held.
@@ -536,10 +542,37 @@ class MonopolyBoard {
         if (route) { this._routeTargets = null; this._syncRoutePickChrome(); this.client.moves.commitRoute(route); }
         return;
       }
+      // Overlap-cycle (ticket: overlapped tiles cycle on repeated clicks):
+      // dense flat-atlas clusters can stack several `.tile[data-space]`
+      // elements at the same point — later DOM siblings paint on top, so a
+      // fully-covered earlier tile never wins `e.target.closest()`'s hit-test
+      // and its popover was permanently unreachable by click. Deliberately a
+      // SEPARATE technique from the route-pick fix above (that one disables
+      // pointer-events so the browser's native hit-test falls through — see
+      // the #token-layer .token CSS comment on why an elementsFromPoint
+      // lookup was avoided there); here we WANT the full z-ordered stack, so
+      // elementsFromPoint is the right tool. First click at any point always
+      // opens the top (hit-test) tile — same as before — because
+      // _openTileSpaceId is null until a tile popover has actually opened
+      // (openUiModal resets it, this handler re-arms it below). Only a
+      // REPEATED click, while the popover already showing is one of the
+      // tiles stacked at this exact point, advances to the next tile in the
+      // stack instead of reopening the same unreachable top tile.
+      const stackIds = [...new Set(
+        document.elementsFromPoint(e.clientX, e.clientY)
+          .map(el => el.closest && el.closest('.tile[data-space]'))
+          .filter(Boolean)
+          .map(el => el.dataset.space)
+      )];
+      let targetSpaceId = tile.dataset.space;
+      if (stackIds.length > 1 && this._openTileSpaceId != null) {
+        const idx = stackIds.indexOf(this._openTileSpaceId);
+        if (idx !== -1) targetSpaceId = stackIds[(idx + 1) % stackIds.length];
+      }
       const state = this.client && this.client.getState();
       if (!state) return;
-      const d = this._tileDetailData(parseInt(tile.dataset.space, 10), state.G, state.ctx);
-      if (d) this.openUiModal(tileDetailHtml(d));
+      const d = this._tileDetailData(parseInt(targetSpaceId, 10), state.G, state.ctx);
+      if (d) { this.openUiModal(tileDetailHtml(d)); this._openTileSpaceId = targetSpaceId; }
     });
     this.turnboxEl = document.getElementById('turnbox');
     // Chrome-band sizing (Task 2 review fix — see _syncChromeBands below and
@@ -3391,6 +3424,13 @@ class MonopolyBoard {
   // UI modals (lore / trade builder / AI settings / saves)
   // ─────────────────────────────────────────────────────────
   openUiModal(html, wide) {
+    // Overlapped-tile cycle tracking (ticket: overlapped tiles cycle on
+    // repeated clicks): _openTileSpaceId only means "the ui-modal currently
+    // showing IS this tile's popover" — any modal open (tile, chip, lore, AI
+    // settings, saves, trade...) resets it first; the board click handler
+    // (the only caller that cares) re-arms it immediately after, right below
+    // this call, when — and only when — it actually opened a tile popover.
+    this._openTileSpaceId = null;
     this.uiModalBoxEl.className = `modal ${wide ? 'modal--wide' : ''}`;
     this.uiModalBoxEl.innerHTML = html;
     this.uiModalEl.classList.add('open');
@@ -3400,6 +3440,7 @@ class MonopolyBoard {
     this.uiModalEl.classList.remove('open');
     this.uiModalBoxEl.innerHTML = '';
     document.body.style.overflow = '';
+    this._openTileSpaceId = null;
   }
 
   showLoreModal(charId) {
