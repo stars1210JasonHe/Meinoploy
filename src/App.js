@@ -8,12 +8,18 @@ import { PLAYER_COLORS, BUILDING_ICONS, BUILDING_NAMES, UPGRADE_COST_MULTIPLIERS
 import { RULES } from '../mods/active-rules';
 import { Lobby } from './Lobby';
 import { loadMap, getGridDimensions, positionsToGrid } from './map-loader';
-import { CharacterAI, VERBOSITY, mapEngineEventToAi, consumeNewEvents } from './character-ai';
+import {
+  CharacterAI, VERBOSITY, mapEngineEventToAi, consumeNewEvents,
+  resolveBanterPair, banterSituationText,
+} from './character-ai';
 // MT2-SP4 direction B (T2): T1's pure memory core (attitude ledger + turn
 // digest, zero engine changes, lives client-side beside botSeats). App.js
 // owns the LIVE ledger (folded from G.events every render, independent of
 // whether the AI is enabled — "no key = ledger still accumulates").
-import { createLedgerState, applyEvents, buildTurnDigest } from './dialogue/memory';
+import {
+  createLedgerState, applyEvents, buildTurnDigest,
+  createDiaryState, appendDiaryEntry, getRecentDiaryLines,
+} from './dialogue/memory';
 import { loadWorld } from './world-loader';
 import { routeChoices } from './atlas-movement';
 import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
@@ -281,6 +287,11 @@ class MonopolyBoard {
     // SEPARATE lazy cursor from _lastEventSeq for exactly that reason.
     this.dialogueLedger = createLedgerState();
     this._lastLedgerSeq = undefined;
+    // Season-diary store (T2) — one array per character, capped at
+    // RULES.dialogue.diaryHistoryCap by appendDiaryEntry. Reset alongside
+    // dialogueLedger at every exitToMenu/loadGame (same "per-GAME, not
+    // per-boot" reasoning).
+    this.dialogueDiaries = createDiaryState();
 
     // Audio + animator: constructed exactly ONCE, here at app-boot — not per-game-start.
     // this.mapData already exists (setMap() ran above); this.boardEl/tokenLayer don't exist
@@ -3772,9 +3783,7 @@ class MonopolyBoard {
   // Assembles the {ledgerState, opponents, digest, diaryLines, dialogueRules}
   // bundle CharacterAI's buildDialoguePromptExtras consumes. `opponents` is
   // every OTHER seated character (id+name) — used both to resolve names in
-  // the turn-digest text and as the attitude table's row list. Diary lines
-  // are wired in by a later commit (T2's diary/banter task); until then this
-  // intentionally omits diaryLines (formatDiaryLines(undefined) -> '').
+  // the turn-digest text and as the attitude table's row list.
   _buildDialogueContext(charId, G) {
     if (!G) return null;
     const opponents = G.players.filter(p => p.character).map(p => ({ id: p.id, name: p.character.name }));
@@ -3782,6 +3791,7 @@ class MonopolyBoard {
       ledgerState: this.dialogueLedger,
       opponents,
       digest: buildTurnDigest(G.events, charId, RULES.dialogue.digestWindow),
+      diaryLines: getRecentDiaryLines(this.dialogueDiaries, charId, RULES.dialogue.diaryPromptLines),
       dialogueRules: RULES.dialogue,
     };
   }
@@ -3817,6 +3827,18 @@ class MonopolyBoard {
     for (const event of newEvents) {
       const mapped = mapEngineEventToAi(event, G);
       if (mapped) this._triggerAIResponse(char, mapped.eventType, mapped.eventData, gameState, G);
+      // Diary/banter (T2): independent of the reaction dispatch above — both
+      // duel_resolved and season_changed already produce a reaction (via
+      // mapEngineEventToAi) AND may separately trigger diary/banter for
+      // OTHER characters than ctx.currentPlayer, so these are deliberately
+      // NOT mutually exclusive with `mapped`. Both gated overall by this
+      // method's own isEnabled() early-return above (OFF verbosity or no
+      // key skips diary/banter too, same as reactions).
+      if (event.type === 'season_changed') {
+        this._triggerSeasonDiaries(G, event);
+      } else if (event.type === 'duel_resolved' || event.type === 'trade_accepted' || event.type === 'auction_ended') {
+        this._triggerBanter(event, G);
+      }
     }
   }
 
@@ -3836,6 +3858,86 @@ class MonopolyBoard {
     }
     if (this.aiResponses.length > 8) this.aiResponses = this.aiResponses.slice(-8);
     this._renderAIResponses();
+  }
+
+  // Pushes an ALREADY-RESOLVED line straight into the existing council-
+  // chatter feed (aiResponses + _renderAIResponses) — the "reuse the
+  // reaction plumbing" instruction for banter (T2): no new UI surface, just
+  // another entry in the same bubble strip _triggerAIResponse already
+  // renders into. No loading placeholder (banter's two legs are already
+  // sequential awaits by the time this is called).
+  _pushAIResponse(char, text) {
+    this._nextAIId = (this._nextAIId || 0) + 1;
+    this.aiResponses.push({ id: this._nextAIId, charName: char.name, charColor: char.color, portrait: char.portrait, text });
+    if (this.aiResponses.length > 8) this.aiResponses = this.aiResponses.slice(-8);
+    this._renderAIResponses();
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Season diaries (T2) — one mini call per AI-voiced (= every seated)
+  // character per season_changed event, fire-and-forget. Gated on
+  // RULES.dialogue.diaryEnabled; writeDiaryEntry itself additionally guards
+  // on apiKey (no key -> silently skipped, never thrown). Each character's
+  // write is independently caught so one failure can't take down the
+  // others' diary entries for this season.
+  // ─────────────────────────────────────────────────────────
+  _triggerSeasonDiaries(G, event) {
+    if (!RULES.dialogue.diaryEnabled) return;
+    const roster = G.players.filter(p => p.character);
+    roster.forEach(p => {
+      this._writeDiaryFor(p, G, event).catch(e => console.warn('dialogue diary failed:', e && e.message));
+    });
+  }
+
+  async _writeDiaryFor(player, G, event) {
+    const char = player.character;
+    const lore = this.activeMod.getLoreById(char.id);
+    const dialogueContext = this._buildDialogueContext(player.id, G);
+    const text = await this.characterAI.writeDiaryEntry(char, lore, dialogueContext);
+    if (!text) return; // no key, diaryEnabled false, or API failure — all silent no-ops
+    const data = event && event.data ? event.data : {};
+    this.dialogueDiaries = appendDiaryEntry(this.dialogueDiaries, player.id, {
+      turn: G.totalTurns,
+      seasonIndex: data.seasonIndex,
+      seasonName: data.seasonName,
+      text,
+    }, RULES.dialogue);
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Banter (T2) — at most ONE reply-pair (two mini calls) per triggering
+  // event, fire-and-forget, reusing the aiResponses bubble feed via
+  // _pushAIResponse. Gated on RULES.dialogue.banterEnabled; if the first
+  // leg comes back empty (no key / capped / API error) the pair is skipped
+  // entirely rather than firing a lone half-line.
+  // ─────────────────────────────────────────────────────────
+  _triggerBanter(event, G) {
+    if (!RULES.dialogue.banterEnabled) return;
+    this._runBanter(event, G).catch(e => console.warn('dialogue banter failed:', e && e.message));
+  }
+
+  async _runBanter(event, G) {
+    const pair = resolveBanterPair(event, G.events);
+    if (!pair) return;
+    const firstPlayer = G.players.find(p => p.id === pair.firstId);
+    const secondPlayer = G.players.find(p => p.id === pair.secondId);
+    if (!firstPlayer || !firstPlayer.character || !secondPlayer || !secondPlayer.character) return;
+
+    const situations = banterSituationText(pair.situation, firstPlayer.character.name, secondPlayer.character.name, event);
+
+    const firstContext = this._buildDialogueContext(firstPlayer.id, G);
+    const firstLine = await this.characterAI.banterLine(
+      firstPlayer.character, this.activeMod.getLoreById(firstPlayer.character.id), firstContext, situations.first
+    );
+    if (!firstLine) return; // skip the whole pair — never a lone half-pair
+    this._pushAIResponse(firstPlayer.character, firstLine);
+
+    const secondContext = this._buildDialogueContext(secondPlayer.id, G);
+    const secondLine = await this.characterAI.banterLine(
+      secondPlayer.character, this.activeMod.getLoreById(secondPlayer.character.id), secondContext, situations.second
+    );
+    if (!secondLine) return;
+    this._pushAIResponse(secondPlayer.character, secondLine);
   }
 
   _renderAIResponses() {
@@ -3995,10 +4097,12 @@ class MonopolyBoard {
     this._lastEventSeq = undefined;
     // Dialogue memory is per-GAME, not per-boot (MT2-SP4 T2): a fresh game
     // (including "Play Again", which routes here) starts with a clean
-    // attitude ledger — grudges from a finished match must never leak into
-    // the next one, same treatment as botSeats/aiResponses/chatHistories.
+    // attitude ledger AND diary store — grudges/entries from a finished
+    // match must never leak into the next one, same treatment as
+    // botSeats/aiResponses/chatHistories.
     this.dialogueLedger = createLedgerState();
     this._lastLedgerSeq = undefined;
+    this.dialogueDiaries = createDiaryState();
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
     this.closeUiModal();
@@ -4070,10 +4174,11 @@ class MonopolyBoard {
     this._lastEventSeq = undefined;
     // MT2-SP4 T2: dialogue memory restoration from the save envelope lands in
     // a later commit (persistence); until then every load starts a fresh
-    // ledger, same as exitToMenu — never worse than "memory absent", never
-    // stale/wrong.
+    // ledger/diary store, same as exitToMenu — never worse than "memory
+    // absent", never stale/wrong.
     this.dialogueLedger = createLedgerState();
     this._lastLedgerSeq = undefined;
+    this.dialogueDiaries = createDiaryState();
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
     const savedG = saveData.G;

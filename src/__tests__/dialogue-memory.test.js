@@ -28,6 +28,11 @@ import {
   serializeLedger,
   deserializeLedger,
   buildTurnDigest,
+  createDiaryState,
+  appendDiaryEntry,
+  getRecentDiaryLines,
+  serializeDiaries,
+  deserializeDiaries,
 } from '../dialogue/memory';
 
 function ev(seq, turn, type, actor, data) {
@@ -415,6 +420,108 @@ describe('serialize/deserialize', () => {
     // fresh ledger behaves identically to a brand-new one under applyEvent
     const withEvent = applyEvent(fresh, ev(0, 1, 'bankruptcy', '1', { creditorId: '0' }), RULES);
     expect(getAttitude(withEvent, '1', '0').grudge).toBe(RULES.dialogue.weights.bankruptedByGrudge);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Diary store (T2) — createDiaryState/appendDiaryEntry/getRecentDiaryLines +
+// serializeDiaries/deserializeDiaries
+// ---------------------------------------------------------------------------
+
+describe('diary store', () => {
+  test('createDiaryState starts empty', () => {
+    expect(createDiaryState()).toEqual({});
+  });
+
+  test('appendDiaryEntry adds an entry with defaulted fields', () => {
+    const state = appendDiaryEntry(createDiaryState(), '0', { turn: 5, seasonIndex: 1, seasonName: 'Autumn', text: 'hello' }, RULES);
+    expect(state['0']).toEqual([{ turn: 5, seasonIndex: 1, seasonName: 'Autumn', text: 'hello' }]);
+  });
+
+  test('appendDiaryEntry is immutable (returns a new state, does not mutate the input)', () => {
+    const state1 = createDiaryState();
+    const state2 = appendDiaryEntry(state1, '0', { turn: 1, text: 'a' }, RULES);
+    expect(state1).toEqual({});
+    expect(state2).not.toBe(state1);
+  });
+
+  test('missing charId or entry -> state unchanged (no-op)', () => {
+    const state = appendDiaryEntry(createDiaryState(), '0', { turn: 1, text: 'a' }, RULES);
+    expect(appendDiaryEntry(state, null, { turn: 2, text: 'b' }, RULES)).toBe(state);
+    expect(appendDiaryEntry(state, '0', null, RULES)).toBe(state);
+  });
+
+  test('appendDiaryEntry trims to diaryHistoryCap, dropping the OLDEST first', () => {
+    const rules = { dialogue: { diaryHistoryCap: 3 } };
+    let state = createDiaryState();
+    for (let i = 0; i < 5; i++) {
+      state = appendDiaryEntry(state, '0', { turn: i, text: `entry-${i}` }, rules);
+    }
+    expect(state['0'].map(e => e.text)).toEqual(['entry-2', 'entry-3', 'entry-4']);
+  });
+
+  test('appendDiaryEntry missing turn/seasonIndex/seasonName fields default safely (no NaN/undefined)', () => {
+    const state = appendDiaryEntry(createDiaryState(), '0', { text: 'bare' }, RULES);
+    expect(state['0'][0]).toEqual({ turn: 0, seasonIndex: null, seasonName: '', text: 'bare' });
+  });
+
+  test('getRecentDiaryLines returns the most recent N, oldest first', () => {
+    let state = createDiaryState();
+    for (let i = 0; i < 5; i++) state = appendDiaryEntry(state, '0', { turn: i, text: `e${i}` }, RULES);
+    expect(getRecentDiaryLines(state, '0', 2).map(e => e.text)).toEqual(['e3', 'e4']);
+  });
+
+  test('getRecentDiaryLines with n >= available length returns everything, oldest first', () => {
+    let state = createDiaryState();
+    for (let i = 0; i < 2; i++) state = appendDiaryEntry(state, '0', { turn: i, text: `e${i}` }, RULES);
+    expect(getRecentDiaryLines(state, '0', 10).map(e => e.text)).toEqual(['e0', 'e1']);
+  });
+
+  test.each([0, -1, undefined, null, NaN])('getRecentDiaryLines with n=%p -> []', (n) => {
+    let state = appendDiaryEntry(createDiaryState(), '0', { turn: 1, text: 'x' }, RULES);
+    expect(getRecentDiaryLines(state, '0', n)).toEqual([]);
+  });
+
+  test('getRecentDiaryLines for unknown charId or missing state -> []', () => {
+    const state = appendDiaryEntry(createDiaryState(), '0', { turn: 1, text: 'x' }, RULES);
+    expect(getRecentDiaryLines(state, '1', 3)).toEqual([]);
+    expect(getRecentDiaryLines(null, '0', 3)).toEqual([]);
+    expect(getRecentDiaryLines(undefined, '0', 3)).toEqual([]);
+  });
+
+  test('serializeDiaries round-trips through deserializeDiaries', () => {
+    let state = createDiaryState();
+    state = appendDiaryEntry(state, '0', { turn: 1, seasonIndex: 0, seasonName: 'Summer', text: 'a' }, RULES);
+    state = appendDiaryEntry(state, '1', { turn: 2, seasonIndex: 1, seasonName: 'Autumn', text: 'b' }, RULES);
+    const raw = serializeDiaries(state);
+    expect(deserializeDiaries(raw)).toEqual(state);
+  });
+
+  test('serializeDiaries on null/undefined -> {}', () => {
+    expect(serializeDiaries(null)).toEqual({});
+    expect(serializeDiaries(undefined)).toEqual({});
+  });
+
+  test.each([null, undefined, 'x', 42, []])('deserializeDiaries tolerates non-object input %p -> {}', (bad) => {
+    expect(deserializeDiaries(bad)).toEqual({});
+  });
+
+  test('deserializeDiaries drops non-array buckets and malformed/textless entries', () => {
+    const raw = {
+      '0': [{ turn: 1, text: 'ok' }, { turn: 2 }, 'not-an-object', { turn: 3, text: '' }],
+      '1': 'not-an-array',
+      '2': [{ turn: 4, text: 'also-ok' }],
+    };
+    const out = deserializeDiaries(raw);
+    expect(out['0']).toEqual([{ turn: 1, seasonIndex: null, seasonName: '', text: 'ok' }]);
+    expect(out['1']).toBeUndefined();
+    expect(out['2']).toEqual([{ turn: 4, seasonIndex: null, seasonName: '', text: 'also-ok' }]);
+  });
+
+  test('a bucket that ends up entirely empty after filtering is dropped, not kept as []', () => {
+    const out = deserializeDiaries({ '0': [{ turn: 1 }, 'junk'] });
+    expect(out['0']).toBeUndefined();
+    expect(Object.keys(out)).toEqual([]);
   });
 });
 

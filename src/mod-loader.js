@@ -140,6 +140,8 @@ export const DEFAULT_RULES = {
     botAttitudeEnabled: true,
     banterEnabled: true,
     diaryEnabled: true,
+    diaryPromptLines: 3,
+    diaryHistoryCap: 12,
   },
   display: {
     playerColors: [

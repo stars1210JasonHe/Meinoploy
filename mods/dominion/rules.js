@@ -247,6 +247,12 @@ export const RULES = {
     botAttitudeEnabled: true, // T4: bot-driver.js trade-response tilt (local bot paths only, sim stays pure)
     banterEnabled: true,      // T2/T3: duel/auction/trade banter reply-pairs
     diaryEnabled: true,       // T2: once-per-season-change LLM diary line
+    // T2 diary tuning: diaryPromptLines caps how many of a character's own
+    // past diary entries get RE-FED into a prompt each time (readability +
+    // token cost); diaryHistoryCap caps how many are RETAINED in the store
+    // (save-envelope size) — independent knobs, retention can exceed prompt use.
+    diaryPromptLines: 3,
+    diaryHistoryCap: 12,
   },
 
   // ── Player Display ──────────────────────────────────────

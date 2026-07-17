@@ -205,6 +205,103 @@ export function consumeNewEvents(events, lastSeq) {
 }
 
 // ---------------------------------------------------------------------------
+// Banter (MT2-SP4 direction B, T2 — merges direction A's "ambient table-talk"
+// into B per the spec's recommendation). Pure event-shape helpers that
+// App.js's event-driven dispatch loop (same lazy-cursor pattern as
+// mapEngineEventToAi above) uses to decide WHO banters and about WHAT,
+// before making any LLM call. Kept pure/exported for the same reason as
+// mapEngineEventToAi/consumeNewEvents: unit-testable with hand-built event
+// fixtures, no DOM/G required.
+// ---------------------------------------------------------------------------
+
+// auction_ended carries only {propertyId, winnerId, amount} — no losing
+// bidders. Scans backward from the matching auction_ended event (found by
+// seq) to the auction's own auction_started boundary, collecting bid_placed
+// actors for that propertyId, and returns the CLOSEST (most recent) losing
+// bidder found — i.e. whoever was outbid last, the most natural "rival" for
+// a grumble. Returns null when no other bidder exists (solo-bidder auction,
+// or winnerId absent) — banter needs a genuine pair, not a lone gloat line.
+export function findAuctionRival(events, endEvent) {
+  if (!endEvent || endEvent.type !== 'auction_ended') return null;
+  const data = endEvent.data || {};
+  const { propertyId, winnerId } = data;
+  if (winnerId == null || propertyId == null) return null;
+  const list = events || [];
+  const endIdx = list.findIndex(e => e.seq === endEvent.seq);
+  if (endIdx === -1) return null;
+  for (let i = endIdx - 1; i >= 0; i--) {
+    const e = list[i];
+    if (e.type === 'auction_started' && e.data && e.data.propertyId === propertyId) break;
+    if (e.type === 'bid_placed' && e.data && e.data.propertyId === propertyId && e.actor !== winnerId) {
+      return e.actor;
+    }
+  }
+  return null;
+}
+
+// Resolves a triggering engine event into a banter pair — {firstId,
+// secondId, situation} — or null when no valid two-sided exchange can be
+// formed (a "reply-pair" per spec; App.js skips banter entirely rather than
+// firing a lone half-pair). `firstId` speaks first (the winner/proposer
+// side); `secondId` replies. `events` is the full G.events array, needed
+// only for the auction case (findAuctionRival's backward scan).
+export function resolveBanterPair(event, events) {
+  if (!event) return null;
+  const data = event.data || {};
+  switch (event.type) {
+    case 'duel_resolved': {
+      const { ownerId, winnerId } = data;
+      const actor = event.actor;
+      if (actor == null || ownerId == null || winnerId == null) return null;
+      const loserId = winnerId === actor ? ownerId : actor;
+      if (loserId === winnerId) return null;
+      return { firstId: winnerId, secondId: loserId, situation: 'duel' };
+    }
+    case 'trade_accepted': {
+      const proposerId = data.proposerId;
+      const actor = event.actor;
+      if (proposerId == null || actor == null || actor === proposerId) return null;
+      return { firstId: proposerId, secondId: actor, situation: 'trade' };
+    }
+    case 'auction_ended': {
+      const rival = findAuctionRival(events, event);
+      if (rival == null) return null;
+      return { firstId: data.winnerId, secondId: rival, situation: 'auction' };
+    }
+    default:
+      return null;
+  }
+}
+
+// The two user-turn prompts for a banter pair's first/second line — plain
+// situational framing (not a "Game event: ..." reaction context), since
+// banter is a direct address between two characters rather than a comment on
+// one's own turn. `event` supplies the auction's final bid amount when
+// relevant; unused for duel/trade.
+export function banterSituationText(situation, firstName, secondName, event) {
+  const amount = event && event.data && event.data.amount;
+  switch (situation) {
+    case 'duel':
+      return {
+        first: `You just won a duel over a property against ${secondName}.`,
+        second: `You just lost a duel over a property to ${firstName}.`,
+      };
+    case 'trade':
+      return {
+        first: `You just completed a trade with ${secondName}.`,
+        second: `You just completed a trade with ${firstName}.`,
+      };
+    case 'auction':
+      return {
+        first: `You just won an auction against ${secondName}${amount != null ? ` (final bid $${amount})` : ''}.`,
+        second: `You just lost an auction to ${firstName}${amount != null ? ` (final bid $${amount})` : ''}.`,
+      };
+    default:
+      return { first: '', second: '' };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Dialogue-memory prompt assembly (MT2-SP4 direction B, T2). Pure formatters
 // that turn T1's structured memory core (attitude ledger + turn digest) plus
 // this task's diary lines into short, LLM-legible prompt text blocks. Kept
@@ -571,6 +668,53 @@ export class CharacterAI {
       return await this._callApi(messages, this.model);
     } catch (e) {
       console.warn('CharacterAI event response failed:', e.message);
+      return null;
+    }
+  }
+
+  // Season diary (T2): ONE first-person sentence per AI-voiced character per
+  // season_changed, mini model. Gated independently on both apiKey AND
+  // RULES.dialogue.diaryEnabled (defense in depth — App.js's caller already
+  // checks diaryEnabled before invoking this, but this method must also be
+  // safe to call directly/standalone, matching chat/introduce's own
+  // independent apiKey guards). Failures are caught and return null, never
+  // thrown — App.js's fire-and-forget diary trigger relies on that.
+  async writeDiaryEntry(character, lore, dialogueContext) {
+    if (!this.apiKey) return null;
+    if (!this.dialogueRules.diaryEnabled) return null;
+
+    const systemPrompt = this.buildSystemPrompt(character, lore, dialogueContext);
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: 'Write ONE first-person diary sentence reflecting on your recent fortunes and rivalries this season, drawing on your standing and recent history above where relevant. Output only the sentence — no quotes, no preamble.' },
+    ];
+
+    try {
+      return await this._callApi(messages, this.model);
+    } catch (e) {
+      console.warn('CharacterAI diary entry failed:', e.message);
+      return null;
+    }
+  }
+
+  // Banter line (T2): one side of a reply-pair (see resolveBanterPair),
+  // mini model, gated on RULES.dialogue.banterEnabled + apiKey. `situationText`
+  // is one of banterSituationText's two strings (already resolved by the
+  // caller — this method doesn't know which side of the pair it's voicing).
+  async banterLine(character, lore, dialogueContext, situationText) {
+    if (!this.apiKey) return null;
+    if (!this.dialogueRules.banterEnabled) return null;
+
+    const systemPrompt = this.buildSystemPrompt(character, lore, dialogueContext);
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `${situationText}\n\nRespond briefly and in character, directly addressing the other party (1 sentence).` },
+    ];
+
+    try {
+      return await this._callApi(messages, this.model);
+    } catch (e) {
+      console.warn('CharacterAI banter line failed:', e.message);
       return null;
     }
   }

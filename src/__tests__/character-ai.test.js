@@ -1,6 +1,7 @@
 const {
   CharacterAI, EVENT_TYPES, VERBOSITY, mapEngineEventToAi, consumeNewEvents,
   formatAttitudeTable, formatTurnDigest, formatDiaryLines, localeInstruction,
+  resolveBanterPair, findAuctionRival, banterSituationText,
 } = require('../character-ai');
 const { createLedgerState, applyEvent, buildTurnDigest, DEFAULT_DIALOGUE_RULES } = require('../dialogue/memory');
 const { setLocale, getLocale } = require('../i18n');
@@ -464,6 +465,67 @@ describe('CharacterAI', () => {
     });
   });
 
+  describe('writeDiaryEntry (T2 season diary)', () => {
+    test('returns null when no API key', async () => {
+      const ai = new CharacterAI('');
+      const result = await ai.writeDiaryEntry(mockCharacter, mockLore, {});
+      expect(result).toBeNull();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    test('returns null and never calls the API when diaryEnabled is false', async () => {
+      const ai = new CharacterAI('sk-test', { dialogueRules: { diaryEnabled: false } });
+      const result = await ai.writeDiaryEntry(mockCharacter, mockLore, {});
+      expect(result).toBeNull();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    test('calls the mini model and returns the diary sentence, prompt carries the memory blocks', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '陈留连失两城，记下了。' } }] }),
+      });
+      const ai = new CharacterAI('sk-test');
+      const result = await ai.writeDiaryEntry(mockCharacter, mockLore, {
+        diaryLines: [{ turn: 1, text: 'past entry' }],
+      });
+      expect(result).toBe('陈留连失两城，记下了。');
+      const body = JSON.parse(fetch.mock.calls[0][1].body);
+      expect(body.model).toBe('gpt-4o-mini');
+      expect(body.messages[0].content).toContain('past entry');
+      expect(body.messages[1].content).toContain('diary sentence');
+    });
+  });
+
+  describe('banterLine (T2 duel/auction/trade banter)', () => {
+    test('returns null when no API key', async () => {
+      const ai = new CharacterAI('');
+      const result = await ai.banterLine(mockCharacter, mockLore, {}, 'You just won a duel.');
+      expect(result).toBeNull();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    test('returns null and never calls the API when banterEnabled is false', async () => {
+      const ai = new CharacterAI('sk-test', { dialogueRules: { banterEnabled: false } });
+      const result = await ai.banterLine(mockCharacter, mockLore, {}, 'You just won a duel.');
+      expect(result).toBeNull();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    test('calls the mini model with the situation text as the user turn', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'Third time. I remember.' } }] }),
+      });
+      const ai = new CharacterAI('sk-test');
+      const result = await ai.banterLine(mockCharacter, mockLore, {}, 'You just won a duel over a property against Lia Frost.');
+      expect(result).toBe('Third time. I remember.');
+      const body = JSON.parse(fetch.mock.calls[0][1].body);
+      expect(body.model).toBe('gpt-4o-mini');
+      expect(body.messages[1].content).toContain('You just won a duel over a property against Lia Frost.');
+    });
+  });
+
   describe('concurrency guard', () => {
     test('returns null when max concurrent requests exceeded', async () => {
       // Create two slow requests that don't resolve
@@ -835,5 +897,139 @@ describe('localeInstruction', () => {
   test('invalid override falls back to the live locale rather than throwing', () => {
     setLocale('en');
     expect(localeInstruction('fr')).toContain('English');
+  });
+});
+
+// --- MT2-SP4 T2: banter pair resolution (pure, event-shape driven) ---
+
+describe('findAuctionRival', () => {
+  function auctionEv(seq, type, actor, data) { return { seq, type, actor, data }; }
+
+  test('returns the CLOSEST (most recent) losing bidder walking backward from auction_ended', () => {
+    const events = [
+      auctionEv(0, 'auction_started', null, { propertyId: 5, bidders: ['0', '1', '2'] }),
+      auctionEv(1, 'bid_placed', '0', { propertyId: 5, amount: 10 }),
+      auctionEv(2, 'bid_placed', '1', { propertyId: 5, amount: 20 }),
+      auctionEv(3, 'bid_placed', '0', { propertyId: 5, amount: 30 }),
+      auctionEv(4, 'auction_ended', null, { propertyId: 5, winnerId: '0', amount: 30 }),
+    ];
+    // Walking backward from seq 4: last bid_placed with actor != winner is seq 2 (actor '1').
+    expect(findAuctionRival(events, events[4])).toBe('1');
+  });
+
+  test('stops at this auction\'s own auction_started boundary (does not reach into an earlier auction)', () => {
+    const events = [
+      auctionEv(0, 'auction_started', null, { propertyId: 9, bidders: ['9'] }),
+      auctionEv(1, 'bid_placed', '9', { propertyId: 9, amount: 5 }),
+      auctionEv(2, 'auction_ended', null, { propertyId: 9, winnerId: '9', amount: 5 }),
+      auctionEv(3, 'auction_started', null, { propertyId: 5, bidders: ['0', '1'] }),
+      auctionEv(4, 'bid_placed', '0', { propertyId: 5, amount: 10 }),
+      auctionEv(5, 'auction_ended', null, { propertyId: 5, winnerId: '0', amount: 10 }),
+    ];
+    // Only bidder on property 5 IS the winner -> no rival, must not fall through to property 9's bidder.
+    expect(findAuctionRival(events, events[5])).toBeNull();
+  });
+
+  test('sole bidder (no rival) -> null', () => {
+    const events = [
+      auctionEv(0, 'auction_started', null, { propertyId: 5, bidders: ['0'] }),
+      auctionEv(1, 'bid_placed', '0', { propertyId: 5, amount: 10 }),
+      auctionEv(2, 'auction_ended', null, { propertyId: 5, winnerId: '0', amount: 10 }),
+    ];
+    expect(findAuctionRival(events, events[2])).toBeNull();
+  });
+
+  test('no-bid auction (winnerId null) -> null', () => {
+    const events = [
+      auctionEv(0, 'auction_started', null, { propertyId: 5, bidders: ['0'] }),
+      auctionEv(1, 'auction_ended', null, { propertyId: 5, winnerId: null, amount: null }),
+    ];
+    expect(findAuctionRival(events, events[1])).toBeNull();
+  });
+
+  test('non-auction_ended event or missing event -> null', () => {
+    expect(findAuctionRival([], null)).toBeNull();
+    expect(findAuctionRival([], { type: 'bid_placed', data: {} })).toBeNull();
+  });
+});
+
+describe('resolveBanterPair', () => {
+  test('duel_resolved: winner speaks first, loser second, regardless of who was the actor', () => {
+    // Actor is always the challenger (T1 report quirk) — winner here is the owner, not the actor.
+    const event = { type: 'duel_resolved', actor: '0', data: { ownerId: '1', winnerId: '1' } };
+    expect(resolveBanterPair(event, [])).toEqual({ firstId: '1', secondId: '0', situation: 'duel' });
+  });
+
+  test('duel_resolved with missing fields -> null', () => {
+    expect(resolveBanterPair({ type: 'duel_resolved', actor: null, data: { ownerId: '1', winnerId: '1' } }, [])).toBeNull();
+    expect(resolveBanterPair({ type: 'duel_resolved', actor: '0', data: { ownerId: null, winnerId: '1' } }, [])).toBeNull();
+  });
+
+  test('trade_accepted: proposer speaks first, acceptor (actor) second', () => {
+    const event = { type: 'trade_accepted', actor: '1', data: { proposerId: '0' } };
+    expect(resolveBanterPair(event, [])).toEqual({ firstId: '0', secondId: '1', situation: 'trade' });
+  });
+
+  test('trade_accepted with proposerId === actor (degenerate) -> null', () => {
+    expect(resolveBanterPair({ type: 'trade_accepted', actor: '0', data: { proposerId: '0' } }, [])).toBeNull();
+  });
+
+  test('auction_ended: winner speaks first, the closest losing bidder second', () => {
+    const events = [
+      { seq: 0, type: 'auction_started', actor: null, data: { propertyId: 5, bidders: ['0', '1'] } },
+      { seq: 1, type: 'bid_placed', actor: '1', data: { propertyId: 5, amount: 20 } },
+      { seq: 2, type: 'auction_ended', actor: null, data: { propertyId: 5, winnerId: '0', amount: 30 } },
+    ];
+    expect(resolveBanterPair(events[2], events)).toEqual({ firstId: '0', secondId: '1', situation: 'auction' });
+  });
+
+  test('auction_ended with no identifiable rival -> null', () => {
+    const events = [
+      { seq: 0, type: 'auction_started', actor: null, data: { propertyId: 5, bidders: ['0'] } },
+      { seq: 1, type: 'bid_placed', actor: '0', data: { propertyId: 5, amount: 10 } },
+      { seq: 2, type: 'auction_ended', actor: null, data: { propertyId: 5, winnerId: '0', amount: 10 } },
+    ];
+    expect(resolveBanterPair(events[2], events)).toBeNull();
+  });
+
+  test('unrelated event type -> null', () => {
+    expect(resolveBanterPair({ type: 'dice_rolled', actor: '0', data: {} }, [])).toBeNull();
+  });
+
+  test('null event -> null', () => {
+    expect(resolveBanterPair(null, [])).toBeNull();
+  });
+});
+
+describe('banterSituationText', () => {
+  test('duel: distinct first/second lines naming the OTHER party', () => {
+    const { first, second } = banterSituationText('duel', 'Albert Victor', 'Lia Frost', {});
+    expect(first).toContain('Lia Frost');
+    expect(first).toContain('won');
+    expect(second).toContain('Albert Victor');
+    expect(second).toContain('lost');
+  });
+
+  test('trade: both sides reference completing a trade with the other', () => {
+    const { first, second } = banterSituationText('trade', 'Albert Victor', 'Lia Frost', {});
+    expect(first).toContain('Lia Frost');
+    expect(second).toContain('Albert Victor');
+  });
+
+  test('auction: includes the real final bid amount from the event when present', () => {
+    const event = { data: { amount: 275 } };
+    const { first, second } = banterSituationText('auction', 'Albert Victor', 'Lia Frost', event);
+    expect(first).toContain('$275');
+    expect(second).toContain('$275');
+  });
+
+  test('auction: omits the amount clause gracefully when absent', () => {
+    const { first } = banterSituationText('auction', 'Albert Victor', 'Lia Frost', {});
+    expect(first).not.toContain('undefined');
+    expect(first).not.toContain('null');
+  });
+
+  test('unknown situation -> empty strings, no throw', () => {
+    expect(banterSituationText('mystery', 'A', 'B', {})).toEqual({ first: '', second: '' });
   });
 });

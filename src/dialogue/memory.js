@@ -60,6 +60,13 @@ export const DEFAULT_DIALOGUE_RULES = {
   botAttitudeEnabled: true,
   banterEnabled: true,
   diaryEnabled: true,
+  // T2 (season diaries): how many of a character's own most-recent diary
+  // entries are fed into a prompt (formatDiaryLines, character-ai.js) vs how
+  // many are RETAINED in the diary store (appendDiaryEntry below, save-
+  // envelope-bound). Kept as two separate knobs — a long game may want to
+  // retain more history than it re-feeds into every prompt.
+  diaryPromptLines: 3,
+  diaryHistoryCap: 12,
 };
 
 // Recognized RULES.dialogue field names — used ONLY to detect "this object is
@@ -70,6 +77,7 @@ export const DEFAULT_DIALOGUE_RULES = {
 const DIALOGUE_RULE_KEYS = [
   'digestWindow', 'weights', 'caps', 'decayPerSeason', 'rentGrudgeThreshold',
   'attitudeDisplay', 'botAttitudeEnabled', 'banterEnabled', 'diaryEnabled',
+  'diaryPromptLines', 'diaryHistoryCap',
 ];
 
 // Accepts: the full RULES object (reads .dialogue off it), a RULES.dialogue-
@@ -301,6 +309,84 @@ export function deserializeLedger(raw) {
     // object — functionally identical under getAttitude either way, but
     // keeps a rehydrated ledger's own key set honest.
     if (Object.keys(nextBucket).length > 0) out[charId] = nextBucket;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Diary store (T2, "season diaries") — per-character array of
+// {turn, seasonIndex, seasonName, text} entries, one written per
+// season_changed the character was voiced through (character-ai.js
+// writeDiaryEntry + App.js's season-change trigger). Pure state + pure
+// updaters, same JSON-plain-object discipline as the ledger above, extending
+// the save-envelope-facing store this module owns (see serializeDialogueMemory
+// below) rather than a second, parallel storage mechanism.
+// ---------------------------------------------------------------------------
+
+export function createDiaryState() {
+  return {};
+}
+
+// Appends one entry for charId, trimming to RULES.dialogue.diaryHistoryCap
+// (oldest dropped first) so an unbounded diary can't grow forever inside the
+// save envelope across a very long game. No-ops (returns state unchanged,
+// falling back to a fresh store if state itself was missing) on a
+// missing charId or entry.
+export function appendDiaryEntry(diaryState, charId, entry, rulesLike) {
+  const state = diaryState || createDiaryState();
+  if (charId == null || !entry) return state;
+  const rules = resolveDialogueRules(rulesLike);
+  const cap = Number.isFinite(rules.diaryHistoryCap) && rules.diaryHistoryCap > 0
+    ? rules.diaryHistoryCap : DEFAULT_DIALOGUE_RULES.diaryHistoryCap;
+  const prior = state[charId] || [];
+  const nextEntry = {
+    turn: Number.isFinite(entry.turn) ? entry.turn : 0,
+    seasonIndex: Number.isFinite(entry.seasonIndex) ? entry.seasonIndex : null,
+    seasonName: typeof entry.seasonName === 'string' ? entry.seasonName : '',
+    text: String(entry.text || ''),
+  };
+  const nextList = [...prior, nextEntry];
+  const trimmed = nextList.length > cap ? nextList.slice(nextList.length - cap) : nextList;
+  return { ...state, [charId]: trimmed };
+}
+
+// Most recent `n` entries for charId, OLDEST FIRST (chronological reading
+// order — see formatDiaryLines in character-ai.js, which renders them as a
+// first-person arc, most recent last). Missing charId/state, or n<=0/absent,
+// returns [] rather than throwing.
+export function getRecentDiaryLines(diaryState, charId, n) {
+  if (!diaryState || charId == null || !Array.isArray(diaryState[charId])) return [];
+  const count = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  if (count === 0) return [];
+  const list = diaryState[charId];
+  return list.length > count ? list.slice(list.length - count) : list.slice();
+}
+
+// JSON-safe defensive deep clone, mirroring serializeLedger's contract.
+export function serializeDiaries(diaryState) {
+  return JSON.parse(JSON.stringify(diaryState || {}));
+}
+
+// Tolerant of missing/partial/malformed entries (old-save forward-compat),
+// same posture as deserializeLedger: non-array buckets are dropped, entries
+// missing a non-empty `text` are dropped (a diary entry IS its text — no
+// text, no entry), numeric fields fall back to safe defaults rather than
+// propagating NaN/undefined.
+export function deserializeDiaries(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const charId of Object.keys(raw)) {
+    const list = raw[charId];
+    if (!Array.isArray(list)) continue;
+    const cleaned = list
+      .filter(e => e && typeof e === 'object' && typeof e.text === 'string' && e.text.length > 0)
+      .map(e => ({
+        turn: Number.isFinite(e.turn) ? e.turn : 0,
+        seasonIndex: Number.isFinite(e.seasonIndex) ? e.seasonIndex : null,
+        seasonName: typeof e.seasonName === 'string' ? e.seasonName : '',
+        text: e.text,
+      }));
+    if (cleaned.length > 0) out[charId] = cleaned;
   }
   return out;
 }
