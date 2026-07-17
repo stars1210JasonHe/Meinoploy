@@ -325,6 +325,7 @@ class MonopolyBoard {
     this._bubbles = {};
     this._bubbleTimers = {};
     this._bubbleSeq = 0;
+    this._bubbleRepositionRaf = null; // pending rAF handle from _scheduleBubbleReposition (scroll/resize coalescing)
 
     // Audio + animator: constructed exactly ONCE, here at app-boot — not per-game-start.
     // this.mapData already exists (setMap() ran above); this.boardEl/tokenLayer don't exist
@@ -660,6 +661,13 @@ class MonopolyBoard {
     // classic-board on/off probe (`getBoundingClientRect().width` on
     // `boardEl`, gated behind an `actionBarEl` truthiness guard).
     this.chipsBarEl = document.querySelector('.game__chips');
+    // Chip-strip scroll moves the bubble anchors without any G change, so no
+    // update() tick fires to reposition them (T3-review SHOULD-FIX 2a) —
+    // passive (never blocks scrolling) + rAF-throttled via
+    // _scheduleBubbleReposition. Also the seam the visibility gate in
+    // _renderBubbles relies on: scrolling a chip out of the strip hides its
+    // bubble on this very listener's next frame.
+    this.chipsBarEl.addEventListener('scroll', () => this._scheduleBubbleReposition(), { passive: true });
     this.actionBarEl = document.querySelector('.game__actionbar');
     this.manageEl = document.getElementById('manage');
     this.messagesEl = document.getElementById('log');
@@ -879,7 +887,10 @@ class MonopolyBoard {
     // `resize` event on fullscreen ENTER and EXIT (viewport dimensions actually
     // change), so a dedicated `fullscreenchange` hook is not needed — see
     // task-4-report.md for the verification note.
-    window.addEventListener('resize', () => { this._syncGutterMode(); this._syncChromeBands(); });
+    // _scheduleBubbleReposition runs AFTER the two syncs (T3-review
+    // SHOULD-FIX 2b) — and being rAF-deferred it positions against the
+    // post-resize, post-gutter-flip layout, never the mid-transition one.
+    window.addEventListener('resize', () => { this._syncGutterMode(); this._syncChromeBands(); this._scheduleBubbleReposition(); });
 
     // Modal close on scrim click
     this.stateModalEl.addEventListener('click', (e) => { if (e.target === this.stateModalEl) { /* state-driven; ignore */ } });
@@ -1455,6 +1466,10 @@ class MonopolyBoard {
     if (ctx.gameover) {
       this._teardownGlobe(); // results screen doesn't call renderBoard — stop the globe RAF/WebGL
       if (this.animator) this.animator.reset(); // clear any in-flight dice/hop before results paint
+      // T3 (review NIT): same treatment as exitToMenu/loadGame — the chip
+      // strip is gone on the results screen, and a pending dismiss timer
+      // firing after teardown would otherwise touch stale bubble DOM.
+      this._clearBubbles();
       this._showScreen('results');
       this.renderResults(G, ctx);
       return;
@@ -1467,11 +1482,6 @@ class MonopolyBoard {
     this._renderLegend(G, ctx);
     this.renderTokens(G, ctx);
     this.renderPlayerInfo(G, ctx);
-    // T3: repositions (never recreates unchanged) any active speech bubbles
-    // against this render's fresh chip DOM — see _renderBubbles' doc comment
-    // for why this must run AFTER renderPlayerInfo on every tick yet still
-    // never restarts an unrelated bubble's CSS animation.
-    this._renderBubbles();
     this.renderTurnbox(G, ctx);
     this.renderManage(G, ctx);
     const logLines = this.renderMessages(G);
@@ -1494,6 +1504,15 @@ class MonopolyBoard {
     // comment on the method for why this is JS-measured instead of a static
     // CSS worst-case default.
     this._syncChromeBands();
+    // T3 (review SHOULD-FIX 2c): bubbles position against this render's
+    // fresh chip DOM (needs renderPlayerInfo done) AND the FINAL chrome
+    // layout — _syncGutterMode can flip the chip strip between the floating
+    // top strip and the left rail column this very tick, moving every chip,
+    // so this must run after BOTH syncs above, not right after
+    // renderPlayerInfo (where it originally sat). Purely positional for
+    // unchanged bubble seqs — never restarts a bubble's CSS animation
+    // (see _renderBubbles' doc comment).
+    this._renderBubbles();
     if (this.animator) { this.animator.onState(G); this.animator.afterRender(); }
     // Paced bot-turn stepper (local-bots wiring): single-flight internally, so
     // calling this every render is cheap (no-op unless the current acting seat
@@ -4218,6 +4237,15 @@ class MonopolyBoard {
       const owner = node.dataset.bubbleOwner;
       if (!this._bubbles[owner]) node.remove();
     });
+    // The chip strip (.game__chips) is a scroll container (overflow-x:auto in
+    // the floating strip; overflow-y:auto as the gutter-mode rail column) —
+    // a chip scrolled out of its visible box still reports real viewport
+    // coords via getBoundingClientRect, so a bubble positioned against it
+    // would float over whatever happens to be at those coords (T3-review
+    // SHOULD-FIX 2a). Measure the container's own rect once per pass and
+    // HIDE (display:none, timer untouched — the bubble's lifetime is wall-
+    // clock, not visibility) any bubble whose chip doesn't intersect it.
+    const stripRect = this.chipsBarEl ? this.chipsBarEl.getBoundingClientRect() : null;
     Object.keys(this._bubbles).forEach(key => {
       const bubble = this._bubbles[key];
       const chipEl = this.playerInfoEl.querySelector(`[data-chip="${key}"]`);
@@ -4231,20 +4259,54 @@ class MonopolyBoard {
         node = fresh;
       }
       const rect = chipEl.getBoundingClientRect();
+      // Visibility gate: chip must intersect its scroll container's visible
+      // box (both axes — horizontal matters in the floating strip, vertical
+      // in the gutter rail) AND have a real size (width 0 = display:none or
+      // detached-mid-transition). Hidden bubbles keep their state + dismiss
+      // timer and reappear at the correct spot on the next _renderBubbles
+      // (scroll/resize/render tick) if still alive.
+      const visible = rect.width > 0 && (!stripRect || (
+        rect.right > stripRect.left && rect.left < stripRect.right &&
+        rect.bottom > stripRect.top && rect.top < stripRect.bottom
+      ));
+      node.style.display = visible ? '' : 'none';
+      if (!visible) return;
       node.style.left = (rect.left + rect.width / 2) + 'px';
       node.style.top = rect.top + 'px';
     });
   }
 
+  // rAF-throttled reposition for high-frequency geometry events (chip-strip
+  // scroll, window resize — T3-review SHOULD-FIX 2a/2b). Multiple calls
+  // within one frame collapse into a single _renderBubbles, which is purely
+  // positional for unchanged seqs (no DOM recreation — see its doc comment),
+  // so this can never restart a bubble's CSS animation either.
+  _scheduleBubbleReposition() {
+    if (this._bubbleRepositionRaf) return;
+    const raf = (typeof requestAnimationFrame === 'function')
+      ? requestAnimationFrame.bind(null)
+      : (fn) => setTimeout(fn, 16);
+    this._bubbleRepositionRaf = raf(() => {
+      this._bubbleRepositionRaf = null;
+      this._renderBubbles();
+    });
+  }
+
   // Cancels every pending dismiss timer and clears all bubble state/DOM —
-  // called from exitToMenu/loadGame (same "per-GAME, not per-boot" treatment
-  // as dialogueLedger/dialogueDiaries just above them) so a finished or
+  // called from exitToMenu/loadGame/the gameover branch (same "per-GAME, not
+  // per-boot" treatment as dialogueLedger/dialogueDiaries) so a finished or
   // about-to-be-replaced game can never leave a stray setTimeout firing into
-  // the NEXT game's chip strip.
+  // the NEXT game's chip strip. Also drops any queued reposition frame — a
+  // pending rAF running _renderBubbles after this would harmlessly no-op
+  // (empty state), but cancelling keeps the teardown airtight.
   _clearBubbles() {
     Object.keys(this._bubbleTimers).forEach(key => clearTimeout(this._bubbleTimers[key]));
     this._bubbleTimers = {};
     this._bubbles = {};
+    if (this._bubbleRepositionRaf && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this._bubbleRepositionRaf);
+    }
+    this._bubbleRepositionRaf = null;
     if (this.dialogueBubblesEl) this.dialogueBubblesEl.innerHTML = '';
   }
 
