@@ -614,6 +614,57 @@ describe('CharacterAI', () => {
       expect(ai.getCostEstimate()).toMatchObject({ spentUSD: 1.23, callCount: 45 });
     });
 
+    // T2-review Fix 2: session-scoped monotonicity — loading an EARLIER
+    // save must never roll the in-session spend counter backward, or
+    // checkpoint-cycling (spend → load older save → spend again) could
+    // bill real dollars far past the $3 cap while the counter kept
+    // resetting.
+    test('loading a save with LOWER stored spend never rolls the session counter backward', async () => {
+      fetch.mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: 'x' } }] }) });
+      const ai = new CharacterAI('sk-test', { verbosity: VERBOSITY.ALL });
+      // Spend to X = 0.003 / 3 calls in this session.
+      for (let i = 0; i < 3; i++) {
+        await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      }
+      expect(ai.getCostEstimate()).toMatchObject({ spentUSD: 0.003, callCount: 3 });
+      // "Load an earlier checkpoint" carrying a lower stored spend.
+      ai.setCostEstimate({ spentUSD: 0.001, callCount: 1 });
+      // Counter stays at X — the session already made those real calls.
+      expect(ai.getCostEstimate()).toMatchObject({ spentUSD: 0.003, callCount: 3 });
+    });
+
+    test('after loading a lower-spend save, the cap still triggers at the true session total (poison-pill)', async () => {
+      fetch.mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: 'x' } }] }) });
+      // Budget allows exactly 4 reaction calls (4 x 0.001).
+      const ai = new CharacterAI('sk-test', { verbosity: VERBOSITY.ALL, dialogueRules: { costBudgetUSD: 0.004 } });
+      for (let i = 0; i < 3; i++) {
+        await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      }
+      // Checkpoint-cycle attempt: load an old save claiming only 1 call spent.
+      ai.setCostEstimate({ spentUSD: 0.001, callCount: 1 });
+      // 4th call still allowed (true total 0.003 < 0.004)...
+      const r4 = await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      expect(r4).not.toBeNull();
+      expect(fetch).toHaveBeenCalledTimes(4);
+      // ...and the 5th is blocked at the TRUE session total, not the rolled-back one.
+      const poisonFetch = jest.fn(() => { throw new Error('cap bypassed — should never be called'); });
+      global.fetch = poisonFetch;
+      const r5 = await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      expect(r5).toBeNull();
+      expect(poisonFetch).not.toHaveBeenCalled();
+      expect(ai.getCostEstimate().capped).toBe(true);
+      global.fetch = fetch; // restore the jest.fn() mock for subsequent tests
+    });
+
+    test('after resetCostEstimate (genuinely new game), setCostEstimate can seed any value again', () => {
+      const ai = new CharacterAI('sk-test');
+      ai.setCostEstimate({ spentUSD: 2.5, callCount: 200 });
+      ai.resetCostEstimate(); // exitToMenu — a true reset, new budget
+      expect(ai.getCostEstimate()).toMatchObject({ spentUSD: 0, callCount: 0 });
+      ai.setCostEstimate({ spentUSD: 0.5, callCount: 10 }); // load a different game's save
+      expect(ai.getCostEstimate()).toMatchObject({ spentUSD: 0.5, callCount: 10 });
+    });
+
     test('setCostEstimate tolerates missing/malformed input (old-save forward-compat) -> 0/0', () => {
       const ai = new CharacterAI('sk-test');
       ai.setCostEstimate({ spentUSD: 'oops', callCount: null });

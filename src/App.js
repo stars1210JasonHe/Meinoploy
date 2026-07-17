@@ -4222,7 +4222,12 @@ class MonopolyBoard {
     this.dialogueDiaries = dm.diaries;
     // The $3 cap is per-GAME (see saveGame's comment) — a loaded game
     // resumes counting from its own saved spend rather than getting a fresh
-    // budget, so a save/reload cycle can never be used to bypass the cap.
+    // budget. setCostEstimate clamps to max(current, loaded) — session-
+    // scoped monotonicity (T2-review Fix 2, see its doc comment in
+    // character-ai.js) — so neither reloading THIS save nor checkpoint-
+    // cycling back to an EARLIER save can ever lower what this session has
+    // already spent; only exitToMenu's resetCostEstimate() grants a fresh
+    // budget.
     this.characterAI.setCostEstimate(dm.spentEstimate);
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';

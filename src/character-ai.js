@@ -497,10 +497,29 @@ export class CharacterAI {
   // Restores a persisted {spentUSD, callCount} (save-envelope load path).
   // Tolerant of a missing/malformed estimate (old saves, corrupt data) —
   // falls back to 0/0 rather than propagating NaN into the cap check.
+  //
+  // T2-review Fix 2 — SESSION-SCOPED MONOTONICITY: within one browser
+  // session the in-memory counters can only ever INCREASE via this method
+  // (Math.max clamp per field). An unconditional overwrite let loading an
+  // EARLIER save roll the spend counter backward, so checkpoint-cycling
+  // (spend → load older save → spend again → repeat) could bill real
+  // dollars far past the owner's $3 hard cap while the counter kept
+  // resetting — the exact bypass the cap exists to prevent. The two scopes
+  // compose as: per-game PERSISTENCE (the envelope carries the counter
+  // across save/load so a resumed game continues its own budget) +
+  // per-session MONOTONICITY (no load within a running session can lower
+  // what this session has already been charged for — real API calls
+  // already happened; a save file can't un-spend them). A genuinely NEW
+  // budget comes only from resetCostEstimate() above (exitToMenu / fresh
+  // game). Side effect, deliberately fail-closed: loading a DIFFERENT
+  // match's save mid-session without exiting to menu first keeps
+  // max(current, loaded) — conservative over-counting, never under.
   setCostEstimate(est) {
     const e = est || {};
-    this._spentEstimateUSD = Number.isFinite(e.spentUSD) ? e.spentUSD : 0;
-    this._callCount = Number.isFinite(e.callCount) ? e.callCount : 0;
+    const loadedSpent = Number.isFinite(e.spentUSD) ? e.spentUSD : 0;
+    const loadedCount = Number.isFinite(e.callCount) ? e.callCount : 0;
+    this._spentEstimateUSD = Math.max(this._spentEstimateUSD, loadedSpent);
+    this._callCount = Math.max(this._callCount, loadedCount);
   }
 
   isEnabled() {
