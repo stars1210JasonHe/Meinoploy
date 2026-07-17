@@ -33,6 +33,8 @@ import {
   getRecentDiaryLines,
   serializeDiaries,
   deserializeDiaries,
+  serializeDialogueMemory,
+  deserializeDialogueMemory,
 } from '../dialogue/memory';
 
 function ev(seq, turn, type, actor, data) {
@@ -522,6 +524,47 @@ describe('diary store', () => {
     const out = deserializeDiaries({ '0': [{ turn: 1 }, 'junk'] });
     expect(out['0']).toBeUndefined();
     expect(Object.keys(out)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Save-envelope combined serialize/deserialize (T2 persistence)
+// ---------------------------------------------------------------------------
+
+describe('serializeDialogueMemory / deserializeDialogueMemory', () => {
+  test('round-trips ledger + diaries + spentEstimate together', () => {
+    let ledger = createLedgerState();
+    ledger = applyEvent(ledger, ev(0, 1, 'bankruptcy', '1', { creditorId: '0' }), RULES);
+    let diaries = appendDiaryEntry(createDiaryState(), '0', { turn: 1, seasonIndex: 0, seasonName: 'Summer', text: 'hello' }, RULES);
+    const memory = { ledger, diaries, spentEstimate: { spentUSD: 1.5, callCount: 12 } };
+
+    const raw = serializeDialogueMemory(memory);
+    const restored = deserializeDialogueMemory(raw);
+
+    expect(restored.ledger).toEqual(ledger);
+    expect(restored.diaries).toEqual(diaries);
+    expect(restored.spentEstimate).toEqual({ spentUSD: 1.5, callCount: 12 });
+  });
+
+  test('absent-save-field tolerance: deserializeDialogueMemory(undefined) -> fresh empty memory (old-save forward-compat)', () => {
+    const restored = deserializeDialogueMemory(undefined);
+    expect(restored.ledger).toEqual(createLedgerState());
+    expect(restored.diaries).toEqual(createDiaryState());
+    expect(restored.spentEstimate).toEqual({ spentUSD: 0, callCount: 0 });
+  });
+
+  test('null/non-object input -> fresh empty memory, no throw', () => {
+    expect(deserializeDialogueMemory(null)).toEqual({ ledger: {}, diaries: {}, spentEstimate: { spentUSD: 0, callCount: 0 } });
+    expect(deserializeDialogueMemory('garbage')).toEqual({ ledger: {}, diaries: {}, spentEstimate: { spentUSD: 0, callCount: 0 } });
+  });
+
+  test('malformed spentEstimate (non-finite / missing fields) falls back to 0/0 per field independently', () => {
+    const raw = { ledger: {}, diaries: {}, spentEstimate: { spentUSD: 'oops', callCount: 7 } };
+    expect(deserializeDialogueMemory(raw).spentEstimate).toEqual({ spentUSD: 0, callCount: 7 });
+  });
+
+  test('serializeDialogueMemory on an empty/undefined memory object produces a well-formed envelope', () => {
+    expect(serializeDialogueMemory(undefined)).toEqual({ ledger: {}, diaries: {}, spentEstimate: { spentUSD: 0, callCount: 0 } });
   });
 });
 

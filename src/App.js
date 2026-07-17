@@ -19,6 +19,7 @@ import {
 import {
   createLedgerState, applyEvents, buildTurnDigest,
   createDiaryState, appendDiaryEntry, getRecentDiaryLines,
+  serializeDialogueMemory, deserializeDialogueMemory,
 } from './dialogue/memory';
 import { loadWorld } from './world-loader';
 import { routeChoices } from './atlas-movement';
@@ -4138,7 +4139,18 @@ class MonopolyBoard {
       }
       return;
     }
-    const saveData = { G: G, currentPlayer: ctx.currentPlayer, numPlayers: G.players.length, modId: this.activeMod.id, mapId: this.mapData.id, timestamp: Date.now(), botSeats: [...this.botSeats] };
+    // dialogueMemory (MT2-SP4 T2): ledger + diaries + the LLM cost-cap's
+    // running spend estimate ride the envelope beside botSeats. The spend
+    // counter DOES persist across save/load — the $3 cap is per-GAME, not
+    // per-browser-boot, so a reloaded game must resume counting from where
+    // it left off rather than getting a fresh $3 (see T2 report for the
+    // full reasoning).
+    const dialogueMemory = serializeDialogueMemory({
+      ledger: this.dialogueLedger,
+      diaries: this.dialogueDiaries,
+      spentEstimate: this.characterAI.getCostEstimate(),
+    });
+    const saveData = { G: G, currentPlayer: ctx.currentPlayer, numPlayers: G.players.length, modId: this.activeMod.id, mapId: this.mapData.id, timestamp: Date.now(), botSeats: [...this.botSeats], dialogueMemory };
     const saveName = `meinopoly_save_${new Date().toLocaleString().replace(/[/:]/g, '-')}`;
     const saves = JSON.parse(localStorage.getItem('meinopoly_saves') || '{}');
     saves[saveName] = saveData;
@@ -4183,13 +4195,19 @@ class MonopolyBoard {
     this._logSeenCount = 0;
     this.activeChatCharId = null;
     this._lastEventSeq = undefined;
-    // MT2-SP4 T2: dialogue memory restoration from the save envelope lands in
-    // a later commit (persistence); until then every load starts a fresh
-    // ledger/diary store, same as exitToMenu — never worse than "memory
-    // absent", never stale/wrong.
-    this.dialogueLedger = createLedgerState();
-    this._lastLedgerSeq = undefined;
-    this.dialogueDiaries = createDiaryState();
+    // MT2-SP4 T2: restore dialogue memory from the save envelope. A save
+    // with no `dialogueMemory` field at all (pre-T2 save) -> deserializeDialogueMemory(undefined)
+    // -> fresh empty ledger/diaries/spentEstimate — same "the save predates
+    // this field -> safe default" treatment rehydrateSavedG (Game.js) gives
+    // events/eventSeq/luckRedraws, and loadGame already gives botSeats.
+    const dm = deserializeDialogueMemory(saveData.dialogueMemory);
+    this.dialogueLedger = dm.ledger;
+    this._lastLedgerSeq = undefined; // lazy re-init against savedG.events, mirroring _lastEventSeq
+    this.dialogueDiaries = dm.diaries;
+    // The $3 cap is per-GAME (see saveGame's comment) — a loaded game
+    // resumes counting from its own saved spend rather than getting a fresh
+    // budget, so a save/reload cycle can never be used to bypass the cap.
+    this.characterAI.setCostEstimate(dm.spentEstimate);
     if (this.aiResponsesEl) this.aiResponsesEl.innerHTML = '';
     if (this.chatPanelEl) this.chatPanelEl.innerHTML = '';
     const savedG = saveData.G;

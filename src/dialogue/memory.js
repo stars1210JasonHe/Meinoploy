@@ -418,6 +418,47 @@ export function deserializeDiaries(raw) {
 }
 
 // ---------------------------------------------------------------------------
+// Save-envelope-level combined serialize/deserialize (T2 persistence). This
+// is the SINGLE function App.js's saveGame/loadGame call — a thin wrapper
+// composing serializeLedger/deserializeLedger (T1) and
+// serializeDiaries/deserializeDiaries (above) plus the LLM cost-cap's
+// {spentUSD, callCount} counters (character-ai.js owns the counters
+// themselves; this module only knows how to round-trip the plain numbers
+// tolerantly — see the T2 report for the "persist across save/load" decision).
+// Extends T1's serialize format COMPATIBLY: an old save with no
+// `dialogueMemory` field at all is the caller's job to detect (App.js passes
+// `undefined` here in that case), which — same as deserializeLedger's own
+// "absent field -> fresh ledger" contract — yields a fully fresh, empty
+// memory rather than throwing.
+// ---------------------------------------------------------------------------
+
+export function serializeDialogueMemory(memory) {
+  const m = memory || {};
+  const spent = m.spentEstimate || {};
+  return {
+    ledger: serializeLedger(m.ledger),
+    diaries: serializeDiaries(m.diaries),
+    spentEstimate: {
+      spentUSD: Number.isFinite(spent.spentUSD) ? spent.spentUSD : 0,
+      callCount: Number.isFinite(spent.callCount) ? spent.callCount : 0,
+    },
+  };
+}
+
+export function deserializeDialogueMemory(raw) {
+  const r = (raw && typeof raw === 'object') ? raw : {};
+  const spent = (r.spentEstimate && typeof r.spentEstimate === 'object') ? r.spentEstimate : {};
+  return {
+    ledger: deserializeLedger(r.ledger),
+    diaries: deserializeDiaries(r.diaries),
+    spentEstimate: {
+      spentUSD: Number.isFinite(spent.spentUSD) ? spent.spentUSD : 0,
+      callCount: Number.isFinite(spent.callCount) ? spent.callCount : 0,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Turn digest
 // ---------------------------------------------------------------------------
 
