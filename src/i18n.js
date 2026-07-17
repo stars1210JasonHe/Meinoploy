@@ -342,6 +342,16 @@ export const STRINGS = {
     'lore.passive': '被动技能',
     'lore.startingCapital': '起始资金',
     'lore.close': '关闭',
+    // Lore modal tab rail (T3, MT2-SP4 direction B): only rendered when the
+    // character has at least one stored diary entry (App.js showLoreModal).
+    'lore.tabBio': '简介',
+    'lore.tabDiary': '心路',
+
+    // Player-detail popover: code-driven attitude section (game-chrome.js
+    // attitudeChipsHtml). Keyless-safe — grudge/trust are pure ledger reads.
+    'attitude.title': '态度',
+    'attitude.grudgeLabel': '宿怨',
+    'attitude.trustLabel': '信任',
   },
   en: {
     'topbar.load': 'LOAD',
@@ -648,6 +658,12 @@ export const STRINGS = {
     'lore.passive': 'PASSIVE',
     'lore.startingCapital': 'STARTING CAPITAL',
     'lore.close': 'CLOSE',
+    'lore.tabBio': 'PROFILE',
+    'lore.tabDiary': 'DIARY',
+
+    'attitude.title': 'STANDING',
+    'attitude.grudgeLabel': 'GRUDGE',
+    'attitude.trustLabel': 'TRUST',
   },
 };
 

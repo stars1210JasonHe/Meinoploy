@@ -21,6 +21,11 @@ import {
   createDiaryState, appendDiaryEntry, getRecentDiaryLines,
   serializeDialogueMemory, deserializeDialogueMemory,
 } from './dialogue/memory';
+// T3 (MT2-SP4 direction B): read-only ledger accessor for the player-detail
+// popover's attitude section — split onto its own import so the commit that
+// adds attitude chips (T3 deliverable 2) doesn't also touch the T1/T2 import
+// block above.
+import { getAttitude } from './dialogue/memory';
 import { loadWorld } from './world-loader';
 import { routeChoices } from './atlas-movement';
 import { miniMapSvg, pluralize, breadcrumbSteps } from './entry-ui';
@@ -34,6 +39,8 @@ import { chipHtml, chipDetailHtml, tileDetailHtml, drawerShellHtml, tokenVisual,
 // content builder — its own import line so this commit doesn't also touch
 // deliverable 2's imports below.
 import { bubbleHtml } from './game-chrome';
+// T3, deliverable 2 (attitude chips + diary tab).
+import { attitudeChipsHtml, diaryTabHtml } from './game-chrome';
 import { resolveBoardBg, starfieldDataUri } from './board-bg';
 import { bloomSprite } from './wr-bloom';
 // Local computer players (Task 2 wiring): bot-driver.js is the engine-decoupled
@@ -2945,7 +2952,13 @@ class MonopolyBoard {
   _openPlayerDetail(playerId) {
     const idx = parseInt(playerId, 10);
     const d = this._chipDetail && this._chipDetail[idx];
-    if (d) this.openUiModal(chipDetailHtml(d));
+    if (!d) return;
+    this.openUiModal(chipDetailHtml(d));
+    // T3: chipDetailHtml renders a "view lore" button (#btn-chip-lore) only
+    // when d.charId is set — wire its click the same way btn-lore-close is
+    // wired right after showLoreModal's own openUiModal call, just above.
+    const loreBtn = document.getElementById('btn-chip-lore');
+    if (loreBtn) loreBtn.onclick = () => this.showLoreModal(d.charId);
   }
 
   // First-paragraph lore excerpt for the chip/token popover (spec §2.5b).
@@ -3001,6 +3014,22 @@ class MonopolyBoard {
         if (player.regulatedProperty !== null && player.regulatedProperty !== undefined) abilities.push(t('chip.abilityReg', { name: this.boardSpaces[player.regulatedProperty].name }));
       }
 
+      // T3 (MT2-SP4 direction B): this character's standing toward every OTHER
+      // seated character — pure ledger reads (this.dialogueLedger, folded
+      // unconditionally every render by _updateDialogueLedger), works with
+      // zero API key. attitudeChipsHtml omits neutral (0/0) rows and returns
+      // '' entirely when nothing is non-neutral yet (fresh game, turn 1).
+      let attitudeHtml = '';
+      if (char) {
+        const attitudeRows = [];
+        G.players.forEach((op, oi) => {
+          if (oi === i || !op.character) return;
+          const att = getAttitude(this.dialogueLedger, char.id, op.character.id);
+          attitudeRows.push({ name: op.character.name, color: this._playerColor(G, oi), grudge: att.grudge, trust: att.trust });
+        });
+        attitudeHtml = attitudeChipsHtml(attitudeRows, RULES.dialogue.attitudeDisplay);
+      }
+
       html += chipHtml({
         idx: i, name, color,
         portraitUrl: cchar ? cchar.portrait : null,
@@ -3022,6 +3051,12 @@ class MonopolyBoard {
         // Task 3 (spec §2.5b): first-paragraph lore excerpt, shown in both the
         // chip-click and token-click popovers (same cache, same builder).
         loreHtml: char ? this._loreParagraphHtml(char.id) : null,
+        // T3 (MT2-SP4 direction B): attitude section (see above) + charId,
+        // the latter so chipDetailHtml can render a "view lore" button that
+        // opens showLoreModal(charId) mid-game (previously only reachable
+        // from character-select — needed for the diary tab to ever be seen).
+        attitudeHtml,
+        charId: char ? char.id : null,
       };
     });
     this.playerInfoEl.innerHTML = html;
@@ -3630,6 +3665,23 @@ class MonopolyBoard {
       <div class="lore__body"><blockquote>${lore.themeSummary.replace(/\n/g, '<br/>')}</blockquote></div>
     `;
     const startMoney = RULES.core.baseStartingMoney + char.stats.capital * RULES.stats.capital.startingMoneyBonus;
+
+    // T3 (MT2-SP4 direction B): 心路/Diary tab — stored diary lines for THIS
+    // character (this.dialogueDiaries, live only during a game; empty/absent
+    // pre-game or keyless — no LLM call happens here, purely a read). The
+    // whole tab rail is omitted (not just the panel) when there are zero
+    // entries, so a keyless or fresh game's lore modal renders EXACTLY as
+    // before (untabbed single panel) — "hidden entirely" per the brief.
+    const diaryEntries = getRecentDiaryLines(this.dialogueDiaries, charId, RULES.dialogue.diaryHistoryCap);
+    const diaryHtml = diaryTabHtml(diaryEntries);
+    const hasDiary = !!diaryHtml;
+    const tabsHtml = hasDiary ? `
+      <div class="lore__tabs">
+        <button class="lore__tab lore__tab--active" data-lore-tab="bio">${t('lore.tabBio')}</button>
+        <button class="lore__tab" data-lore-tab="diary">${t('lore.tabDiary')}</button>
+      </div>` : '';
+    const diaryPanelHtml = hasDiary ? `<div class="lore__panel" data-lore-panel="diary" hidden>${diaryHtml}</div>` : '';
+
     this.openUiModal(`
       <div class="lore">
         <div class="lore__left">
@@ -3639,15 +3691,27 @@ class MonopolyBoard {
           <div class="lore__stats">${statRowsHtml(char.stats, char.color)}</div>
         </div>
         <div class="lore__right">
-          <div class="lore__sectlabel">${t('lore.passive')} · ${esc(char.passive.name)}</div>
-          <div class="lore__passive">${esc(char.passive.description)}</div>
-          <div class="lore__sectlabel">${t('lore.startingCapital')}</div>
-          <div class="lore__money">${money(startMoney)}</div>
-          ${sections}
+          ${tabsHtml}
+          <div class="lore__panel" data-lore-panel="bio">
+            <div class="lore__sectlabel">${t('lore.passive')} · ${esc(char.passive.name)}</div>
+            <div class="lore__passive">${esc(char.passive.description)}</div>
+            <div class="lore__sectlabel">${t('lore.startingCapital')}</div>
+            <div class="lore__money">${money(startMoney)}</div>
+            ${sections}
+          </div>
+          ${diaryPanelHtml}
           <div class="lore__close"><button class="pix-btn pix-btn--primary" id="btn-lore-close">${t('lore.close')}</button></div>
         </div>
       </div>`, true);
     document.getElementById('btn-lore-close').onclick = () => this.closeUiModal();
+    if (hasDiary) {
+      this.uiModalBoxEl.querySelectorAll('[data-lore-tab]').forEach(btn => {
+        btn.onclick = () => {
+          this.uiModalBoxEl.querySelectorAll('[data-lore-tab]').forEach(b => b.classList.toggle('lore__tab--active', b === btn));
+          this.uiModalBoxEl.querySelectorAll('[data-lore-panel]').forEach(p => { p.hidden = p.dataset.lorePanel !== btn.dataset.loreTab; });
+        };
+      });
+    }
   }
 
   showAISettings() {

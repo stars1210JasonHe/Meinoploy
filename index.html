@@ -806,6 +806,21 @@
     .chip-detail__lore { font-family:var(--body); font-size:13px; line-height:1.5; color:var(--ink-dim); }
     .chip-detail__lore p { margin:0; }
     .chip-detail__lore strong { color:var(--ink); }
+    .chip-detail__lorelink { margin-top:2px; }
+
+    /* Attitude section (T3, MT2-SP4 direction B: game-chrome.js attitudeChipsHtml) —
+       code-driven grudge/trust standing toward every OTHER seated character,
+       shown inside the chip-detail popover. Works with zero API key (pure
+       ledger read); hidden entirely when every pair is neutral (0/0). */
+    .attitude { display:flex; flex-direction:column; gap:4px; padding-top:2px;
+      border-top:1px solid var(--line); }
+    .attitude__title { font-family:var(--disp); font-size:7px; letter-spacing:1px;
+      color:var(--wr-ink-faint, var(--ink-dim)); text-transform:uppercase; margin-top:4px; }
+    .attitude__row { display:flex; align-items:baseline; gap:8px; font-family:var(--body);
+      font-size:13px; flex-wrap:wrap; }
+    .attitude__name { font-weight:bold; }
+    .attitude__grudge { color:var(--bad); }
+    .attitude__trust { color:var(--good); }
 
     /* Tile popover (openUiModal(tileDetailHtml(d))) — spec §2.5/§2.5b. Same GB-pixel
        class family as .chip-detail above; .tile-detail__description/__flavor use --body
@@ -1209,6 +1224,21 @@
     .lore__body li { margin:4px 0; }
     .lore__money { font-family:var(--disp); font-size:18px; }
     .lore__close { margin-top:6px; align-self:flex-end; }
+
+    /* Lore modal tab rail (T3, MT2-SP4 direction B) — only rendered at all when
+       the character has stored diary lines (App.js showLoreModal); a keyless
+       or brand-new game shows the untabbed bio panel exactly as before. */
+    .lore__tabs { display:flex; gap:6px; margin-bottom:4px; }
+    .lore__tab { font-family:var(--disp); font-size:8px; letter-spacing:1px; padding:6px 10px;
+      background:var(--bg3); border:2px solid var(--line); color:var(--ink-dim); cursor:pointer; }
+    .lore__tab--active { color:var(--accent); border-color:var(--accent); }
+    .lore__panel[hidden] { display:none; }
+    .diary__list { display:flex; flex-direction:column; gap:10px; }
+    .diary__entry { border-left:3px solid var(--accent2); padding-left:10px; }
+    .diary__meta { font-family:var(--disp); font-size:7px; letter-spacing:1px; color:var(--ink-dim);
+      text-transform:uppercase; margin-bottom:2px; }
+    .diary__text { font-family:var(--body); font-size:17px; line-height:1.3; color:var(--ink);
+      font-style:italic; margin:0; }
 
     /* event card */
     .evcard { padding:22px; display:flex; flex-direction:column; align-items:center; gap:14px; text-align:center; }

@@ -74,17 +74,77 @@ export function chipDetailHtml(d) {
       ${abilities.length ? `<div class="pcard__abilities">${abilities.map(esc).join(' · ')}</div>` : ''}
       ${d.propsHtml ? `<div class="pcard__props">${d.propsHtml}</div>` : ''}
       ${
+        // attitudeHtml: RAW pass-through, same discipline as propsHtml — App
+        // pre-builds it via attitudeChipsHtml (below) since it needs the live
+        // dialogue ledger this module intentionally has no access to (T3,
+        // MT2-SP4 direction B). '' when every opponent pair is neutral.
+        d.attitudeHtml || ''
+      }
+      ${
         // loreHtml: RAW pass-through — App escapes/truncates upstream (same contract as propsHtml/groupHtml).
         d.loreHtml ? `<div class="chip-detail__lore">${d.loreHtml}</div>` : ''
+      }
+      ${
+        // T3: opens the full character lore modal (showLoreModal) from mid-game —
+        // previously only reachable from character-select. Needed so the lore
+        // modal's new "diary" tab (stored diary lines, keyless-hidden) is ever
+        // reachable at all once a game is in progress. App wires the click
+        // handler right after injecting this html (same pattern as btn-lore-close).
+        d.charId ? `<div class="chip-detail__lorelink"><button id="btn-chip-lore" class="pix-btn pix-btn--ghost pix-btn--sm" data-char-id="${esc(d.charId)}">${t('charselect.viewLore')}</button></div>` : ''
       }
     </div>`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Dialogue system UI (MT2-SP4 direction B, T3) — speech bubble content.
-// Keyless-safe (reads only strings App already resolved off the live
-// dialogueLedger — no network, no engine access).
+// Dialogue system UI (MT2-SP4 direction B, T3) — three pure builders:
+//  - attitudeChipsHtml: player-detail popover's code-driven "standing" section
+//  - bubbleHtml: transient speech-bubble content, anchored/positioned by App.js
+//  - diaryTabHtml: the lore modal's 心路/Diary tab body
+// All three are keyless-safe (read only numbers/strings App already resolved
+// off the live dialogueLedger/dialogueDiaries — no network, no engine access).
 // ─────────────────────────────────────────────────────────────────────────
+
+// How many tier-glyphs a value has crossed, given an ascending threshold
+// array (RULES.dialogue.attitudeDisplay.{grudge,trust}Tiers, e.g. [3,6,9]).
+// Deliberately a SEPARATE small helper from character-ai.js's own tierGlyphs
+// (prompt-text formatter) rather than a shared import — this module must stay
+// free of character-ai.js's network-calling weight, and T2's report already
+// flags that the UI's glyph choice is independent of the prompt's (no shared
+// contract enforced, both just read the same RULES thresholds).
+function tierCount(value, tiers) {
+  const list = Array.isArray(tiers) ? tiers : [];
+  let n = 0;
+  for (const threshold of list) {
+    if (value >= threshold) n += 1;
+  }
+  return n;
+}
+
+// rows: [{ name, color, grudge, trust }] — one row per OTHER seated
+// character, raw numeric ledger values (App resolves these via
+// dialogue/memory.js's getAttitude — this module has no ledger access).
+// tiers: RULES.dialogue.attitudeDisplay ({ grudgeTiers, trustTiers }).
+// A row with BOTH axes at 0 tiers crossed (neutral standing) is omitted
+// entirely (same "compact prompt" convention character-ai.js's
+// formatAttitudeTable already uses) — and if every row ends up neutral, the
+// whole section returns '' so chipDetailHtml renders nothing (no empty
+// "STANDING" header with zero rows under it).
+export function attitudeChipsHtml(rows, tiers) {
+  if (!rows || rows.length === 0) return '';
+  const t_ = tiers || {};
+  const items = (rows || []).map(r => {
+    const gTier = tierCount(r.grudge, t_.grudgeTiers);
+    const tTier = tierCount(r.trust, t_.trustTiers);
+    if (gTier === 0 && tTier === 0) return '';
+    const gGlyph = gTier > 0
+      ? `<span class="attitude__grudge">${t('attitude.grudgeLabel')} ${'▲'.repeat(gTier)}</span>` : '';
+    const tGlyph = tTier > 0
+      ? `<span class="attitude__trust">${t('attitude.trustLabel')} ${'▼'.repeat(tTier)}</span>` : '';
+    return `<div class="attitude__row"><span class="attitude__name" style="color:${esc(r.color)}">${esc(r.name)}</span>${gGlyph}${tGlyph}</div>`;
+  }).filter(Boolean).join('');
+  if (!items) return '';
+  return `<div class="attitude"><div class="attitude__title">${t('attitude.title')}</div>${items}</div>`;
+}
 
 // d: { idx (player index, matches chipHtml's data-chip), seq (monotonic bubble
 // counter — App uses this to decide whether an existing DOM node can be left
@@ -97,6 +157,24 @@ export function bubbleHtml(d) {
     <div class="dbubble__text">${esc(d.text)}</div>
     <div class="dbubble__tail"></div>
   </div>`;
+}
+
+// entries: [{ turn, seasonName, text }] (dialogue/memory.js's
+// getRecentDiaryLines output, oldest first). '' when empty — the lore
+// modal hides the whole Diary tab in that case (App.js showLoreModal),
+// this builder just mirrors that by returning nothing to show.
+export function diaryTabHtml(entries) {
+  if (!entries || entries.length === 0) return '';
+  const rows = entries.map(e => {
+    // Reuses season.turn ('Turn {n}' / '第 {n} 回合') rather than a new key —
+    // same "Turn N" concept the season box already renders.
+    const meta = [e.seasonName, e.turn ? t('season.turn', { n: e.turn }) : null].filter(Boolean).join(' · ');
+    return `<div class="diary__entry">
+      ${meta ? `<div class="diary__meta">${esc(meta)}</div>` : ''}
+      <p class="diary__text">${esc(e.text)}</p>
+    </div>`;
+  }).join('');
+  return `<div class="diary__list">${rows}</div>`;
 }
 
 // Resolve the tile popover's `description` field (ticket: classic-board place

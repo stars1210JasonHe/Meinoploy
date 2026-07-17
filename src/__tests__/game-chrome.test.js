@@ -1,6 +1,8 @@
 import { chipHtml, chipDetailHtml, drawerShellHtml, tokenVisual, tileDetailHtml, nodeGlow, NODE_GLOW_COLORS, legendHtml, resolveTileDescription } from '../game-chrome';
 // T3 (MT2-SP4 direction B), deliverable 1 (speech bubbles).
 import { bubbleHtml } from '../game-chrome';
+// T3, deliverable 2 (attitude chips + diary tab).
+import { attitudeChipsHtml, diaryTabHtml } from '../game-chrome';
 import { setLocale } from '../i18n';
 
 // Task 3 (i18n): game-chrome now renders its static labels through t(), whose
@@ -179,6 +181,101 @@ describe('chipDetailHtml', () => {
     const h = chipDetailHtml(base);
     expect(h).not.toContain('chip-detail__lore');
   });
+
+  // T3 (MT2-SP4 direction B): attitudeHtml is a RAW pass-through field (App
+  // pre-builds it via attitudeChipsHtml — same discipline as propsHtml/loreHtml).
+  test('attitudeHtml renders verbatim when present', () => {
+    const base = { name: 'H', title: 'T', color: '#fff', portraitUrl: null, moneyHtml: '$1', deeds: 2 };
+    const h = chipDetailHtml({ ...base, attitudeHtml: '<div class="attitude">STANDING</div>' });
+    expect(h).toContain('<div class="attitude">STANDING</div>');
+  });
+
+  test('attitudeHtml absent when not provided (no empty wrapper)', () => {
+    const base = { name: 'H', title: 'T', color: '#fff', portraitUrl: null, moneyHtml: '$1', deeds: 2 };
+    const h = chipDetailHtml(base);
+    expect(h).not.toContain('class="attitude"');
+  });
+
+  // T3: mid-game entry point into the full lore modal (showLoreModal), needed
+  // so the modal's new Diary tab is ever reachable outside character-select.
+  test('charId present -> renders the view-lore button with the char id', () => {
+    const base = { name: 'H', title: 'T', color: '#fff', portraitUrl: null, moneyHtml: '$1', deeds: 2 };
+    const h = chipDetailHtml({ ...base, charId: 'marcus-kodak' });
+    expect(h).toContain('id="btn-chip-lore"');
+    expect(h).toContain('data-char-id="marcus-kodak"');
+  });
+
+  test('charId absent -> no view-lore button', () => {
+    const base = { name: 'H', title: 'T', color: '#fff', portraitUrl: null, moneyHtml: '$1', deeds: 2 };
+    const h = chipDetailHtml(base);
+    expect(h).not.toContain('btn-chip-lore');
+  });
+});
+
+describe('attitudeChipsHtml', () => {
+  const TIERS = { grudgeTiers: [3, 6, 9], trustTiers: [3, 6, 9] };
+
+  test('empty rows -> empty string', () => {
+    expect(attitudeChipsHtml([], TIERS)).toBe('');
+    expect(attitudeChipsHtml(null, TIERS)).toBe('');
+  });
+
+  test('all-neutral rows (grudge 0, trust 0) -> empty string, no empty section header', () => {
+    const h = attitudeChipsHtml([{ name: 'Guan Yu', color: '#f00', grudge: 0, trust: 0 }], TIERS);
+    expect(h).toBe('');
+  });
+
+  test('grudge crossing 1 tier -> one ▲, trust untouched', () => {
+    const h = attitudeChipsHtml([{ name: 'Guan Yu', color: '#f00', grudge: 3, trust: 0 }], TIERS);
+    expect(h).toContain('▲');
+    expect(h).not.toContain('▲▲');
+    expect(h).not.toContain('▼');
+    expect(h).toContain('Guan Yu');
+  });
+
+  test('grudge crossing all 3 tiers -> ▲▲▲', () => {
+    const h = attitudeChipsHtml([{ name: 'Guan Yu', color: '#f00', grudge: 9, trust: 0 }], TIERS);
+    expect(h).toContain('▲▲▲');
+    expect(h).not.toContain('▲▲▲▲');
+  });
+
+  test('trust crossing tiers renders ▼ glyphs, independent of grudge', () => {
+    const h = attitudeChipsHtml([{ name: 'Guan Yu', color: '#f00', grudge: 0, trust: 6 }], TIERS);
+    expect(h).toContain('▼▼');
+    expect(h).not.toContain('▲');
+  });
+
+  test('mixed rows: neutral pairs are omitted, non-neutral pairs still render', () => {
+    const rows = [
+      { name: 'Neutral Guy', color: '#0f0', grudge: 0, trust: 0 },
+      { name: 'Guan Yu', color: '#f00', grudge: 6, trust: 3 },
+    ];
+    const h = attitudeChipsHtml(rows, TIERS);
+    expect(h).not.toContain('Neutral Guy');
+    expect(h).toContain('Guan Yu');
+    expect(h).toContain('▲▲');
+    expect(h).toContain('▼');
+  });
+
+  test('root wrapper carries the .attitude class + title, escapes hostile names', () => {
+    const h = attitudeChipsHtml([{ name: '<script>x</script>', color: '#f00', grudge: 3, trust: 0 }], TIERS);
+    expect(h).toContain('class="attitude"');
+    expect(h).not.toContain('<script>x</script>');
+    expect(h).toContain('&lt;script&gt;');
+  });
+
+  test('zh locale: grudge/trust labels + section title localize', () => {
+    setLocale('zh');
+    const h = attitudeChipsHtml([{ name: '关羽', color: '#f00', grudge: 6, trust: 3 }], TIERS);
+    expect(h).toContain('宿怨');
+    expect(h).toContain('信任');
+    expect(h).toContain('态度');
+  });
+
+  test('missing tiers config defaults to zero crossings (no glyphs, row omitted)', () => {
+    const h = attitudeChipsHtml([{ name: 'Guan Yu', color: '#f00', grudge: 5, trust: 5 }], {});
+    expect(h).toBe('');
+  });
 });
 
 describe('bubbleHtml', () => {
@@ -204,6 +301,44 @@ describe('bubbleHtml', () => {
     const h = bubbleHtml({ idx: '0', seq: 1, text: 'hi', color: '#fff' });
     expect(h).toContain('dbubble__tail');
     expect(h).toContain('dbubble__text');
+  });
+});
+
+describe('diaryTabHtml', () => {
+  test('empty/absent entries -> empty string (lore modal hides the whole tab)', () => {
+    expect(diaryTabHtml([])).toBe('');
+    expect(diaryTabHtml(null)).toBe('');
+    expect(diaryTabHtml(undefined)).toBe('');
+  });
+
+  test('renders entry text + season/turn metadata', () => {
+    const h = diaryTabHtml([{ turn: 12, seasonName: 'Autumn', text: 'Guan Yu wronged me again.' }]);
+    expect(h).toContain('Guan Yu wronged me again.');
+    expect(h).toContain('Autumn');
+    expect(h).toContain('diary__entry');
+  });
+
+  test('multiple entries all render, in the given (oldest-first) order', () => {
+    const h = diaryTabHtml([
+      { turn: 1, seasonName: 'Summer', text: 'First entry.' },
+      { turn: 12, seasonName: 'Autumn', text: 'Second entry.' },
+    ]);
+    const firstIdx = h.indexOf('First entry.');
+    const secondIdx = h.indexOf('Second entry.');
+    expect(firstIdx).toBeGreaterThan(-1);
+    expect(secondIdx).toBeGreaterThan(firstIdx);
+  });
+
+  test('escapes hostile diary text', () => {
+    const h = diaryTabHtml([{ turn: 1, seasonName: 'Summer', text: '<script>x</script>' }]);
+    expect(h).not.toContain('<script>x</script>');
+    expect(h).toContain('&lt;script&gt;');
+  });
+
+  test('missing seasonName/turn tolerated (no "undefined" leaking through)', () => {
+    const h = diaryTabHtml([{ text: 'Just text.' }]);
+    expect(h).toContain('Just text.');
+    expect(h).not.toContain('undefined');
   });
 });
 
