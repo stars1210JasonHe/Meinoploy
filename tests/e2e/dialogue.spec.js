@@ -6,31 +6,50 @@ const { test, expect } = require('@playwright/test');
 //
 // Two independent cases:
 //  (a) keyless deterministic — play Terra Titans (the only mod with
-//      RULES.duel.enabled=true, see duel.spec.js) until a duel resolves,
-//      open the LOSER's player-detail popover, assert a grudge tier glyph
-//      renders. Zero API key anywhere — the attitude ledger is pure/code-
-//      driven (T1/T2 "no key = ledger still accumulates" invariant).
+//      RULES.duel.enabled=true, see duel.spec.js), resolving real duels and
+//      reading the SAVED attitude ledger after each one, until the ledger
+//      itself proves a grudge tier is crossed — only THEN open that seat's
+//      player-detail popover and assert the glyph. Zero API key anywhere —
+//      the attitude ledger is pure/code-driven (T1/T2 "no key = ledger
+//      still accumulates" invariant).
 //  (b) bubble smoke — inject an already-resolved reaction line through
 //      window.__MP_TEST_BUBBLE (App.js's test-only seam, mirroring the
 //      existing __MP_FAST_ROLL/__MP_LIVE_CLIENTS convention) and assert the
 //      speech bubble appears on the right chip, never blocks clicks, and
 //      auto-dismisses.
 //
-// MEASURED finding that shaped test (a)'s design (not a guess — verified via
-// a scratch jest run against the real loaded Terra Titans world before
-// writing this spec): every Terra Titans city's rent tops out at 38
-// (loaded via src/world-loader.js's loadWorld against the real
-// mods/terra-titans world data), so even doubled by RULES.duel.loseMultiplier
-// (2) a duel-loss rent payment (max 76) NEVER reaches
-// RULES.dialogue.rentGrudgeThreshold (200) — the "big rent" grudge row never
-// fires here. A SINGLE duel loss therefore only ever produces
-// weights.duelLostGrudge (2), which is BELOW attitudeDisplay.grudgeTiers[0]
-// (3) — no glyph would render after just one duel. This matches the plan's
-// own acceptance item (docs/superpowers/plans/2026-07-17-dialogue-b-plan.md,
-// sign-off 3: "两轮即到显示" — two rounds to reach the display threshold),
-// so the test below plays additional duel rounds (same two players, no other
-// opponents exist) until the actual grudge glyph appears, rather than
-// asserting after exactly one duel.
+// ── Why test (a) asserts on LEDGER STATE, not duel counting (T3-review
+// MUST-FIX redesign) ─────────────────────────────────────────────────────
+//
+// MEASURED inputs (verified via a scratch jest run against the real loaded
+// Terra Titans world through src/world-loader.js loadWorld — not guessed):
+// every city rent tops out at 38, so even doubled by duel.loseMultiplier
+// (2) a duel-loss payment (max 76) NEVER reaches
+// RULES.dialogue.rentGrudgeThreshold (200) — the bigRentGrudge stacking row
+// never fires here. Per-loss delta is therefore exactly
+// weights.duelLostGrudge = 2.
+//
+// The decay math that broke the first version of this test: decayPerSeason
+// .grudge = 1 fires on EVERY season_changed (seasons.changeInterval = 10
+// G.totalTurns = every 5 two-player rounds) and decays EVERY tracked pair.
+// Two same-holder losses with <= 1 season boundary between them yield
+// 2 - 1 + 2 = 3 >= attitudeDisplay.grudgeTiers[0] (3) — tier reached. With
+// >= 2 boundaries between them the pair oscillates 2 -> 0 -> 2 and NEVER
+// crosses. A fixed "N duels then assert the popover" script therefore
+// races decay (the review's finding: most long trajectories interleave it).
+//
+// The deterministic fix: after each resolved duel, click SAVE and read the
+// dialogue-memory envelope (T2's saveData.dialogueMemory.ledger — the exact
+// same seat-keyed state renderPlayerInfo's attitude section reads) straight
+// out of localStorage. The popover is opened ONLY once the ledger itself
+// shows some pair's grudge >= grudgeTiers[0] — at that point the glyph
+// rendering is a pure deterministic function of state already proven to
+// hold, so the UI assertion cannot race anything. The loop merely HUNTS for
+// that state under hard caps: every duel adds +2 to one of the two pair
+// directions while a season boundary costs each direction only 1, and the
+// convergent-route policy (duel.spec.js's proven approach) recurs duels
+// well within a season once cross-ownership builds — two same-holder losses
+// inside <= 1 boundary is the expected case, not the lucky one.
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -141,101 +160,146 @@ async function terraTitansTurn(page) {
   return false;
 }
 
-// Resolves the CURRENTLY-showing duel offer (DUEL! -> FIGHT), reads the
-// winner's character name off the result strip (App.js _duelResultStripHtml,
-// t('duel.wins', {name,...}) = "{name} WINS (...)"), and ends the turn so
-// the outer search loop can resume. Returns the winner's character name.
+// The grudge value at which the FIRST tier glyph renders —
+// RULES.dialogue.attitudeDisplay.grudgeTiers[0] (mods/dominion/rules.js,
+// shared by every mod via the drift-guarded defaults). Not readable from the
+// save envelope (RULES live off-G), so mirrored here with this pointer.
+const GRUDGE_TIER_1 = 3;
+
+// The duel stake is loseMultiplier (2) x rent (max 38 in this world, see the
+// header comment) = max 76, but the loser might ALSO be close to broke from
+// buying. A challenger below this floor pays rent instead of duelling so a
+// lost duel can never bankrupt-and-gameover a player mid-test (T3-review:
+// challenger-cash guard).
+const DUEL_CASH_FLOOR = 500;
+
+// Resolves the CURRENTLY-showing duel offer (DUEL! -> FIGHT -> result strip),
+// then ends the turn so the outer loop can resume. Caller has already
+// checked the cash floor + enabled state.
 async function resolveOneDuel(page) {
-  await expect(page.locator('#btn-payrent')).toBeVisible();
-  const duelBtn = page.locator('#btn-duel');
-  await expect(duelBtn).toBeVisible();
-  await expect(duelBtn).toBeEnabled();
-  await duelBtn.click();
+  await page.locator('#btn-duel').click();
   await page.waitForTimeout(300);
 
   await expect(page.locator('#btn-fight')).toBeVisible();
   await page.locator('#btn-fight').click();
   await page.waitForTimeout(300);
 
-  const winsLocator = page.locator('.turnbox__slot', { hasText: 'WINS' }).first();
-  await expect(winsLocator).toBeVisible();
-  const winsText = (await winsLocator.textContent()) || '';
-  const m = winsText.match(/^\s*(.+?)\s+WINS/);
-  const winnerName = m ? m[1].trim() : null;
+  // Resolution is random (2d6 + stats per side) — which side won doesn't
+  // matter here (the LEDGER read below is the arbiter); just wait for the
+  // result strip so the duel has definitely resolved before saving.
+  await expect(page.locator('.turnbox__slot', { hasText: 'WINS' }).first()).toBeVisible();
 
   const endBtn = page.locator('#btn-end');
   if (await endBtn.isVisible().catch(() => false) && await endBtn.isEnabled().catch(() => false)) {
     await endBtn.click();
     await page.waitForTimeout(300);
   }
-  return winnerName;
 }
 
-// Maps a character NAME to its chip's data-chip index. .pcard__name is
-// display:none at rest (CSS hover-reveal — index.html
-// ".app--game .pcard--chip .pcard__name { display:none }") but
-// .textContent() reads the real DOM text regardless of CSS visibility
-// (unlike .innerText()/click(), which require visibility) — same technique
-// duel.spec.js's activePlayerMoney already relies on for .pcard__money.
-async function chipIdxByName(page, name) {
-  const chips = page.locator('.pcard--chip');
-  const count = await chips.count();
-  for (let i = 0; i < count; i++) {
-    const chipName = ((await chips.nth(i).locator('.pcard__name').textContent()) || '').trim();
-    if (chipName === name) return chips.nth(i).getAttribute('data-chip');
+// Pays the rent on a showing duel offer instead of fighting (cash floor /
+// cooldown-disabled cases), then ends the turn.
+async function payRentInstead(page) {
+  await page.click('#btn-payrent');
+  await page.waitForTimeout(300);
+  const endBtn = page.locator('#btn-end');
+  if (await endBtn.isVisible().catch(() => false) && await endBtn.isEnabled().catch(() => false)) {
+    await endBtn.click();
+    await page.waitForTimeout(300);
   }
-  return null;
 }
 
-// Opens chipIdx's player-detail popover, checks for a rendered grudge glyph
-// (game-chrome.js attitudeChipsHtml's .attitude__grudge — code-driven, no
-// API key involved anywhere in this path), closes the popover (scrim click —
-// Escape only closes the drawer, not this modal, per gameplay.spec.js), and
-// returns whether a glyph was present.
-async function popoverHasGrudgeGlyph(page, chipIdx) {
-  await page.locator(`.pcard--chip[data-chip="${chipIdx}"]`).click();
-  await expect(page.locator('.chip-detail')).toBeVisible();
-  const hasGrudge = (await page.locator('.attitude__grudge').count()) > 0;
-  await page.locator('#ui-modal').click({ position: { x: 5, y: 5 } });
-  await expect(page.locator('#ui-modal')).not.toHaveClass(/open/);
-  return hasGrudge;
+// Saves the game via the real topbar SAVE flow (bots.spec.js's exact
+// pattern: the topbar auto-hides in-game, revealed via the top-edge
+// hotzone), then reads the freshest save's dialogue-memory ledger (T2's
+// saveData.dialogueMemory.ledger) out of localStorage and returns the first
+// {holder, opp, grudge} pair at/over GRUDGE_TIER_1, or null. The ledger is
+// keyed by SEAT ids ('0','1') — holder is therefore directly the data-chip
+// index of the chip whose popover must show the glyph.
+async function readGrudgeTierHit(page) {
+  await page.hover('#topbar-hotzone');
+  await expect(page.locator('.topbar')).toHaveClass(/topbar--show/);
+  await expect(page.locator('#btn-save')).toBeVisible();
+  await page.click('#btn-save');
+  await expect(page.locator('#btn-save')).toContainText('SAVED', { timeout: 3000 });
+  return await page.evaluate((tier) => {
+    const saves = JSON.parse(localStorage.getItem('meinopoly_saves') || '{}');
+    const newest = Object.values(saves).sort((a, b) => b.timestamp - a.timestamp)[0];
+    const ledger = (newest && newest.dialogueMemory && newest.dialogueMemory.ledger) || {};
+    for (const holder of Object.keys(ledger)) {
+      for (const opp of Object.keys(ledger[holder])) {
+        if (ledger[holder][opp].grudge >= tier) {
+          return { holder, opp, grudge: ledger[holder][opp].grudge };
+        }
+      }
+    }
+    return null;
+  }, GRUDGE_TIER_1);
 }
 
 test.describe('Attitude ledger (keyless, MT2-SP4 direction B)', () => {
-  test('grudge tier glyph renders in the loser\'s player-detail popover after real duel losses', async ({ page }) => {
-    // Generous budget: see the file-header comment — a single duel loss
-    // (grudge 2) sits BELOW the display tier (3), so this may need several
-    // duel rounds (same 2 players, no other opponents exist in a 1v1 game)
-    // before ANY pair crosses the display threshold. Each round's own search
-    // for a fresh cross-landing reuses duel.spec.js's proven 40-turn/240s
-    // budget for finding ONE duel; this scales that budget for up to 4 rounds.
-    test.setTimeout(420000);
+  test('grudge tier glyph renders once the saved ledger proves the tier is crossed', async ({ page }) => {
+    // Budget: each duel-search reuses duel.spec.js's proven convergent-route
+    // policy (~found within 40 turns worst-case pre-ownership; much faster
+    // once cross-ownership exists). MAX_TURNS caps total turn iterations
+    // across ALL duels; MAX_DUELS caps resolved duels. See the file header
+    // for the 2+2-1=3 tier math and why the ledger read (not duel counting)
+    // is what makes the final assertion deterministic.
+    test.setTimeout(480000);
+    const MAX_TURNS = 150;
+    const MAX_DUELS = 12;
     const pageErrors = [];
     page.on('pageerror', err => pageErrors.push(err.message));
 
     await selectCharactersTerraTitans(page);
 
-    let glyphFound = false;
-    for (let round = 0; round < 4 && !glyphFound; round++) {
-      let offerSeen = false;
-      for (let i = 0; i < 40 && !offerSeen; i++) {
-        if (await page.locator('.results__victory').isVisible().catch(() => false)) break;
-        offerSeen = await terraTitansTurn(page);
+    let hit = null;
+    let duelsResolved = 0;
+    for (let i = 0; i < MAX_TURNS && !hit && duelsResolved < MAX_DUELS; i++) {
+      if (await page.locator('.results__victory').isVisible().catch(() => false)) break;
+      const offerShowing = await terraTitansTurn(page);
+      if (!offerShowing) continue;
+
+      // Duel offer on screen. Guards: challenger cash floor (a lost duel's
+      // 2x-rent stake must never bankrupt-and-gameover mid-test) and the
+      // cooldown-disabled state (RULES.duel.cooldownTurns renders #btn-duel
+      // disabled for 3 turns after each duel) — both fall back to paying
+      // rent, which still advances the game toward the next opportunity.
+      const cash = await activePlayerMoney(page);
+      const duelEnabled = await page.locator('#btn-duel').isEnabled().catch(() => false);
+      if (cash < DUEL_CASH_FLOOR || !duelEnabled) {
+        await payRentInstead(page);
+        continue;
       }
-      if (!offerSeen) break; // game likely ended (victory) — nothing more to search for
 
-      const winnerName = await resolveOneDuel(page);
-      expect(winnerName).toBeTruthy();
-
-      const chipIds = await page.locator('.pcard--chip').evaluateAll(els => els.map(el => el.dataset.chip));
-      const winnerIdx = await chipIdxByName(page, winnerName);
-      const loserIdx = chipIds.find(idx => idx !== winnerIdx);
-      expect(loserIdx).toBeTruthy();
-
-      glyphFound = await popoverHasGrudgeGlyph(page, loserIdx);
+      await resolveOneDuel(page);
+      duelsResolved += 1;
+      hit = await readGrudgeTierHit(page);
     }
 
-    expect(glyphFound).toBe(true);
+    // The ledger itself must have crossed the tier within budget…
+    expect(hit).toBeTruthy();
+    expect(hit.grudge).toBeGreaterThanOrEqual(GRUDGE_TIER_1);
+
+    // …and only now assert the UI: the popover's attitude section renders
+    // from EXACTLY this ledger state (renderPlayerInfo -> attitudeChipsHtml,
+    // seat-keyed), so with the tier proven above, the glyph is a
+    // deterministic function of state — no luck left in this assertion.
+    //
+    // De-hover the topbar first: readGrudgeTierHit's save-hover left it
+    // shown (App.js's mousemove toggle), and the shown topbar overlays the
+    // top-of-screen chip strip — a mid-screen mouse move clears
+    // .topbar--show so the chip click can't be intercepted.
+    await page.mouse.move(400, 400);
+    await expect(page.locator('.topbar')).not.toHaveClass(/topbar--show/);
+    await page.locator(`.pcard--chip[data-chip="${hit.holder}"]`).click();
+    await expect(page.locator('.chip-detail')).toBeVisible();
+    await expect(page.locator('.attitude__grudge').first()).toBeVisible();
+    // Close via scrim click. (Escape would ALSO close it — App.js's
+    // consolidated keydown handler closes the ui-modal first, modal-first
+    // ordering — scrim-click just matches gameplay.spec.js's convention.)
+    await page.locator('#ui-modal').click({ position: { x: 5, y: 5 } });
+    await expect(page.locator('#ui-modal')).not.toHaveClass(/open/);
+
     expect(pageErrors).toEqual([]);
   });
 });
