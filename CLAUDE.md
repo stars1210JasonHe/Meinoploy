@@ -92,9 +92,15 @@ registration wrapper.
 
 ```bash
 npm run server                              # dominion/classic (default), port 8088
-MOD=terra-titans node -r esm server.js      # a specific mod, its default map/world
-MOD=dominion MAP=classic node -r esm server.js   # a specific mod + map/world id
+MOD=terra-titans npm run server             # a specific mod, its default map/world
+MOD=dominion MAP=classic npm run server     # a specific mod + map/world id
 ```
+
+`npm run server` (and `sim`/`create-mod`/`extract-facts`/`gen-portraits`/`gen-boardbg`) load via
+`node -r ./scripts/node-compat-register.js <entry>.js` — a small Module._extensions hook that
+transpiles this project's ES-module-syntax files to CommonJS via the existing `babel.config.js`
+(see that file's header comment). It replaces the old `-r esm` loader, which crashes
+unconditionally under Node 22; the new mechanism works under both Node 20.19 and Node 22.
 
 `MOD=`/`MAP=` are boot-time env vars (`server.js`, read once at startup) — one mod+map
 per server process; `MAP=` without `MOD=` is a startup error (a map id only means

@@ -95,7 +95,7 @@ describe('stdio smoke', () => {
     // into the waitHttp failure so a real boot error (e.g. a stack trace) is
     // visible in the test failure output instead of just "not up".
     gameStderrBuf = '';
-    gameProc = spawn(process.execPath, ['-r', 'esm', 'server.js'],
+    gameProc = spawn(process.execPath, ['-r', './scripts/node-compat-register.js', 'server.js'],
       { cwd: ROOT, env: { ...process.env, PORT: String(gamePort) }, stdio: ['ignore', 'ignore', 'pipe'] });
     gameProc.stderr.on('data', (d) => { gameStderrBuf += d.toString(); });
     try {

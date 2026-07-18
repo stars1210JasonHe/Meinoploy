@@ -1,14 +1,18 @@
 // Meinopoly — boardgame.io Multiplayer Server
-// Usage: node -r esm server.js                        (dominion/classic, as before)
-//        MOD=terra-titans node -r esm server.js       (mod's first map/world)
-//        MOD=dominion MAP=classic node -r esm server.js
-// Port 8088 by default (PORT env var overrides).
+// Usage: npm run server                                          (dominion/classic, as before)
+//        MOD=terra-titans npm run server                         (mod's first map/world)
+//        MOD=dominion MAP=classic npm run server                 (mod + map/world id)
+//   or directly: node -r ./scripts/node-compat-register.js server.js
+// Port 8088 by default (PORT env var overrides). Works under Node 20.19 and
+// Node 22 (node-compat-register.js replaces the old `-r esm` loader, which
+// crashes unconditionally under Node 22 — see that file's header comment).
 
 const { Server } = require('boardgame.io/server');
 const serve = require('koa-static');
 const path = require('path');
 
-// Use esm to import ES module game definition
+// node-compat-register.js (loaded via -r) transpiles this ES-module-syntax
+// file to CommonJS on the fly, so require() works normally here.
 const { Monopoly } = require('./src/Game');
 
 // Boot-time mod/map activation (MT2-SP3, spec §0): one mod+map per server

@@ -5,20 +5,26 @@
 // Registration (direct node — NEVER via `npm run`, npm's banner corrupts the stdio wire):
 //   claude mcp add meinopoly -- node <absolute path>/scripts/mcp-server.js
 //
-// MODULE BOOTSTRAP (spec §2, empirically verified): this file is plain CJS run
-// WITHOUT `-r esm`. The MCP SDK ships CJS builds but uses a modern package
-// `exports` map the old esm@3.2.25 shim cannot resolve — so the SDK and zod are
-// required NATIVELY here, and project `src/` files (ESM syntax + boardgame.io
-// directory imports) are loaded through a SCOPED shim instance instead. Order
-// does not matter (verified both ways), but .js extensions are load-bearing:
-// a .mjs handed to esmRequire() is routed to Node's strict resolver and dies
-// on boardgame.io 0.45's directory imports.
+// MODULE BOOTSTRAP (ticket: node-22 loader, 2026-07-18 — supersedes the old
+// scoped-esm-shim bootstrap): this file is plain CJS. It used to load project
+// `src/` files (ESM syntax + boardgame.io directory imports) through a scoped
+// `require('esm')(module)` shim instance, because the MCP SDK's modern
+// package `exports` map defeated the old esm@3.2.25 shim's own resolver. That
+// shim now crashes UNCONDITIONALLY under Node 22 (a native assertion failure
+// the moment it's loaded — see node-compat-register.js's header for the full
+// investigation), so it's retired here too. `node-compat-register.js`
+// (Module._extensions['.js'] hook, transpiles via the project's existing
+// babel.config.js) is required first instead: it transforms local ESM-syntax
+// files to CommonJS and leaves node_modules untouched, so the SDK/zod's own
+// modern `exports` maps still resolve through Node's normal, unmodified
+// resolver — the same requirement the old split (native require for the SDK,
+// shim for src/) existed to satisfy, now satisfied uniformly by ONE `require()`
+// path. Works under Node 20.19 and Node 22.
+require('./node-compat-register');
 
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { z } = require('zod');
-
-const esmRequire = require('esm')(module);
 
 function log(...args) {
   // stdout is the JSON-RPC wire — stderr only, never credentials.
@@ -27,29 +33,29 @@ function log(...args) {
 
 async function main() {
   if (process.argv.includes('--selftest')) {
-    // Bootstrap verification (spec V4): prove the scoped shim loads the full
-    // src/ graph (Game.js -> mods registry, boardgame.io client + transports)
-    // alongside the natively-required SDK, in ONE process.
-    const { Monopoly } = esmRequire('../src/Game.js');
-    const { Client } = esmRequire('boardgame.io/client');
-    const { SocketIO, Local } = esmRequire('boardgame.io/multiplayer');
+    // Bootstrap verification (spec V4): prove node-compat-register.js loads
+    // the full src/ graph (Game.js -> mods registry, boardgame.io client +
+    // transports) alongside the natively-required SDK, in ONE process.
+    const { Monopoly } = require('../src/Game.js');
+    const { Client } = require('boardgame.io/client');
+    const { SocketIO, Local } = require('boardgame.io/multiplayer');
     if (typeof McpServer !== 'function') throw new Error('selftest: McpServer not a constructor');
     if (typeof z.object !== 'function') throw new Error('selftest: zod not loaded');
     if (!Monopoly || Monopoly.name !== 'monopoly') throw new Error('selftest: Game.js failed to load');
     if (typeof Client !== 'function' || typeof SocketIO !== 'function' || typeof Local !== 'function') {
       throw new Error('selftest: boardgame.io client/transports failed to load');
     }
-    log('BOOTSTRAP OK: sdk + zod (native) + Game.js + boardgame.io (scoped esm)');
+    log('BOOTSTRAP OK: sdk + zod (native) + Game.js + boardgame.io (node-compat-register)');
     return;
   }
   // --- full tool registration ---
   const path = require('path');
   const fs = require('fs');
-  const mcpCore = esmRequire('../src/mcp/index.js');
+  const mcpCore = require('../src/mcp/index.js');
   const { createSession, McpToolError } = mcpCore;
-  const { Client } = esmRequire('boardgame.io/client');
-  const { SocketIO } = esmRequire('boardgame.io/multiplayer');
-  const { Monopoly, setActiveMod } = esmRequire('../src/Game.js');
+  const { Client } = require('boardgame.io/client');
+  const { SocketIO } = require('boardgame.io/multiplayer');
+  const { Monopoly, setActiveMod } = require('../src/Game.js');
 
   const SERVER_URL = process.env.MEINOPOLY_SERVER_URL || 'http://localhost:8088';
   const MOVE_TIMEOUT = Number(process.env.MEINOPOLY_MCP_MOVE_TIMEOUT_MS) || 1500;
