@@ -130,6 +130,19 @@ function printBoardBgDryRunPlan(normalized) {
 // callers pass either the in-memory `normalized` or a freshly-read <id>.data.json. Never
 // throws: a malformed/hand-edited data shape must not block mod creation or the chain.
 export function rewireBoardBg(dataLike, modDir) {
+  // dominion is hand-authored, never created via createMod(), and its bundle.client.js is
+  // ALREADY hand-wired (mods/dominion/bundle.client.js imports its backgrounds/classic.png
+  // directly into a bespoke TERRA_ASSETS shape, not the generic atlasAssets/mapAssets the
+  // template writes). Review follow-up ticket: a hypothetical rewire targeting dominion used
+  // to fall through to the generic path, which would still end up a SILENT no-op (dominion's
+  // bundle.client.js never contains GLOBE_IMPORT_LINE in the exact template shape
+  // patchBundleClientBoardBg looks for — see its "tolerant: unrecognized shape" test), just for
+  // a less honest reason. gen-boardbg.js's CLI already treats dominion as a distinct,
+  // hand-wired case (loadDominionTarget) rather than resolving it through boardBgTarget; mirror
+  // that here with an explicit, LOGGED skip instead of a silent one.
+  if (path.basename(modDir) === 'dominion') {
+    return { wired: null, warning: "boardBg rewire skipped: dominion's bundle.client.js is hand-wired, not create-mod's generated template — wire backgrounds by hand there if needed" };
+  }
   try {
     const target = boardBgTarget(dataLike, { modName: dataLike && dataLike.name });
     const bgPngPath = path.join(modDir, 'backgrounds', `${target.targetId}.png`);
@@ -137,7 +150,7 @@ export function rewireBoardBg(dataLike, modDir) {
     const bundleClientPath = path.join(modDir, 'bundle.client.js');
     const before = fs.readFileSync(bundleClientPath, 'utf8');
     const patched = patchBundleClientBoardBg(before, target);
-    if (!patched.changed) return { wired: null, warning: null };
+    if (!patched.changed) return { wired: null, warning: patched.warning };
     fs.writeFileSync(bundleClientPath, patched.contents);
     return { wired: { kind: target.kind, targetId: target.targetId }, warning: null };
   } catch (e) {
@@ -251,19 +264,32 @@ export function createMod({ inputPath, rootDir = REPO_ROOT, dryRun = false, forc
   const rewire = { portraits: 0, boardBg: null };
   const modDir = path.join(rootDir, 'mods', input.id);
 
-  // 1. Portraits — same allPresent check gen-portraits.js's runGenPortraits uses (a PNG on disk
-  // for every roster id). Reuses rewireCharactersJs (exported from gen-portraits.js) rather than
-  // re-deriving the PORTRAIT_MAP template here. Lazy require: mirrors chainPortraits below, so a
-  // unit test that never plants portraits never pulls in gen-portraits' network-capable deps.
+  // 1. Portraits — a PNG on disk for every roster id used to be an all-or-nothing gate (a
+  // roster ADDITION with no portrait yet for the new id un-wired the WHOLE roster, even
+  // characters whose portraits were already on disk). Softened (review follow-up ticket): wire
+  // whichever roster members HAVE a portrait.png present, and warn about the rest. Safe because
+  // charactersJs's template already tolerates a partial PORTRAIT_MAP — `portrait: PORTRAIT_MAP
+  // [char.id] || null` (src/createmod/templates.js) — and every client render site already
+  // branches on `char && char.portrait` (App.js/game-chrome.js), so a null portrait is an
+  // existing, exercised fallback state, not a new one. Reuses rewireCharactersJs (exported from
+  // gen-portraits.js) rather than re-deriving the PORTRAIT_MAP template here. Lazy require:
+  // mirrors chainPortraits below, so a unit test that never plants portraits never pulls in
+  // gen-portraits' network-capable deps.
   const portraitsDir = path.join(modDir, 'portraits');
-  const wantedPortraits = (normalized.roster || []).map(c => `${c.id}.png`);
+  const roster = normalized.roster || [];
   const existingPortraits = fs.existsSync(portraitsDir) ? fs.readdirSync(portraitsDir) : [];
-  const allPortraitsPresent = wantedPortraits.length > 0 && wantedPortraits.every(f => existingPortraits.includes(f));
-  if (allPortraitsPresent) {
+  const presentRoster = roster.filter(c => existingPortraits.includes(`${c.id}.png`));
+  if (presentRoster.length > 0) {
     const { rewireCharactersJs } = require('./gen-portraits');
-    rewireCharactersJs(normalized, modDir, input.id, normalized.roster);
-    rewire.portraits = wantedPortraits.length;
+    rewireCharactersJs(normalized, modDir, input.id, presentRoster);
+    rewire.portraits = presentRoster.length;
     console.log(`[rewire] portraits: ${rewire.portraits} wired`);
+    if (presentRoster.length < roster.length) {
+      const missing = roster.filter(c => !existingPortraits.includes(`${c.id}.png`)).map(c => c.id);
+      const msg = `portraits: ${presentRoster.length}/${roster.length} roster member(s) wired; missing portrait.png for: ${missing.join(', ')} (run gen-portraits to fill in)`;
+      warnings.push(msg);
+      console.log(`[rewire] ${msg}`);
+    }
   }
 
   // 2. Board background — mirrors boardBgTarget's own world/map resolution: targetId is the

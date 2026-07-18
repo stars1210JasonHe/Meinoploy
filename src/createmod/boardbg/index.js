@@ -65,23 +65,29 @@ export function patchBundleClientBoardBg(contents, target) {
   // targetId comes from world.id/map.id, which world-loader/map-loader only check for
   // non-empty string — unlike the kebab-case-validated top-level input.id. Guard before
   // interpolating into generated source (same threat model as templates.js headerSafe).
-  if (!/^[a-z0-9-]+$/.test(target.targetId)) return { contents, changed: false };
+  if (!/^[a-z0-9-]+$/.test(target.targetId)) return { contents, changed: false, warning: null };
   const importLine = `import boardBg from './backgrounds/${target.targetId}.png';\n`;
-  if (contents.includes(importLine)) return { contents, changed: false }; // already wired
+  if (contents.includes(importLine)) return { contents, changed: false, warning: null }; // already wired
 
-  if (!contents.includes(GLOBE_IMPORT_LINE)) return { contents, changed: false }; // unrecognized shape
-  if (!contents.includes(ATLAS_EMPTY_LINE)) return { contents, changed: false }; // atlasAssets already non-empty (e.g. world.mapImage) or edited
+  if (!contents.includes(GLOBE_IMPORT_LINE)) return { contents, changed: false, warning: null }; // unrecognized shape (tolerant by design)
+  if (!contents.includes(ATLAS_EMPTY_LINE)) {
+    // Review follow-up ticket: this precedence used to be silent — a mod created with
+    // world.mapImage already populates atlasAssets at creation time, so a LATER-generated
+    // boardBg (gen-boardbg / --boardbg) has nowhere to go and is quietly dropped. Surface it:
+    // the caller may have just spent an API call on an image that will never be wired in.
+    return { contents, changed: false, warning: 'atlasAssets is already non-empty (likely world.mapImage set at creation) — the generated boardBg was not wired' };
+  }
 
   const withImport = contents.replace(GLOBE_IMPORT_LINE, GLOBE_IMPORT_LINE + importLine);
 
   if (target.kind === 'world') {
     const wired = withImport.replace(ATLAS_EMPTY_LINE,
       `  atlasAssets: { '${target.targetId}': { worldBg: boardBg, cityImages: {} } },\n`);
-    return { contents: wired, changed: true };
+    return { contents: wired, changed: true, warning: null };
   }
   // classic (kind === 'map'): atlasAssets stays `{}`; add a sibling mapAssets entry.
-  if (withImport.includes('  mapAssets:')) return { contents, changed: false }; // already has one
+  if (withImport.includes('  mapAssets:')) return { contents, changed: false, warning: null }; // already has one
   const wired = withImport.replace(ATLAS_EMPTY_LINE,
     ATLAS_EMPTY_LINE + `  mapAssets: { '${target.targetId}': { boardBg: boardBg } },\n`);
-  return { contents: wired, changed: true };
+  return { contents: wired, changed: true, warning: null };
 }

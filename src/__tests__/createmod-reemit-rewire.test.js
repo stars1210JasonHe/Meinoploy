@@ -9,7 +9,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { createMod } from '../../scripts/create-mod';
+import { createMod, rewireBoardBg } from '../../scripts/create-mod';
 import { patchBundleClientBoardBg, boardBgTarget } from '../createmod/boardbg';
 
 function makeRoot() {
@@ -128,6 +128,47 @@ describe('createMod --force rewire pass: portraits + boardBg survive re-emit', (
     expect(bundle1.equals(bundle2)).toBe(true);
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  // Review follow-up ticket (b): roster ADDITION without a new portrait used to un-wire the
+  // WHOLE roster (all-or-nothing gate) — softened to wire whichever roster members have a
+  // portrait.png present and warn about the rest.
+  test('partial portraits (roster addition without a new portrait) -> present ones wired, missing one warned, not all-or-nothing', () => {
+    const root = makeRoot();
+    expect(createMod({ inputPath: ATLAS, rootDir: root }).ok).toBe(true);
+
+    // Only 2 of the 3 roster ids have a portrait on disk — simulates a roster addition
+    // (alexander-the-great) that hasn't had gen-portraits run for it yet.
+    plantPortraits(root, 'ancient-empires', ['hammurabi', 'cyrus-the-great']);
+
+    const r = createMod({ inputPath: ATLAS, rootDir: root, force: true });
+    expect(r.ok).toBe(true);
+    expect(r.rewire.portraits).toBe(2); // present ones wired, not 0
+    expect(r.warnings.some(w => w.includes('2/3') && w.includes('alexander-the-great'))).toBe(true);
+
+    const chars = fs.readFileSync(path.join(root, 'mods/ancient-empires/characters.js'), 'utf8');
+    expect(chars).toContain("from './portraits/hammurabi.png'");
+    expect(chars).toContain("from './portraits/cyrus-the-great.png'");
+    expect(chars).not.toContain('alexander-the-great'); // no import/map entry for the missing one
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  // Review follow-up ticket (a): dominion is hand-authored (never created via createMod()) and
+  // its bundle.client.js already hand-wires backgrounds/classic.png into a bespoke shape — a
+  // hypothetical rewire targeting it must not silently no-op; it should explicitly skip with a
+  // logged warning naming dominion, distinct from the generic "unrecognized shape" tolerance.
+  test('rewireBoardBg explicitly (and loudly) skips dominion instead of silently no-opping', () => {
+    const root = makeRoot();
+    const dominionDir = path.join(root, 'mods', 'dominion');
+    fs.mkdirSync(path.join(dominionDir, 'backgrounds'), { recursive: true });
+    fs.writeFileSync(path.join(dominionDir, 'backgrounds', 'classic.png'), FAKE_PNG);
+    fs.writeFileSync(path.join(dominionDir, 'bundle.client.js'), 'export default {};\n');
+
+    const r = rewireBoardBg({ map: { id: 'classic' }, name: 'Dominion' }, dominionDir);
+    expect(r.wired).toBeNull();
+    expect(r.warning).toMatch(/dominion/i);
+    expect(r.warning).toMatch(/hand-wired/i);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });
 
 describe('patchBundleClientBoardBg (pure): idempotent + tolerant of both template variants', () => {
@@ -194,6 +235,28 @@ export default xClient;
     const r = patchBundleClientBoardBg(alreadyWired, { kind: 'world', targetId: 'x' });
     expect(r.changed).toBe(false);
     expect(r.contents).toBe(alreadyWired);
+  });
+
+  // Review follow-up ticket (c): this precedence used to be silent — surface it via a `warning`
+  // string on the (pure) result, distinct from the other no-op cases (already-wired,
+  // unrecognized shape) which stay silent because they are not surprising.
+  test('atlasAssets-already-populated no-op now carries a warning (world.mapImage-vs-boardBg precedence)', () => {
+    const alreadyWired = PLAIN_ATLAS.replace('atlasAssets: {},', "atlasAssets: { 'x': { worldBg, cityImages: {} } },");
+    const r = patchBundleClientBoardBg(alreadyWired, { kind: 'world', targetId: 'x' });
+    expect(r.changed).toBe(false);
+    expect(r.warning).toMatch(/atlasAssets/i);
+    expect(r.warning).toMatch(/not wired/i);
+  });
+
+  test('already-wired and unrecognized-shape no-ops stay warning-free (not surprising)', () => {
+    const target = { kind: 'world', targetId: 'my-world' };
+    const first = patchBundleClientBoardBg(PLAIN_ATLAS, target);
+    const second = patchBundleClientBoardBg(first.contents, target); // already wired
+    expect(second.warning).toBeNull();
+
+    const hostile = 'export default {};\n';
+    const r = patchBundleClientBoardBg(hostile, { kind: 'world', targetId: 'x' });
+    expect(r.warning).toBeNull();
   });
 });
 
