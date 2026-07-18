@@ -843,19 +843,23 @@ test.describe('Locked board size (Redesign B)', () => {
 // CHROME_GUTTER_MARGIN constant regardless of the actionbar's real height).
 // The chip column above it yields the same real height back via the
 // measured `--rail-bar-h` custom prop instead of the old static 186px
-// reserve. Driven on 三国志 (sanguo-excerpt — an atlas/flat-rect-board mod
-// with no classic maps, `bundle.data.js`: `maps: []`) per the fix brief, at
-// three wide viewports that all cross the >=300px-per-side gutter threshold
-// for a rect board (App.js `_syncGutterMode`'s rect-board probe).
+// reserve. Originally driven on 三国志 (sanguo-excerpt) per the fix brief,
+// but that mod is owner-WIP and NOT committed — on CI's clean checkout the
+// mod card never renders and all three specs time out (first-CI-run find,
+// 2026-07-18). Switched to Dominion's "Terra Circuit" world (the committed
+// atlas flat-RECT board gameplay.spec's atlas tests already drive): it
+// crosses the same >=300px-per-side gutter threshold (App.js
+// `_syncGutterMode`'s rect-board probe) at these three viewports — the
+// containment invariant under test is mod-agnostic.
 test.describe('Rail actionbar content-sizing (dice-clip fix)', () => {
-  async function selectCharactersSanguo(page, viewport) {
+  async function selectCharactersAtlasRect(page, viewport) {
     await page.setViewportSize(viewport);
     await page.goto('/');
     await page.waitForSelector('#btn-mode-local', { timeout: 10000 });
     await page.click('#btn-mode-local');
-    await selectMod(page, '三国志');
-    await page.waitForSelector('.map-card[data-map-idx="0"]', { timeout: 10000 });
-    await page.click('.map-card[data-map-idx="0"]');
+    await selectMod(page, 'Dominion');
+    await page.waitForSelector('.map-card[data-map-idx]', { timeout: 10000 });
+    await page.locator('.map-card[data-map-idx]', { hasText: 'Terra Circuit' }).click();
     await page.waitForSelector('.count-btn[data-count="2"]', { timeout: 10000 });
     await page.click('.count-btn[data-count="2"]');
     await page.waitForSelector('#btn-vic-start', { timeout: 10000 });
@@ -906,7 +910,7 @@ test.describe('Rail actionbar content-sizing (dice-clip fix)', () => {
       const pageErrors = [];
       page.on('pageerror', err => pageErrors.push(err.message));
 
-      await selectCharactersSanguo(page, viewport);
+      await selectCharactersAtlasRect(page, viewport);
       await expect(page.locator('#game-area')).toHaveClass(/game--gutters/);
 
       const boardBox = () => page.locator('#board').evaluate(el => {
