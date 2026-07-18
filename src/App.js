@@ -2079,8 +2079,19 @@ class MonopolyBoard {
     // node when the rendered turnbox html actually changes — see index.html's
     // .turnbox__duelflash rule for why that makes a once-on-appear CSS
     // animation here correct instead of a per-tick strobe.
+    //
+    // data-seq (ticket: duel flash keyed by event seq — closes _writeTurnbox's
+    // own "String-equality keying edge" NIT above): the flash firing was
+    // riding on the WHOLE turnbox html string happening to differ between
+    // renders, which is true today only incidentally (a duel always needs
+    // rolls/phase-hint changes in between). Two duel_resolved events that
+    // rendered byte-identical strips (same names/rolls/outcome) back-to-back
+    // with nothing else in the turnbox differing would silently share one
+    // flash. ev.seq is per-event monotonic (src/events.js) and unique to
+    // THIS duel's resolution — embedding it makes the flash keyed on the
+    // event itself, not on incidental string drift elsewhere in the turnbox.
     return `
-      <div class="turnbox__slot turnbox__duelflash">
+      <div class="turnbox__slot turnbox__duelflash" data-seq="${ev.seq}">
         <div class="cp__info">${esc(challengerName)} [${cr.dice[0]}][${cr.dice[1]}]+${cBonus} = ${cr.total} &nbsp;${t('duel.vs')}&nbsp; ${esc(ownerName)} [${dr.dice[0]}][${dr.dice[1]}]+${dBonus} = ${dr.total}</div>
         <div class="cp__info">${t('duel.wins', { name: esc(winnerName), outcome: outcomeText })}</div>
       </div>`;
@@ -3362,14 +3373,15 @@ class MonopolyBoard {
     // would defeat exactly that comparison.
     if (this._rolling || this._rollTimer) return;
     if (html === this._turnboxHtml) return;
-    // String-equality keying edge (review NIT, theoretical): a duel-result
-    // strip only re-flashes because SOME turnbox render between two duels
-    // differs (roll buttons, phase hints — always true today: a duel needs
-    // rolls in between). If two byte-identical turnbox strings could ever
-    // arrive back-to-back with nothing written between them, the second
-    // appear-animation would be skipped; keying the strip on the
-    // duel_resolved event seq (data-seq attr changing the string) is the
-    // future-proof alternative if that ever becomes reachable.
+    // String-equality keying edge (review NIT, CLOSED — ticket: duel flash
+    // keyed by event seq): a duel-result strip used to re-flash only because
+    // SOME turnbox render between two duels happened to differ (roll
+    // buttons, phase hints). _duelResultStripHtml now embeds
+    // `data-seq="${ev.seq}"` on the strip, so the strip's OWN identity
+    // (not incidental drift elsewhere in the turnbox) changes the string on
+    // every distinct duel_resolved event, deterministically, even in the
+    // (never actually observed) case where the rest of the turnbox would
+    // otherwise render byte-identical twice in a row.
     this._turnboxHtml = html;
     this.turnboxEl.innerHTML = html;
   }
