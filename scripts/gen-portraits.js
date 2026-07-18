@@ -60,6 +60,7 @@ export function redactSecrets(s) {
 function renderReport(ctx) {
   const lines = [`# Portrait generation report — ${ctx.modId}`, ''];
   lines.push(`- characters: ${ctx.rosterCount}`);
+  if (ctx.skipped && ctx.skipped.length) lines.push(`- already had portraits, skipped (use --force to regenerate): ${ctx.skipped.join(', ')}`);
   lines.push(`- image calls: ${ctx.plan.map(p => `${p.count} chars @ ${p.geometry.size} (${p.geometry.cols}x${p.geometry.rows})`).join('; ') || 'none'}`);
   if (ctx.usage) lines.push(`- usage: ${ctx.usage.input_tokens} in / ${ctx.usage.output_tokens} out / ${ctx.usage.total_tokens} total tokens`);
   if (ctx.pruned.length) lines.push(`- pruned stale portraits: ${ctx.pruned.join(', ')}`);
@@ -111,10 +112,24 @@ export async function runGenPortraits(opts, imagesClient, codec) {
   }
   const stale = existing.filter(f => /^[a-z0-9-]+\.png$/.test(f) && !wanted.includes(f));
 
+  // step 3b: fill-missing-only unless --force (ticket: gen-portraits partial-batch tolerance).
+  // Reached only when allPresent is false (the early-return above already handled "all present"),
+  // so genRoster is guaranteed non-empty here. Regenerating a character whose PNG already exists
+  // on disk wastes an API call for no benefit (the image is already correct) — --force is the
+  // explicit escape hatch for "redo everyone anyway" (e.g. a style refresh). This only narrows
+  // WHICH characters generatePortraits is asked to produce; its own atomic buffer-all-then-write
+  // contract (generate everything requested in memory, write nothing on failure) is unchanged —
+  // it just buffers a smaller set. rewireCharactersJs (step 6c, below) always re-renders
+  // characters.js from the FULL roster regardless, since PORTRAIT_MAP must list every character,
+  // freshly generated or pre-existing alike.
+  const genRoster = opts.force ? roster : roster.filter(c => !existing.includes(`${c.id}.png`));
+  const skipped = opts.force ? [] : roster.filter(c => existing.includes(`${c.id}.png`)).map(c => c.id);
+
   // step 4: pre-call plan (before any spend/delete)
-  const dry = await generatePortraits({ roster, lore: dataJson.lore }, { style: opts.style, dryRun: true }, imagesClient, codec);
+  const dry = await generatePortraits({ roster: genRoster, lore: dataJson.lore }, { style: opts.style, dryRun: true }, imagesClient, codec);
   const model = resolveImageModel(opts);
-  log(`${roster.length} character(s) -> ${dry.plan.length} image call(s) (${model}, ${dry.plan.map(p => p.geometry.size).join('/')}, quality medium)`);
+  log(`${genRoster.length} character(s) -> ${dry.plan.length} image call(s) (${model}, ${dry.plan.map(p => p.geometry.size).join('/')}, quality medium)`);
+  if (skipped.length) log(`already have portraits, skipping: ${skipped.join(', ')} (use --force to regenerate)`);
   if (stale.length) log(`stale portraits that a successful run will prune: ${stale.join(', ')}`);
   if (opts.dryRun) {
     for (const p of dry.plan) log(`--- prompt (${p.count} chars in ${p.geometry.cols}x${p.geometry.rows}) ---\n${p.prompt}`);
@@ -125,12 +140,12 @@ export async function runGenPortraits(opts, imagesClient, codec) {
   const reportPath = path.join(portraitsDir, 'generation-report.md');
   let result;
   try {
-    result = await generatePortraits({ roster, lore: dataJson.lore }, { style: opts.style }, imagesClient, codec);
+    result = await generatePortraits({ roster: genRoster, lore: dataJson.lore }, { style: opts.style }, imagesClient, codec);
   } catch (e) {
     const safeMessage = redactSecrets(e.message);
     fs.mkdirSync(portraitsDir, { recursive: true });
     fs.writeFileSync(reportPath, renderReport({
-      modId, rosterCount: roster.length, plan: dry.plan, usage: null,
+      modId, rosterCount: roster.length, skipped, plan: dry.plan, usage: null,
       pruned: [], warnings: dry.warnings, error: safeMessage,
     }));
     return { ok: false, written: [], pruned: [], reportPath, warnings: dry.warnings, error: safeMessage };
@@ -150,7 +165,7 @@ export async function runGenPortraits(opts, imagesClient, codec) {
   rewireCharactersJs(dataJson, modDir, modId, roster);
 
   fs.writeFileSync(reportPath, renderReport({
-    modId, rosterCount: roster.length, plan: result.plan, usage: result.usage,
+    modId, rosterCount: roster.length, skipped, plan: result.plan, usage: result.usage,
     pruned, warnings: result.warnings, error: null,
   }));
   log(`wrote ${written.length} portrait(s) + characters.js; report: ${reportPath}`);

@@ -82,6 +82,41 @@ describe('runGenPortraits', () => {
     await runGenPortraits({ modId: 'm', rootDir: root, force: true }, c4, codec);
     expect(c4.calls).toBe(1);
   });
+  // Ticket (gen-portraits partial-batch tolerance): a partial regenerate must fill ONLY the
+  // missing portrait(s) — the pre-existing ones must not be re-requested from the client (API
+  // cost) or rewritten on disk (bytes untouched). --force is the explicit escape hatch that
+  // still regenerates everyone even when only one portrait is actually missing.
+  test('partial regenerate fills ONLY the missing portrait; existing files untouched; --force still regenerates all', async () => {
+    const root = tmp(); makeMod(root, 'm', 3);
+    await runGenPortraits({ modId: 'm', rootDir: root }, okClient(), codec);
+    const before0 = fs.readFileSync(path.join(root, 'mods/m/portraits/hero-0.png'));
+    const before2 = fs.readFileSync(path.join(root, 'mods/m/portraits/hero-2.png'));
+    fs.rmSync(path.join(root, 'mods/m/portraits/hero-1.png'));
+    const client = okClient();
+    const logs = [];
+    const r = await runGenPortraits({ modId: 'm', rootDir: root, log: m => logs.push(m) }, client, codec);
+    expect(r.ok).toBe(true);
+    expect(client.calls).toBe(1); // one small batch, not a full-roster regenerate
+    expect(r.written.map(p => path.basename(p))).toEqual(['hero-1.png']); // ONLY the missing one written
+    expect(fs.readFileSync(path.join(root, 'mods/m/portraits/hero-0.png')).equals(before0)).toBe(true);
+    expect(fs.readFileSync(path.join(root, 'mods/m/portraits/hero-2.png')).equals(before2)).toBe(true);
+    expect(logs.join('\n')).toMatch(/1 character\(s\).*1 image call/); // plan reflects the SUBSET, not all 3
+    expect(logs.join('\n')).toContain('already have portraits, skipping: hero-0, hero-2');
+    // characters.js still wires ALL THREE — rewire always covers the full roster
+    const chars = fs.readFileSync(path.join(root, 'mods/m/characters.js'), 'utf8');
+    expect(chars).toContain("from './portraits/hero-0.png'");
+    expect(chars).toContain("from './portraits/hero-1.png'");
+    expect(chars).toContain("from './portraits/hero-2.png'");
+    const report = fs.readFileSync(r.reportPath, 'utf8');
+    expect(report).toContain('already had portraits, skipped');
+
+    // --force still regenerates EVERYONE even though only one portrait is missing.
+    fs.rmSync(path.join(root, 'mods/m/portraits/hero-1.png'));
+    const forceClient = okClient();
+    const rf = await runGenPortraits({ modId: 'm', rootDir: root, force: true }, forceClient, codec);
+    expect(rf.ok).toBe(true);
+    expect(rf.written.map(p => path.basename(p)).sort()).toEqual(['hero-0.png', 'hero-1.png', 'hero-2.png']);
+  });
   // Fix 1: `create-mod --force` re-emits characters.js with an EMPTY PORTRAIT_MAP while leaving
   // portraits/*.png on disk untouched. A following gen-portraits run (chained or standalone) must
   // NOT treat "all PNGs present" as "nothing to do" — it must re-wire characters.js at zero API
