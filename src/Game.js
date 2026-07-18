@@ -19,7 +19,8 @@ var _victoryOverride = null;   // per-session override from the game-start selec
 // server, and sim behave byte-identically without anyone calling setActiveMod. Character
 // reads (getCharacterById / getStartingMoney) route through this so a switched mod uses its
 // own roster + starting-money formula. NEVER auto-call setActiveMod here (server/sim import
-// Game.js under `node -r esm`; setActiveMod must be safe to define, but not run server-side).
+// Game.js via scripts/node-compat-register.js; setActiveMod must be safe to define, but not
+// run server-side).
 var _activeMod = MODS.dominion;
 
 // Active-board source for setup(). setup() wraps these into a fresh per-match G.board

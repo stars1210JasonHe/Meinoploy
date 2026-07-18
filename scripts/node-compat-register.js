@@ -44,6 +44,12 @@
 // Usage: `node -r ./scripts/node-compat-register.js <entry>.js` (see
 // package.json scripts), or `require('./node-compat-register')` at the top
 // of a script that is not itself launched with `-r` (mcp-server.js).
+//
+// COST (measured at review, 4 trials each, node 20.19): server boot with the
+// old `-r esm` shim ≈ 1.4s; with this hook ≈ 1.9-2.9s (node 22 ≈ 1.7s) —
+// babel transpiles the src/ graph per boot with no disk cache. A ~0.5-1.5s
+// per-restart dev-loop cost, accepted for dual-node correctness; an
+// mtime-keyed transpile cache is the known upgrade path if it starts to hurt.
 'use strict';
 
 const Module = require('module');
