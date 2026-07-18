@@ -285,6 +285,13 @@ class MonopolyBoard {
     // open (including "some OTHER kind of modal is open" — openUiModal
     // resets this for every call, tile or not).
     this._openTileSpaceId = null;
+    // Ticket (token-parked-on-cluster masks tile beneath): playerId whose
+    // detail popover is CURRENTLY showing, mirroring _openTileSpaceId's
+    // reset contract (openUiModal/closeUiModal clear it for every call,
+    // player-detail or not). Lets the board click handler tell a first click
+    // on a token (open it) apart from a second click on the SAME already-
+    // open token (fall through to the tile stack underneath instead).
+    this._openPlayerDetailId = null;
     // Active mod (default Dominion). All mod CONTENT reads route through this.activeMod;
     // selectMod() swaps it + the engine RULES singleton. availableMaps = the active mod's
     // boards (maps + atlas worlds), the same set the old module-level AVAILABLE_MAPS held.
@@ -609,8 +616,29 @@ class MonopolyBoard {
     this.boardEl.addEventListener('click', (e) => {
       const tokenEl = e.target.closest('.token[data-player]');
       if (tokenEl) {
-        e.stopPropagation();
-        this._openPlayerDetail(tokenEl.dataset.player);
+        // Ticket (token-parked-on-cluster masks tile beneath): a token on a
+        // dense flat-atlas cluster permanently blocked that point's tile
+        // popover, because this branch always won the token/tile priority
+        // and always returned. A SECOND click on a token whose popover is
+        // ALREADY open (this._openPlayerDetailId matches) now falls through
+        // to the tile stack at this exact point instead of re-opening the
+        // same popover — first-click behavior (open it) and route-pick
+        // priority (handled entirely below, never reached from a token
+        // anyway per the CSS pointer-events:none comment above) are both
+        // untouched.
+        if (this._openPlayerDetailId !== tokenEl.dataset.player) {
+          e.stopPropagation();
+          this._openPlayerDetail(tokenEl.dataset.player);
+          return;
+        }
+        // Already open for this exact token — cycle into the tiles beneath
+        // it. #token-layer is a SIBLING of the tile grid (see the priority
+        // comment above), so e.target.closest('.tile[data-space]') can never
+        // find one from here; go straight to the same point-based stack
+        // lookup the tile-overlap-cycle path below uses, with no DOM-tree
+        // fallback tile of our own (stackIds[0], the top of the z-order,
+        // stands in for it).
+        this._openTileFromStack(e.clientX, e.clientY, null);
         return;
       }
       const tile = e.target.closest('.tile[data-space]');
@@ -636,21 +664,7 @@ class MonopolyBoard {
       // REPEATED click, while the popover already showing is one of the
       // tiles stacked at this exact point, advances to the next tile in the
       // stack instead of reopening the same unreachable top tile.
-      const stackIds = [...new Set(
-        document.elementsFromPoint(e.clientX, e.clientY)
-          .map(el => el.closest && el.closest('.tile[data-space]'))
-          .filter(Boolean)
-          .map(el => el.dataset.space)
-      )];
-      let targetSpaceId = tile.dataset.space;
-      if (stackIds.length > 1 && this._openTileSpaceId != null) {
-        const idx = stackIds.indexOf(this._openTileSpaceId);
-        if (idx !== -1) targetSpaceId = stackIds[(idx + 1) % stackIds.length];
-      }
-      const state = this.client && this.client.getState();
-      if (!state) return;
-      const d = this._tileDetailData(parseInt(targetSpaceId, 10), state.G, state.ctx);
-      if (d) { this.openUiModal(tileDetailHtml(d)); this._openTileSpaceId = targetSpaceId; }
+      this._openTileFromStack(e.clientX, e.clientY, tile.dataset.space);
     });
     this.turnboxEl = document.getElementById('turnbox');
     // Chrome-band sizing (Task 2 review fix — see _syncChromeBands below and
@@ -3013,11 +3027,54 @@ class MonopolyBoard {
     const d = this._chipDetail && this._chipDetail[idx];
     if (!d) return;
     this.openUiModal(chipDetailHtml(d));
+    // Re-arm AFTER openUiModal (which just reset it to null) — see
+    // _openPlayerDetailId's declaration doc comment. String, matching
+    // tokenEl.dataset.player / chip.dataset.chip's string shape (playerId
+    // here may already be a string from either caller, but parseInt above
+    // would have coerced a leading numeric prefix silently; store the exact
+    // string so the board click handler's `===` comparison is a plain
+    // string-to-string match, no coercion surprises).
+    this._openPlayerDetailId = String(playerId);
     // T3: chipDetailHtml renders a "view lore" button (#btn-chip-lore) only
     // when d.charId is set — wire its click the same way btn-lore-close is
     // wired right after showLoreModal's own openUiModal call, just above.
     const loreBtn = document.getElementById('btn-chip-lore');
     if (loreBtn) loreBtn.onclick = () => this.showLoreModal(d.charId);
+  }
+
+  // Shared tile-stack resolver + overlap-cycle + opener — the board click
+  // handler's own tile-click path AND the token-already-open fallthrough
+  // (ticket: token-parked-on-cluster masks tile beneath) both funnel through
+  // here, so there is exactly one place that reads elementsFromPoint and
+  // advances _openTileSpaceId. `fallbackSpaceId`: the tile the caller's OWN
+  // hit-test (e.target.closest) already found — used as the default target,
+  // same as the original inline logic's `let targetSpaceId = tile.dataset
+  // .space`; pass null when the caller has no such tile of its own (the
+  // token fallthrough — a token is never a DOM descendant of the tile grid,
+  // see #token-layer's sibling comment on the click handler) and the top of
+  // the z-ordered stack (stackIds[0]) stands in for it instead. Returns true
+  // if a tile popover was opened, false otherwise (no tile under the point /
+  // no detail data).
+  _openTileFromStack(clientX, clientY, fallbackSpaceId) {
+    const stackIds = [...new Set(
+      document.elementsFromPoint(clientX, clientY)
+        .map(el => el.closest && el.closest('.tile[data-space]'))
+        .filter(Boolean)
+        .map(el => el.dataset.space)
+    )];
+    let targetSpaceId = fallbackSpaceId != null ? fallbackSpaceId : stackIds[0];
+    if (targetSpaceId == null) return false; // no tile at this point at all
+    if (stackIds.length > 1 && this._openTileSpaceId != null) {
+      const idx = stackIds.indexOf(this._openTileSpaceId);
+      if (idx !== -1) targetSpaceId = stackIds[(idx + 1) % stackIds.length];
+    }
+    const state = this.client && this.client.getState();
+    if (!state) return false;
+    const d = this._tileDetailData(parseInt(targetSpaceId, 10), state.G, state.ctx);
+    if (!d) return false;
+    this.openUiModal(tileDetailHtml(d));
+    this._openTileSpaceId = targetSpaceId;
+    return true;
   }
 
   // First-paragraph lore excerpt for the chip/token popover (spec §2.5b).
@@ -3705,7 +3762,10 @@ class MonopolyBoard {
     // settings, saves, trade...) resets it first; the board click handler
     // (the only caller that cares) re-arms it immediately after, right below
     // this call, when — and only when — it actually opened a tile popover.
+    // _openPlayerDetailId mirrors the same contract (see its declaration) —
+    // _openPlayerDetail re-arms IT immediately after this call.
     this._openTileSpaceId = null;
+    this._openPlayerDetailId = null;
     this.uiModalBoxEl.className = `modal ${wide ? 'modal--wide' : ''}`;
     this.uiModalBoxEl.innerHTML = html;
     this.uiModalEl.classList.add('open');
@@ -3716,6 +3776,7 @@ class MonopolyBoard {
     this.uiModalBoxEl.innerHTML = '';
     document.body.style.overflow = '';
     this._openTileSpaceId = null;
+    this._openPlayerDetailId = null;
   }
 
   showLoreModal(charId) {
