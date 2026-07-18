@@ -50,6 +50,10 @@ All 10 characters have lore files and pixel-art portraits (including Ophelia Nig
 - Game Boy Color pixel UI (3 palettes + CRT toggle); ported from `data/design_handoff_pixel_ui/`
 - Map system: 4 board layouts (square/circle/hex/custom), data-driven via `map.json`
 - AI characters: optional OpenAI event reactions + chat (`character-ai.js`)
+- Dialogue memory (记忆宿敌, MT2-SP4): seat-keyed attitude ledger (grudge/trust from the
+  event stream, `src/dialogue/memory.js`, works keyless), memory-aware prompts + season
+  diaries + banter, speech bubbles, attitude glyphs in the player popover, bots read the
+  ledger on trade decisions; $3/game HARD LLM cost cap (double fuse in character-ai)
 - Victory conditions: Last Standing / Timed-Richest / Dominion, chosen at game start (`G.victory`)
 - Character selection with stat-based gameplay modifiers
 - 40 spaces, dice, property buying with negotiation discounts, rent with charisma discounts
@@ -70,9 +74,16 @@ All 10 characters have lore files and pixel-art portraits (including Ophelia Nig
 npm start        # Dev server at localhost:1234
 npm run build    # Production build
 npm run server   # Online multiplayer server (port 8088)
-npx jest --no-coverage  # Run 278 unit tests
-npx playwright test     # Run 18 E2E tests
+npm run sim -- --mod <id>   # Headless balance tournament
+npx jest --no-coverage  # Run ~1731 unit tests
+npx playwright test     # Run 49 E2E tests (needs npm start running on 1234)
 ```
+
+Node: the project pins **20.19.0** (nvm on this machine may default to 22 — pin
+per-process with `$env:Path = "C:\Users\Server1.0\AppData\Local\nvm\v20.19.0;$env:Path"`).
+Server + CLI scripts load ESM source via `scripts/node-compat-register.js` (works under
+node 20 AND 22; the old `-r esm` shim crashes under 22). CI (GitHub Actions, 3 jobs:
+jest/build/E2E on ubuntu, node 20.19) runs on every push to main.
 
 For Python scripts in `data/`:
 ```bash

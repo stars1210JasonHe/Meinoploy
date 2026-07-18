@@ -100,7 +100,8 @@ Plus a unique **passive** each. Dominion's council of ten, for example:
 ### 🤖 AI at the table
 
 - **Local bots** with distinct play styles fill any empty seat — solo play works out of the box.
-- **AI characters** (optional, your OpenAI key): every character reacts to the game and chats **in character**, with prompts built from their lore and live game state.
+- **Characters that remember.** Every character keeps a grudge/trust ledger built from what actually happens at the table — lose duels to someone, out-bid them, bankrupt their ally, and they *remember*. Attitudes show as tier glyphs in the player popover (no API key needed), bots consult the ledger before accepting your trades, and grudges decay only slowly with the seasons.
+- **AI characters** (optional, your OpenAI key): every character reacts to the game and chats **in character** — and with the memory system, they cite the actual history: *"That's the third time you've come for my land. My blade is dull, but my memory is excellent."* Characters write one-line diaries at each season's turn. All LLM spend is **hard-capped at $3 per game** (a double-fused budget guard, not an estimate).
 - **MCP server** — LLM agents join a running match as *real seated players*. Nine tools over the Model Context Protocol: list/create/join match, seat-scoped state & digest, legal-move listing (drift-oracle-tested against the engine), move execution with event attribution, an event cursor, and turn-waiting.
 
 ```bash
@@ -226,7 +227,8 @@ npm run create-mod -- 三国演义.txt --from-book --portraits --boardbg --auto-
 ### 🤖 AI 上桌
 
 - **本地机器人**性格各异，随时补位——单人开局即玩。
-- **AI 角色**（可选，用你的 OpenAI key）：每个角色按自己的人设背景对局面做反应、用本人口吻和你聊天。
+- **角色会记仇。** 每个角色都有一本由真实对局事件写成的宿怨/信任账：输给谁单挑、被谁抬价、盟友被谁搞破产——他们*记得*。态度徽记显示在玩家详情里（无需 API key），bot 在接受你的交易前会翻这本账，宿怨只随季节缓慢消退。
+- **AI 角色**（可选，用你的 OpenAI key）：每个角色按人设对局面做反应、用本人口吻聊天——配上记忆系统，他们引用的是真实历史：*"第三次了。云长的刀不利，但记性很好。"* 换季时每个角色写一句日记。所有 LLM 花费**每局硬顶 $3**（双保险预算护栏，不是估算）。
 - **MCP 服务器**——LLM 智能体以**真实玩家席位**加入对局。基于 Model Context Protocol 的九个工具：建房/加入、席位视角的状态与摘要、合法着法列表（与引擎双向漂移测试锁定）、带事件归因的行棋、事件游标、等待轮到自己。
 
 ```bash
