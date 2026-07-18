@@ -21,7 +21,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "boardgame.io": "0.45.0",
-    "esm": "^3.2.25",
     "globe.gl": "^2.46.1",
     "koa-static": "^5.0.0",
     "pngjs": "^7.0.0",

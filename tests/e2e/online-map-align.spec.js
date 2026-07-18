@@ -23,7 +23,7 @@ test.beforeAll(async () => {
     test.skip(true, 'port 8088 busy');
     return;
   }
-  serverProc = spawn(process.execPath, ['-r', 'esm', 'server.js'], {
+  serverProc = spawn(process.execPath, ['-r', './scripts/node-compat-register.js', 'server.js'], {
     env: { ...process.env, MOD: 'terra-titans', PORT: '8088' },
     stdio: 'ignore',
   });
