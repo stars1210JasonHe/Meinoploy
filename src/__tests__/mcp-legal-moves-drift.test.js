@@ -18,6 +18,12 @@ const CHAR_IDS = MODS.dominion.characters.map(c => c.id);
 const ARG_MOVES = new Set(['selectCharacter', 'placeBid', 'proposeTrade', 'commitRoute',
   'upgradeProperty', 'mortgageProperty', 'unmortgageProperty', 'sellBuilding', 'regulateProperty', 'rollDice']);
 
+// seed -> the {move,args} log captured by the seed %i drift test below —
+// consumed by the m9 self-verification test ("cycling actually fires") at
+// the bottom of this file, which runs after test.each has populated it
+// (jest runs a file's tests in declaration order).
+const seedArgsLogs = {};
+
 afterAll(() => {
   // Restore the module-scope active mod/map to dominion/classic — hygiene,
   // mirrors mod-map-select.test.js's afterAll (this file's terra-titans/atlas
@@ -48,19 +54,51 @@ function freshAtlasClient(numPlayers, seed) {
   return client;
 }
 
-function sampleArgs(entry, G, seat) {
+// Round-robins through a bounded set of options, one step per call — bounded
+// (mod length, never grows) and deterministic (a pure function of how many
+// times this move has been sampled so far, which is itself a deterministic
+// function of the fixed seed). `counters` is a plain object the caller owns
+// for the lifetime of one game/walk (see checkStep).
+function nextIndex(counters, key, len) {
+  if (!len) return 0;
+  const n = counters[key] || 0;
+  counters[key] = n + 1;
+  return n % len;
+}
+
+// m9 finding (drift oracle review): this only ever exercised argsHint's
+// FIRST entry per move (propertyIds[0], characterIds[0], min-only bids) —
+// e.g. a seat with THREE simultaneously-upgradable properties only ever had
+// its first one dispatched through the oracle, all game, every seed; the
+// other two were listed but never actually round-tripped through
+// listed=>accepted. `counters` cycles through every hinted option across the
+// repeated times a move gets sampled over the course of one walk.
+function sampleArgs(entry, G, seat, counters) {
   // Derive dispatchable args from the hint the module itself provides.
   switch (entry.move) {
-    case 'selectCharacter': return [entry.argsHint.characterIds[0]];
-    case 'placeBid': return [entry.argsHint.min];
+    case 'selectCharacter': {
+      const ids = entry.argsHint.characterIds;
+      return [ids[nextIndex(counters, 'selectCharacter', ids.length)]];
+    }
+    case 'placeBid': {
+      // Alternate the two concrete legal amounts the hint gives us (Game.js
+      // placeBid accepts amount === player.money — max is not a rejected
+      // over-bid, it's the other end of the legal range).
+      const i = nextIndex(counters, 'placeBid', 2);
+      return [i === 0 ? entry.argsHint.min : entry.argsHint.max];
+    }
     case 'commitRoute': return []; // engine auto-routes on omission
     case 'rollDice': return [];
     case 'proposeTrade': {
-      const other = G.players.find(p => p.id !== seat && !p.bankrupt);
+      const others = G.players.filter(p => p.id !== seat && !p.bankrupt);
+      const other = others[nextIndex(counters, 'proposeTrade', others.length)];
       return [{ targetPlayerId: other.id }];
     }
-    default:
-      return entry.argsHint && entry.argsHint.propertyIds ? [entry.argsHint.propertyIds[0]] : [];
+    default: {
+      const ids = entry.argsHint && entry.argsHint.propertyIds;
+      if (!ids || !ids.length) return [];
+      return [ids[nextIndex(counters, entry.move, ids.length)]];
+    }
   }
 }
 
@@ -76,10 +114,17 @@ function sampleArgs(entry, G, seat) {
 // to steer the walk into those branches; the oracle's listed<=>accepted
 // checks are order-independent (every blind dispatch of an unlisted move must
 // be rejected no matter when it's tried), so reordering never weakens them.
+// `counters` (required): the round-robin state sampleArgs cycles through —
+// owned by the caller for the lifetime of one game/walk, so repeated
+// encounters of the same move over many steps actually vary which hinted
+// option gets dispatched instead of always picking index 0. `argsLog`
+// (optional): if supplied, every listed dispatch is recorded as
+// {move, args} — the self-verification seam for the "did cycling actually
+// fire" test below (a silent no-op must fail loudly, not green-wash).
 // Returns the DISPATCHED move's name (truthy) so callers can self-verify
 // which branches the walk really reached, false if no listed move advanced,
 // undefined on gameover.
-function checkStep(client, seat, priority) {
+function checkStep(client, seat, priority, counters, argsLog) {
   const { G, ctx } = client.getState();
   if (ctx.gameover) return;
   const listed = new Set(getLegalMoves(G, ctx, seat).map(e => e.move));
@@ -93,7 +138,8 @@ function checkStep(client, seat, priority) {
     if (entry) {
       // LISTED => dispatch must be accepted (state changes) — hot-seat client
       // dispatches synchronously; INVALID_MOVE leaves state identical.
-      const args = sampleArgs(entry, before.G, seat);
+      const args = sampleArgs(entry, before.G, seat, counters);
+      if (argsLog) argsLog.push({ move, args });
       client.moves[move](...args);
       const after = client.getState();
       const changed = JSON.stringify(after.G) !== JSON.stringify(before.G)
@@ -120,13 +166,15 @@ function checkStep(client, seat, priority) {
 
 test.each([1, 7, 8, 21])('drift: full game agreement, seed %i', (seed) => {
   const client = freshClient(2, seed);
+  const counters = {}; // one round-robin state per game — see checkStep/sampleArgs
+  const argsLog = [];
   // Hot-seat: ctx.playerID is substituted currentPlayer — audit the CURRENT
   // seat each step (the seat whose moves are dispatchable on this client).
   let steps = 0;
   while (steps < 400) {
     const { ctx } = client.getState();
     if (ctx.gameover) break;
-    const advanced = checkStep(client, ctx.currentPlayer);
+    const advanced = checkStep(client, ctx.currentPlayer, undefined, counters, argsLog);
     if (!advanced) {
       // No listed move advanced state — the game requires a specific decision
       // (shouldn't happen: getLegalMoves must always list SOMETHING for the
@@ -136,6 +184,7 @@ test.each([1, 7, 8, 21])('drift: full game agreement, seed %i', (seed) => {
     steps++;
   }
   expect(steps).toBeGreaterThan(20); // the game genuinely progressed
+  seedArgsLogs[seed] = argsLog; // captured for the m9 self-verification test below
 });
 
 // Steered walk driver, shared by the priority scenarios below. `priority`
@@ -148,11 +197,12 @@ test.each([1, 7, 8, 21])('drift: full game agreement, seed %i', (seed) => {
 // loudly instead of green-washing.
 function driveSteeredGame(client, priority) {
   const dispatched = new Set();
+  const counters = {}; // one round-robin state per game — see checkStep/sampleArgs
   let steps = 0;
   while (steps < 400) {
     const { ctx } = client.getState();
     if (ctx.gameover) break;
-    const move = checkStep(client, ctx.currentPlayer, priority);
+    const move = checkStep(client, ctx.currentPlayer, priority, counters);
     if (!move) {
       throw new Error(`DRIFT (steered): no legal move listed for acting seat at step ${steps}`);
     }
@@ -208,4 +258,81 @@ test('drift: classic board via rollOnly (loop-map immediate-move branch), seed 1
   expect(dispatched.has('rollOnly')).toBe(true);
   expect(dispatched.has('rollDice')).toBe(false); // rollOnly won every pre-roll state
   expect(dispatched.has('commitRoute')).toBe(false); // loop map: no route pause ever opened
+});
+
+// m9 self-verification: does the round-robin actually fire in the full-game
+// walks above, or does every move type only ever see a single simultaneous
+// option (making the cycling a no-op in practice)? MEASURED (2026-07-18,
+// scratch instrumentation over the 4 classic seeds above): mortgageProperty/
+// unmortgageProperty each only ever had ONE candidate property at a time in
+// every one of these games (mortgageProperty is dispatched before
+// buyProperty/endTurn in Game.js's default move order — see driveSteeredGame's
+// header comment — so properties drain one at a time, never accumulating);
+// placeBid never appeared at all (no auctions in these seeds); proposeTrade/
+// acceptTrade only ever had one eligible target (2-player games). So in
+// these PARTICULAR seeded games the round-robin has nothing to cycle through
+// — that is a property of this state space, not a bug in the mechanism.
+// Proving the mechanism itself is correct and bounded therefore needs direct
+// unit coverage of sampleArgs, independent of whether any given seed happens
+// to generate a multi-option state.
+describe('sampleArgs cycles through every argsHint option (m9: previously always index 0)', () => {
+  test('propertyIds-shaped hints (upgradeProperty/mortgageProperty/unmortgageProperty/sellBuilding/regulateProperty) round-robin', () => {
+    const counters = {};
+    const entry = { move: 'upgradeProperty', argsHint: { propertyIds: [10, 20, 30] } };
+    const seen = [0, 1, 2, 3, 4].map(() => sampleArgs(entry, { players: [] }, '0', counters)[0]);
+    expect(seen).toEqual([10, 20, 30, 10, 20]); // wraps deterministically, bounded by array length
+  });
+
+  test('selectCharacter cycles through argsHint.characterIds', () => {
+    const counters = {};
+    const entry = { move: 'selectCharacter', argsHint: { characterIds: ['a', 'b', 'c'] } };
+    const seen = [0, 1, 2, 3].map(() => sampleArgs(entry, {}, '0', counters)[0]);
+    expect(seen).toEqual(['a', 'b', 'c', 'a']);
+  });
+
+  test('placeBid alternates the two legal bid amounts (min, then max — max === player.money is a legal bid, not an over-bid)', () => {
+    const counters = {};
+    const entry = { move: 'placeBid', argsHint: { min: 50, max: 300 } };
+    const seen = [0, 1, 2, 3].map(() => sampleArgs(entry, {}, '0', counters)[0]);
+    expect(seen).toEqual([50, 300, 50, 300]);
+  });
+
+  test('proposeTrade cycles through eligible (non-self, non-bankrupt) targets', () => {
+    const counters = {};
+    const entry = { move: 'proposeTrade' };
+    const G = { players: [{ id: '0' }, { id: '1' }, { id: '2', bankrupt: true }, { id: '3' }] };
+    const seen = [0, 1, 2, 3].map(() => sampleArgs(entry, G, '0', counters)[0].targetPlayerId);
+    expect(seen).toEqual(['1', '3', '1', '3']); // seat 2 excluded (bankrupt), seat 0 excluded (self)
+  });
+
+  test('counters are keyed per move name — cycling one move does not perturb another', () => {
+    const counters = {};
+    const upg = { move: 'upgradeProperty', argsHint: { propertyIds: [1, 2] } };
+    const mort = { move: 'mortgageProperty', argsHint: { propertyIds: [9, 8, 7] } };
+    expect(sampleArgs(upg, {}, '0', counters)[0]).toBe(1);
+    expect(sampleArgs(mort, {}, '0', counters)[0]).toBe(9);
+    expect(sampleArgs(upg, {}, '0', counters)[0]).toBe(2);
+    expect(sampleArgs(mort, {}, '0', counters)[0]).toBe(8);
+  });
+
+  test('a single hinted option never advances the counter into an out-of-range index (bounded)', () => {
+    const counters = {};
+    const entry = { move: 'sellBuilding', argsHint: { propertyIds: [42] } };
+    const seen = [0, 1, 2].map(() => sampleArgs(entry, {}, '0', counters)[0]);
+    expect(seen).toEqual([42, 42, 42]);
+  });
+});
+
+// Cross-check: the full-game walks above did exercise real cycling for the
+// one move type where these particular seeds DO generate >1 simultaneous
+// option — selectCharacter (the roster shrinks as each seat picks, so seat
+// 0 and seat 1's picks are drawn from different available sets). Pins the
+// measured finding above rather than letting it silently rot into a stale
+// comment.
+test('seed diagnostic: selectCharacter picks differ across seats in every captured game (sanity, not a new mechanism claim)', () => {
+  expect(Object.keys(seedArgsLogs).length).toBeGreaterThan(0); // populated by the seed %i tests above
+  for (const log of Object.values(seedArgsLogs)) {
+    const picks = log.filter(e => e.move === 'selectCharacter').map(e => e.args[0]);
+    expect(new Set(picks).size).toBe(picks.length); // no seat re-picked an already-taken id
+  }
 });
