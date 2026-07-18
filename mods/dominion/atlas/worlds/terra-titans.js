@@ -37,6 +37,26 @@
 // │ Validate instantly:  npm run sim -- --map terra-titans --games 20           │
 // └────────────────────────────────────────────────────────────────────────────┘
 
+// ── Event card decks (ticket A2) ─────────────────────────────────────────────
+// The 28 hand-written base cards live in mods/terra-titans/cards.js (portable —
+// no board/engine dependency). Two of them are extended here with a `moveTo`
+// hub-teleport card per deck (spec: "prefer HUB cities so the salary rule is
+// exercised"). The teleport TARGET must be a valid space id on THIS board, and
+// space ids are derivation-dependent (expandWorld assigns them by walking
+// `PLACES` in array order, expanding each place's archetype spaceSlots — see
+// the "HOW TO ADD / EDIT A CITY" block above, which explicitly invites future
+// edits to PLACES). A hardcoded numeric index would silently rot the moment
+// someone reorders/adds a city or gives a place a second archetype (allowed by
+// the same doc block) — nothing would catch it, since expandWorld doesn't
+// cross-check card decks. So instead of a literal number, we resolve the
+// target BY PLACE ID at module-load time, using the exact same expandWorld()
+// the real game will run at loadWorld() time — same PLACES/ARCHETYPES/HUBS
+// inputs in, so the resolved index is GUARANTEED to match whatever loadWorld()
+// computes later (expandWorld is a pure function of those inputs, no RNG).
+import { expandWorld, ATLAS_DEFAULTS } from '../../../../src/world-loader';
+import { ARCHETYPES } from '../archetypes';
+import { CHANCE_CARDS as BASE_CHANCE_CARDS, COMMUNITY_CARDS as BASE_COMMUNITY_CARDS } from '../../../terra-titans/cards';
+
 // Template helper — turns real-world facts into a loader-ready place object.
 // geo is the source of truth; pos:{x,y} (equirectangular projection) is derived
 // so the existing flat loader/sim/validator keep working with zero changes.
@@ -125,6 +145,24 @@ var PLACES = [
   place('tokyo',        'Tokyo',        'tech-hub',            35.68,  139.65, { e: 'new-york' },                            { population: 37000000, gdp: 2050, fame: 95 }),
 ];
 
+var HUBS = ['new-york', 'sao-paulo', 'london', 'paris', 'dubai', 'lagos', 'mumbai', 'singapore', 'shanghai', 'tokyo'];
+// globe.pixelRatio: WebGL drawing-buffer scale — lower = chunkier pixels.
+var ATLAS_CFG = { positions: { slotOffsetStep: 4 }, globe: { pixelRatio: 0.3 } };
+
+// Resolve the moveTo hub targets: expandWorld is a PURE function of
+// (places, archetypes, hubs, atlasConfig) with no RNG, so calling it here with
+// the exact same PLACES/ARCHETYPES/HUBS/ATLAS_CFG that loadWorld() will use at
+// real game-setup time guarantees `ENTRY['london']`/`ENTRY['shanghai']` match
+// whatever loadWorld() computes later — no hardcoded number to drift.
+var ENTRY = expandWorld({ places: PLACES, hubs: HUBS, atlasConfig: ATLAS_CFG }, ARCHETYPES, ATLAS_DEFAULTS).entries;
+
+export var TERRA_CHANCE_CARDS = BASE_CHANCE_CARDS.concat([
+  { text: 'The Silk Road opens westward! Advance your caravan to London, seat of empire.', action: 'moveTo', value: ENTRY['london'] },
+]);
+export var TERRA_COMMUNITY_CARDS = BASE_COMMUNITY_CARDS.concat([
+  { text: 'New sea lanes open to the east. Advance your envoy to Shanghai.', action: 'moveTo', value: ENTRY['shanghai'] },
+]);
+
 export var TERRA_TITANS = {
   id: 'terra-titans',
   name: 'Terra Titans',
@@ -133,7 +171,7 @@ export var TERRA_TITANS = {
   renderMode: 'globe',          // ← Stage-2 board renderer switch (ignored by loader/sim today)
   schemaVersion: '3.0-draft',
   places: PLACES,
-  hubs: ['new-york', 'sao-paulo', 'london', 'paris', 'dubai', 'lagos', 'mumbai', 'singapore', 'shanghai', 'tokyo'],
+  hubs: HUBS,
   winPaths: ['dominion', 'wealth', 'survival'],
   // Balance-tuned via sim (2026-06-26). Greedy bots essentially never complete monopolies
   // here: groupsToWin 6/4/3 NEVER ended a game in 300 turns; survival never bankrupts (rent
@@ -149,7 +187,8 @@ export var TERRA_TITANS = {
   mapMechanics: { priceMultiplier: 1.5 },
   // 49 cities × 3 slots = 147 spaces — blows the inherited 16/96 default, so raise.
   size: { maxPlaces: 56, maxSpaces: 176 },
-  // globe.pixelRatio: WebGL drawing-buffer scale — lower = chunkier pixels.
-  atlasConfig: { positions: { slotOffsetStep: 4 }, globe: { pixelRatio: 0.3 } },
+  atlasConfig: ATLAS_CFG,
   theme: { logoText: 'TERRA', logoSubtitle: 'TITANS' },
+  // Event card decks (ticket A2 — see the "Event card decks" comment above).
+  cards: { chance: TERRA_CHANCE_CARDS, community: TERRA_COMMUNITY_CARDS },
 };
