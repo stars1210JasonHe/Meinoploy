@@ -226,7 +226,23 @@ function driveSteeredGame(client, priority) {
 // - initiateDuel before payRent escalates offers while off cooldown; the
 //   3-turn cooldown then routes later offers through payRent (default order),
 //   so both offer answers get dispatched in the same game.
-test.each([2, 9])('drift: atlas board (terra-titans), rollOnly/commitRoute + duel-respond stance, seed %i', (seed) => {
+// Re-seeded (ticket A2, terra-titans event card decks): seeds 2/9 were tuned
+// against terra-titans' PREVIOUSLY EMPTY chance/community decks, where
+// drawCard's `if (!deck || deck.length === 0) return null;` short-circuits
+// BEFORE calling ctx.random.Number() at all — landing on a card space
+// consumed ZERO random draws. Populating the decks means a card space now
+// legitimately draws (consuming one ctx.random.Number() call), which shifts
+// every subsequent seeded roll for the rest of that game — seeds 2/9 no
+// longer reach the cooldown-blocked-payRent branch by turn 400. This is a
+// consequence of the SAME bug ticket A2 fixes (empty decks silently no-op),
+// not a new drift bug: re-running the seed hunt (measured, not guessed — see
+// the original stance-steering comment above) with real decks in play found
+// seeds 1/6 reach the full scenario in BOTH stances (verified: rollOnly,
+// commitRoute, initiateDuel, respondDuel/declineDuel, and payRent all
+// genuinely dispatch — acceptCard now also dispatches along the way, which is
+// the point of the fix). If terra-titans' decks change again, re-run this
+// hunt rather than re-guessing.
+test.each([1, 6])('drift: atlas board (terra-titans), rollOnly/commitRoute + duel-respond stance, seed %i', (seed) => {
   const dispatched = driveSteeredGame(freshAtlasClient(2, seed), ['rollOnly', 'commitRoute', 'initiateDuel', 'respondDuel', 'buyProperty', 'endTurn']);
   // Self-verifying (reviewer-mandated): each branch was genuinely dispatched
   // through the oracle's listed=>accepted path — a silent no-op fails here.
@@ -238,7 +254,7 @@ test.each([2, 9])('drift: atlas board (terra-titans), rollOnly/commitRoute + due
   expect(dispatched.has('payRent')).toBe(true); // cooldown-blocked offers drain here
 });
 
-test.each([2, 9])('drift: atlas board (terra-titans), duel-decline stance, seed %i', (seed) => {
+test.each([1, 6])('drift: atlas board (terra-titans), duel-decline stance, seed %i', (seed) => {
   const dispatched = driveSteeredGame(freshAtlasClient(2, seed), ['rollOnly', 'commitRoute', 'initiateDuel', 'declineDuel', 'buyProperty', 'endTurn']);
   expect(dispatched.has('rollOnly')).toBe(true);
   expect(dispatched.has('commitRoute')).toBe(true);
