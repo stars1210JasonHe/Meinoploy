@@ -42,6 +42,83 @@ function plantBackground(root, modId, targetId) {
   fs.writeFileSync(path.join(dir, `${targetId}.png`), FAKE_PNG);
 }
 
+// Ticket (open item from the reemit-rewire final review, tickets3-report.md): no test previously
+// proved a PARTIALLY-portrait-wired generated mod is actually buildable — coverage above is
+// string-level only (`.toContain(...)` on import lines). A real `npx parcel build` can't run
+// against these tmp roots as-is: makeRoot() deliberately seeds only the two registry anchor files
+// (see its own comment — "createMod only READS the two registry files + WRITES the mod tree; it
+// never builds"), not a full repo checkout, and tmp roots live outside the project tree entirely
+// (no reachable node_modules for Parcel to walk up to). Copying/symlinking node_modules and a full
+// mods/dominion/ tree into every tmp root per test run would make this suite slow and fragile for
+// what is fundamentally a "does every import specifier point at a real file" question. Chosen
+// instead — the cheaper proof this ticket's own text names as acceptable: parse the generated
+// files with @babel/core and resolve every relative import specifier against the filesystem,
+// asserting each one exists. This catches exactly the failure class a Parcel build would report as
+// "Cannot resolve dependency": a wired-but-missing portrait file, or (the original all-or-nothing
+// bug) an import emitted for a character whose PNG was never generated.
+function collectRelativeImportSpecifiers(source) {
+  const ast = require('@babel/core').parseSync(source, { sourceType: 'module' });
+  return ast.program.body
+    .filter(n => (n.type === 'ImportDeclaration' || n.type === 'ExportNamedDeclaration' || n.type === 'ExportAllDeclaration') && n.source)
+    .map(n => n.source.value)
+    .filter(spec => spec.startsWith('.')); // bare/package specifiers resolve via node_modules — out of scope here
+}
+// Resolves one relative specifier from `fromFile` the way Node/Parcel's CJS-style resolver would:
+// exact path, then + '.js'. Generated-mod imports are always either an explicit-extension asset
+// (portraits/*.png, *.data.json) or an extensionless local module (./characters-data).
+function resolveRelativeSpecifier(fromFile, spec) {
+  const base = path.resolve(path.dirname(fromFile), spec);
+  if (fs.existsSync(base) && fs.statSync(base).isFile()) return base;
+  if (fs.existsSync(base + '.js')) return base + '.js';
+  return null;
+}
+// Parses `filePath` and asserts every relative import specifier it emits resolves to a real file
+// on disk. Returns { specifiers, resolved } for the caller's own content assertions (e.g. proving
+// a specific missing roster member produced NO import at all, not a dangling one).
+function assertImportsResolve(filePath) {
+  const specifiers = collectRelativeImportSpecifiers(fs.readFileSync(filePath, 'utf8'));
+  const resolved = specifiers.map(spec => {
+    const target = resolveRelativeSpecifier(filePath, spec);
+    if (!target) throw new Error(`import "${spec}" in ${filePath} does not resolve to a real file (parcel would fail to build this)`);
+    return target;
+  });
+  return { specifiers, resolved };
+}
+
+describe('partial-portrait mod is buildable (parcel-build-equivalent proof, not just string-shaped)', () => {
+  test('minimal entry -> characters.js: every emitted import specifier resolves to a real file; the un-wired character has NO import at all', () => {
+    const root = makeRoot();
+    expect(createMod({ inputPath: ATLAS, rootDir: root }).ok).toBe(true);
+
+    // PARTIAL: only 2 of the 3 roster ids get a portrait — same scenario as the string-level test
+    // above, but this time we prove the output is actually buildable.
+    plantPortraits(root, 'ancient-empires', ['hammurabi', 'cyrus-the-great']);
+    const r = createMod({ inputPath: ATLAS, rootDir: root, force: true });
+    expect(r.ok).toBe(true);
+    expect(r.rewire.portraits).toBe(2);
+
+    // A minimal entry file, exactly as the ticket describes: something that imports the mod's
+    // characters.js (the way bundle.client.js — and ultimately App.js — really does).
+    const entryPath = path.join(root, 'entry.js');
+    fs.writeFileSync(entryPath, `import { CHARACTERS } from './mods/ancient-empires/characters.js';\nexport { CHARACTERS };\n`);
+
+    const charsPath = path.join(root, 'mods', 'ancient-empires', 'characters.js');
+    const { resolved: entryResolved } = assertImportsResolve(entryPath);
+    expect(entryResolved).toEqual([charsPath]); // the entry itself resolves to the real generated file
+
+    const { specifiers, resolved } = assertImportsResolve(charsPath);
+    expect(resolved).toEqual(expect.arrayContaining([
+      path.join(root, 'mods', 'ancient-empires', 'characters-data.js'),
+      path.join(root, 'mods', 'ancient-empires', 'portraits', 'hammurabi.png'),
+      path.join(root, 'mods', 'ancient-empires', 'portraits', 'cyrus-the-great.png'),
+    ]));
+    // the un-wired roster member (no portrait planted) must produce NO import at all — a
+    // dangling import pointing at a missing file is exactly the regression this test guards.
+    expect(specifiers.some(s => s.includes('alexander-the-great'))).toBe(false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
 describe('createMod --force rewire pass: portraits + boardBg survive re-emit', () => {
   test('atlas: enrichments present -> characters.js + bundle.client.js re-wired (atlasAssets)', () => {
     const root = makeRoot();
