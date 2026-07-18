@@ -128,11 +128,17 @@ Decomposed 2026-07-06 into: SP1 foundation (events+seats) → SP2 duel/对战 �
 > Engine: G.activeModId/activeMapId stamping + MOD=/MAP= server boot + App.js online first-sync
 > alignment. Scoped-esm bootstrap (SDK/zod native CJS + src/ via esm shim) with --selftest. Whole-stack
 > smoke test spawns BOTH real processes and speaks raw JSON-RPC (schema serialization pinned).
-> 1093 unit tests; final whole-branch review + re-review = ready-to-merge. PENDING: manual acceptance
-> (browser + MCP seat to gameover incl. a duel response) — blocked on "no second player to add",
-> unblocks when bots land or via a second Claude session. Post-merge tickets: atlas drift coverage,
-> App.js version-skew re-align guard, CLAUDE.md docs pass (npm run mcp + registration flow), small
-> seam polish (onSync client-identity check, waitForMyTurn catch specificity, smoke gameProc stderr).
+> 1093 unit tests; final whole-branch review + re-review = ready-to-merge. **MANUAL ACCEPTANCE
+> DONE 2026-07-18 (autonomous, 12/12 PASS)**: browser seat through the real Lobby + MCP seat via
+> the 9-tool surface, alternating play across 8 matches, THREE real gameovers byte-consistent on
+> both interfaces, the named duel-response item evidenced (respondDuel with correct decisionSeq
+> correlation + challenger-actor attribution), seq-monotonic gap-free event cursors, seat-scoped
+> state verified. Report: .superpowers/sdd/mcp-acceptance-report.md. New tickets from the run:
+> terra-titans card decks are EMPTY (card spaces no-op — content gap); nondeterministic
+> browser-renderer freeze during online play on the dev machine (engine/MCP unaffected,
+> leave/rejoin self-heals — needs its own probe); list_matches can't flag finished matches;
+> Lobby hides zero-player matches (MCP-first join order documented). Earlier post-merge tickets
+> (atlas drift coverage, seam polish, CLAUDE.md docs) all closed in the 07-16/07-17 batches.
 > **MT2-SP4 — Dialogue system direction B (记忆宿敌): DONE 2026-07-17 (feat/dialogue-b,
 > 18 commits, SDD T1-T4 each double-pass reviewed + final whole-branch review READY TO
 > MERGE; 1713 unit + 49 E2E).** Owner picked B ("先B 后C"; C = opt-in follow-up wave).
