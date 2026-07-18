@@ -1,5 +1,7 @@
 name: CI
 
+# Three independent jobs (unit / build / e2e) — each does its own checkout + npm ci so a failure
+# in one job never blocks the signal from the others. Triggered on push/PR to main.
 on:
   push:
     branches: [main]
@@ -7,29 +9,130 @@ on:
     branches: [main]
 
 jobs:
-  unit-tests:
-    name: Unit tests (Jest)
+  unit:
+    name: unit (Jest, node 20.19.0)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      # node-version pinned to 20.19.0 EXACTLY — the repo's pinned dev version (CLAUDE.md).
+      # scripts/node-compat-register.js (replaces the old `esm`-package require-hook, removed
+      # from dependencies in this same change) is verified to work under both 20.19.0 and 22.x,
+      # but CI should track what dev pins rather than "latest 20", so a version drift in the
+      # loader shows up locally before it ever reaches CI.
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '20.19.0'
           cache: 'npm'
       - run: npm ci
       - run: npx jest --no-coverage
 
-  e2e-tests:
-    name: E2E tests (Playwright)
+  build:
+    name: build (Parcel v1)
     runs-on: ubuntu-latest
-    # Non-blocking: E2E spins up Parcel and is flake-prone in CI. Informational only.
-    continue-on-error: true
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '20.19.0'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+
+  e2e:
+    name: e2e (Playwright, chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
           cache: 'npm'
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+
+      # Boot the dev server in the background and block until it actually answers, rather than
+      # relying on playwright.config.js's own `webServer` block to spawn it (that block still
+      # applies underneath — `reuseExistingServer: true` means it detects this one and does not
+      # spawn a second copy — this step just gives CI an explicit, debuggable boot+readiness
+      # phase with its own log output instead of Playwright's own quieter webServer bookkeeping).
+      - name: Start dev server (background) and wait for readiness
+        run: |
+          npx parcel index.html --port 1234 > parcel.log 2>&1 &
+          echo "parcel PID: $!"
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:1234/ > /dev/null; then
+              echo "dev server is up after ${i} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::dev server never became ready — parcel.log follows"
+          cat parcel.log
+          exit 1
+
       - run: npx playwright test
+
+      - name: Upload Playwright report + test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+# ---------------------------------------------------------------------------
+# Portability review (done ahead of the first real run — this repo's test suite has, to date,
+# only ever run on Windows/Git Bash; this workflow is the first time any of it runs on Linux):
+#
+# VERIFIED CLEAN (checked directly against this repo, not assumed):
+#   - No Jest test hardcodes a Windows-style path (grepped for `C:\\` / drive-letter literals
+#     under src/__tests__ — zero hits). The few backslash-related regexes that do exist
+#     (createmod-extract-cli.test.js, node-compat-register.test.js, scripts/extract-facts.js)
+#     all NORMALIZE `\` -> `/` defensively; they are no-ops on Linux, not Linux-breaking.
+#   - No test/script uses `shell: true` or a `.cmd`-suffixed spawn target. The one Windows-only
+#     code path (src/__tests__/mcp-stdio-smoke.test.js's killTree — `taskkill /T /F` for cleaning
+#     up a spawned process tree) is correctly gated behind `process.platform === 'win32'`, with a
+#     plain `process.kill(pid, 'SIGKILL')` on the else branch — verified this compiles/runs the
+#     same test suite that's green on Windows; the win32 branch is simply dead code on Linux.
+#   - CASE-SENSITIVITY (Windows/macOS are case-insensitive; Linux is not — a real, historically
+#     common cross-platform Parcel-build breaker): scripted a scan of all 628 relative import
+#     specifiers under src/, mods/, scripts/ against the filesystem with an exact-case directory
+#     walk (not fs.existsSync's case-insensitive-on-Windows check). Zero mismatches found.
+#   - `git config core.autocrlf` is `true` on this Windows dev machine, which normalizes CRLF ->
+#     LF on COMMIT (so the objects actually stored in the repo are LF) and only re-expands to
+#     CRLF on checkout locally. actions/checkout on ubuntu-latest does not re-expand line endings
+#     (no core.autocrlf conversion happens on Linux), so the Linux checkout should be the FAITHFUL
+#     LF copy of what's committed — arguably cleaner than this Windows working tree, not riskier.
+#     Audited every test that reads a checked-in file back with fs.readFileSync: golden fixtures
+#     go through JSON.parse (whitespace-insensitive); every other readback is either a) a
+#     round-trip of a file the SAME test just wrote (self-consistent regardless of platform) or
+#     b) a `.toContain()`/`.toMatch()` substring check, not a full byte-equality assertion against
+#     a hardcoded multi-line literal. No .gitattributes exists to force this either way — flagging
+#     as a documented absence, not fixing it speculatively (no failing case found to fix).
+#   - No native-binary devDependency (canvas/sharp/sqlite3/node-sass/etc.) in package-lock.json
+#     that would need Linux build tooling `npm ci` doesn't already handle; `fsevents` is the only
+#     platform-restricted optional dep and is macOS-only (npm skips it automatically elsewhere).
+#
+# NOT VERIFIABLE LOCALLY — first real signal is the first GitHub Actions run (this machine cannot
+# run a Linux job):
+#   - `npx playwright install --with-deps chromium` pulls Linux-specific system libraries (apt
+#     packages) that were never exercised on this Windows machine. If the e2e job fails at THIS
+#     step (not at the dev-server or test-run steps), that specifically points at a missing
+#     apt dependency (--with-deps is supposed to cover this, but it's Ubuntu-version-sensitive).
+#   - Parcel v1's dev server / build path on Linux (this project has only ever built on Windows).
+#     If `build` fails but `unit` passes, suspect Parcel-on-Linux specifically, not the source.
+#   - Actual wall-clock timing for `npx jest --no-coverage` (this suite runs slow on this dev
+#     machine already — some individual gen-portraits tests take 15-40s due to fs churn under
+#     tmp dirs — 15 min should be generous headroom, but hasn't been measured on a GitHub-hosted
+#     runner's CPU/disk profile). Same caveat for the 30 min e2e budget.
+#   - Whether `reuseExistingServer: true` in playwright.config.js actually detects the
+#     manually-started server correctly under Linux's process/port semantics (should be identical
+#     to Windows since it's just an HTTP probe against localhost:1234, but unverified end-to-end
+#     here since Playwright itself was excluded from the local gate for this change).
+# ---------------------------------------------------------------------------
