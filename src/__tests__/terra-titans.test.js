@@ -110,4 +110,44 @@ describe('Terra Titans mod content', () => {
   test('lore table has exactly the 16 leader ids', () => {
     expect(Object.keys(CHARACTER_LORE).sort()).toEqual(CHARACTERS_DATA.map(c => c.id).sort());
   });
+
+  // Roster balance invariant (relied on by the balance sim's stat-redistribution
+  // hill-climb, src/createmod/balance/optimizer.js): every leader's 6 stats must
+  // sum to the SAME total, so no character gets a raw stat-budget edge over
+  // another — only passives/positioning differentiate them.
+  test('every leader\'s 6 stats sum to the same total (stat-budget parity)', () => {
+    const STAT_KEYS = ['capital', 'luck', 'negotiation', 'charisma', 'tech', 'stamina'];
+    const sums = CHARACTERS_DATA.map(c => STAT_KEYS.reduce((a, k) => a + c.stats[k], 0));
+    const expected = sums[0];
+    sums.forEach((sum, i) => {
+      expect(sum).toBe(expected);
+    });
+  });
+
+  // Roster balance fix (2026-07-21): a driver-attribution probe (sim melee, 300
+  // games/seed, full event-log scan) found Chandragupta Maurya and Mansa Musa —
+  // the ONLY two idealist-passive leaders in this roster — were the ONLY
+  // characters with a nonzero passive_triggered idealist go_bonus income (~$813-
+  // 825/game at the Dominion-wide default of 50), and that this was the only
+  // economic channel with a clean split matching their STRONG melee flags.
+  // Terra Titans' globe world crosses a hub roughly every 9 turns (far denser
+  // than Dominion's one GO per lap), so the SAME flat per-hub bonus that is fine
+  // on Dominion's Mira Dawnlight compounds into a dominant edge here. Swept
+  // 50/25/20/15/10/5/0 — 10 is the smallest value that cleared the melee STRONG
+  // flag on both characters across 5 independent seeds; 25/20/15 still re-flagged
+  // on at least one seed. This test locks the fix in and proves it is SCOPED to
+  // terra-titans only (Dominion's own idealist balance, incl. Mira Dawnlight,
+  // must stay untouched).
+  test('idealist passive is scoped down for terra-titans (roster balance fix), Dominion untouched', () => {
+    const domRules = MODS.dominion.rules;
+    const ttRules = terraTitansData.rules;
+    expect(domRules.passives.idealist.goBonus).toBe(50);
+    expect(ttRules.passives.idealist.goBonus).toBe(10);
+    expect(ttRules.passives.idealist.goBonus).toBeLessThan(domRules.passives.idealist.goBonus);
+    // every OTHER passive value is untouched by the terra-titans override
+    Object.keys(domRules.passives).forEach(id => {
+      if (id === 'idealist') return;
+      expect(ttRules.passives[id]).toEqual(domRules.passives[id]);
+    });
+  });
 });
