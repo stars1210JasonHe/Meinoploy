@@ -45,6 +45,7 @@ import { getUpgradeCost } from '../Game';
 import { routeChoices } from '../atlas-movement';
 import { canAct, isMerchant } from './view';
 import { decisionSeq, EXPECT_REQUIRED } from './move-schemas';
+import { canAttempt } from '../persuasion/engine';
 
 // Mirrors Game.js's (unexported) groupKeyOf exactly (Game.js:210).
 function groupKeyOf(space) {
@@ -203,9 +204,30 @@ export function getLegalMoves(G, ctx, seat) {
     return out;
   }
 
+  // --- Persuasion 求情 (rent-refund window, MT2-SP5 direction C2, T4):
+  // deliberately evaluated BEFORE the `if (G.duel) return out;` early return
+  // below — Game.js's attemptPersuasion move body never reads G.duel/
+  // G.auction/G.trade for the 'rent' kind (only G.lastRentPayment's own
+  // turn/payer/owner fields gate it, via canAttempt), so — unlike every
+  // OTHER move this file mirrors — this window can legitimately still be
+  // open even while a NEW G.duel is offered later the SAME turn (a reroll
+  // that pays rent, then lands again on a second duel-eligible property).
+  // Reuses canAttempt directly (not hand-mirrored): it is the EXACT
+  // predicate the engine move dispatches through (window + accounting caps
+  // + RULES.persuasion.enabled), so this can never list a move that would
+  // actually come back INVALID_MOVE.
+  if (G.lastRentPayment && canAttempt(G, ctx, 'rent', seat, G.lastRentPayment.ownerSeat, RULES).ok) {
+    out.push({
+      move: 'attemptPersuasion',
+      argsHint: { kind: 'rent', targetSeat: G.lastRentPayment.ownerSeat },
+      description: `求情 — ask seat ${G.lastRentPayment.ownerSeat} to refund part of the $${G.lastRentPayment.amount} rent you just paid this turn.`,
+    });
+  }
+
   // --- G.duel blocks literally every other move (verified move-by-move
-  // against Game.js: every move besides the duel quartet either explicitly
-  // checks `if (G.duel) return INVALID_MOVE`, or requires a state that can't
+  // against Game.js: every move besides the duel quartet AND
+  // attemptPersuasion(kind:'rent') above either explicitly checks
+  // `if (G.duel) return INVALID_MOVE`, or requires a state that can't
   // structurally coexist with a pending duel in a rest state — e.g.
   // G.canBuy/G.pendingCard/G.auction/G.trade can't be set at the same time
   // as G.duel, since a duel is only offered on a rent-due landing, which is
@@ -216,9 +238,23 @@ export function getLegalMoves(G, ctx, seat) {
       if (!isDuelCooldownBlocked(G.players[Number(G.duel.challengerId)], G.totalTurns)) {
         out.push({ move: 'initiateDuel', description: `Challenge the owner to a duel over the rent (lose = $${Math.round(RULES.duel.loseMultiplier * G.duel.rent)}).` });
       }
-    } else if (G.duel.phase === 'response' && actorMatches(G, seat, G.duel.ownerId)) {
-      if (listable('respondDuel')) out.push({ move: 'respondDuel', expect: expectFor('respondDuel'), description: 'Fight! (2d6 + stats per side)' });
-      if (listable('declineDuel')) out.push({ move: 'declineDuel', expect: expectFor('declineDuel'), description: 'Decline — take the normal rent instead.' });
+    } else if (G.duel.phase === 'response') {
+      if (actorMatches(G, seat, G.duel.ownerId)) {
+        if (listable('respondDuel')) out.push({ move: 'respondDuel', expect: expectFor('respondDuel'), description: 'Fight! (2d6 + stats per side)' });
+        if (listable('declineDuel')) out.push({ move: 'declineDuel', expect: expectFor('declineDuel'), description: 'Decline — take the normal rent instead.' });
+      }
+      // Persuasion 叫阵 (duel-taunt window, T4): the CHALLENGER's own option,
+      // open only during 'response' (before the owner answers) — attemptPersuasion's
+      // actor is always ctx.currentPlayer, which stays the challenger for the
+      // whole duel (Game.js never reassigns currentPlayer mid-duel), so this
+      // is gated on isCurrent rather than actorMatches(..., ownerId) above.
+      if (isCurrent && canAttempt(G, ctx, 'duel', seat, G.duel.ownerId, RULES).ok) {
+        out.push({
+          move: 'attemptPersuasion',
+          argsHint: { kind: 'duel', targetSeat: G.duel.ownerId },
+          description: `叫阵 — taunt seat ${G.duel.ownerId} before they respond to your duel challenge.`,
+        });
+      }
     }
     return out;
   }
@@ -251,6 +287,16 @@ export function getLegalMoves(G, ctx, seat) {
     }
     if (isCurrent) { // G.trade.proposerId === ctx.currentPlayer is an invariant while G.trade is set
       out.push({ move: 'cancelTrade', description: 'Withdraw your trade proposal.' });
+      // Persuasion 游说 (trade-lobby window, T4): the PROPOSER's own option,
+      // riding the current G.trade proposal (canAttempt's 'trade' kind
+      // requires actorSeat === G.trade.proposerId === ctx.currentPlayer here).
+      if (canAttempt(G, ctx, 'trade', seat, G.trade.targetPlayerId, RULES).ok) {
+        out.push({
+          move: 'attemptPersuasion',
+          argsHint: { kind: 'trade', targetSeat: G.trade.targetPlayerId },
+          description: `游说 — lower seat ${G.trade.targetPlayerId}'s acceptance threshold for your pending trade offer.`,
+        });
+      }
     }
   }
 

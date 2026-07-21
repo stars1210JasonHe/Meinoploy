@@ -132,6 +132,22 @@ async function main() {
         expect: z.object({ decisionSeq: z.number() }).optional() } },
     wrap(({ move, args, expect }) => session.makeMove({ move, args, expect })));
 
+  server.registerTool('attempt_persuasion',
+    { description: 'Persuasion (MT2-SP5 "舌战群儒"): text in, verdict out. Usable only when a window is open '
+        + '(get_state_digest / list_legal_moves say so) — kind:\'rent\' (求情, ask the owner to refund part of the '
+        + 'rent you just paid this turn), kind:\'duel\' (叫阵, taunt the owner before they respond to your duel '
+        + 'challenge), or kind:\'trade\' (游说, lower the target\'s acceptance threshold for your pending trade '
+        + 'offer). targetSeat is the seat you are persuading (see the open window). Once per opponent per seam, '
+        + '3 attempts/game total, and DISABLED entirely on this server unless the operator opted in '
+        + '(MEINOPOLY_PERSUASION=1) — returns {accepted:false} rather than an error when the window is closed. '
+        + 'Keyless: your text flavors the attempt but the verdict is a deterministic charisma check, not judged.',
+      inputSchema: {
+        kind: z.enum(['rent', 'duel', 'trade']),
+        targetSeat: z.union([z.string(), z.number()]),
+        text: z.string().max(200).optional(),
+      } },
+    wrap(({ kind, targetSeat, text }) => session.attemptPersuasion({ kind, targetSeat, text })));
+
   server.registerTool('get_events',
     { description: 'Typed engine events since your cursor (parameterless advances it) or since an explicit sinceSeq (pure read; -1 = full history). gap:true means the 200-event log trimmed past your cursor — reconcile via get_state.',
       inputSchema: { sinceSeq: z.number().optional() } },

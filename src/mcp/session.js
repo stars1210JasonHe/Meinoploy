@@ -323,6 +323,40 @@ export function createSession({ serverUrl, fetchImpl, clientFactory, credStore, 
       }
     },
 
+    // attempt_persuasion (MT2-SP5 direction C2 "舌战群儒", T4): a named,
+    // friendly wrapper around the SAME makeMove pipeline every other move
+    // goes through (single-flight, attribution, gameover/stale-decision
+    // handling) — NOT a second dispatch path. attemptPersuasion is never in
+    // EXPECT_REQUIRED (the actor is always ctx.currentPlayer, never a
+    // cross-seat response — see move-schemas.js's own comment on this move),
+    // so no `expect` correlation is needed here unlike make_move's
+    // placeBid/acceptTrade/etc.
+    //
+    // Deliberately KEYLESS-ONLY from this surface — `score` is never
+    // accepted as an input here, even though the underlying engine move
+    // technically supports one (src/persuasion/judge.js's client-side LLM
+    // judge path, App.js only). Reason (this task's own finding, not a spec
+    // requirement): the attitude-clamp anti-abuse pillar the design doc
+    // describes (docs/superpowers/specs/2026-07-18-dialogue-c-design.md,
+    // "Prompt injection" pillar #1) is applied CLIENT-side only
+    // (judge.js's clampScore runs in App.js before attemptPersuasion is ever
+    // dispatched — judge.js's own header comment says so explicitly); the
+    // engine move itself has no server-side re-check of a supplied score
+    // against the target's grudge/trust ledger. Accepting an
+    // externally-supplied score on this MCP surface would hand any agent
+    // seat a way to always claim score:10 and bypass that clamp entirely —
+    // exactly the class of attack the design's "text in, verdict out" MCP
+    // framing (not "score in") is meant to prevent. `text` defaults to ''
+    // (attemptPersuasion's own sanitizeText already tolerates an empty
+    // string — see src/persuasion/engine.js).
+    async attemptPersuasion({ kind, targetSeat, text } = {}) {
+      if (typeof kind !== 'string' || !kind) throw new McpToolError('attempt_persuasion: kind is required (rent | duel | trade)');
+      if (targetSeat === undefined || targetSeat === null || targetSeat === '') {
+        throw new McpToolError('attempt_persuasion: targetSeat is required — see get_state_digest for open windows');
+      }
+      return this.makeMove({ move: 'attemptPersuasion', args: [kind, String(targetSeat), text || ''] });
+    },
+
     // wait_for_my_turn (spec §1 tool 6): blocks until this seat can act, the
     // game ends, or timeoutMs elapses. Built on the existing waitForState
     // helper (own private subscription per call — see waitForState's header)

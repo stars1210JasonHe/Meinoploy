@@ -1,6 +1,7 @@
 import { canAct, stateView, stateDigest } from '../mcp/view';
 import { makeClient, selectAllCharacters } from './helpers/drive';
 import { MODS } from '../../mods/index';
+import { RULES } from '../../mods/active-rules';
 
 const CHAR_IDS = MODS.dominion.characters.map(c => c.id);
 
@@ -133,5 +134,103 @@ describe('stateDigest', () => {
     const merchant = withCard({ luckRedraws: 0, character: merchantChar });
     const dMerchant = stateDigest(merchant, ctx, seat);
     expect(dMerchant).toContain('acceptCard or redrawCard.');
+  });
+
+  // Persuasion windows (MT2-SP5 direction C2 "舌战群儒", T4) — a "PERSUASION:"
+  // line (deliberately NOT "DECISION:" — see view.js's own comment: these are
+  // optional side actions, never blocking) surfaces exactly when
+  // canAttempt would also let list_legal_moves list attemptPersuasion.
+  describe('persuasion windows', () => {
+    function playState() {
+      const client = startedClient();
+      const { G, ctx } = client.getState();
+      return { G, ctx, seat: ctx.currentPlayer };
+    }
+
+    test('rent refund window: hinted to the payer, mentions the amount and remaining attempts', () => {
+      const { G, ctx, seat } = playState();
+      const other = G.players.find(p => p.id !== seat).id;
+      const withRent = { ...G, lastRentPayment: { payerSeat: seat, ownerSeat: other, amount: 340, turn: G.totalTurns } };
+      const d = stateDigest(withRent, ctx, seat);
+      expect(d).toContain(`PERSUASION: you may attemptPersuasion(kind:'rent', targetSeat:'${other}')`);
+      expect(d).toContain('$340 rent you just paid');
+      expect(d).toMatch(/\d+ attempt\(s\) left this game/);
+    });
+
+    test('rent refund window: NOT hinted to the owner (only the payer can attempt)', () => {
+      const { G, ctx, seat } = playState();
+      const other = G.players.find(p => p.id !== seat).id;
+      const withRent = { ...G, lastRentPayment: { payerSeat: seat, ownerSeat: other, amount: 340, turn: G.totalTurns } };
+      const d = stateDigest(withRent, ctx, other);
+      expect(d).not.toContain('PERSUASION');
+    });
+
+    test('rent refund window: NOT hinted once the turn has moved on (lastRentPayment.turn stale)', () => {
+      const { G, ctx, seat } = playState();
+      const other = G.players.find(p => p.id !== seat).id;
+      const withRent = { ...G, lastRentPayment: { payerSeat: seat, ownerSeat: other, amount: 340, turn: G.totalTurns - 1 } };
+      const d = stateDigest(withRent, ctx, seat);
+      expect(d).not.toContain('PERSUASION');
+    });
+
+    test('rent refund window: NOT hinted when RULES.persuasion.enabled is false (matches server online-disable gate)', () => {
+      const saved = RULES.persuasion.enabled;
+      RULES.persuasion.enabled = false;
+      try {
+        const { G, ctx, seat } = playState();
+        const other = G.players.find(p => p.id !== seat).id;
+        const withRent = { ...G, lastRentPayment: { payerSeat: seat, ownerSeat: other, amount: 340, turn: G.totalTurns } };
+        const d = stateDigest(withRent, ctx, seat);
+        expect(d).not.toContain('PERSUASION');
+      } finally {
+        RULES.persuasion.enabled = saved;
+      }
+    });
+
+    test('rent refund window: NOT hinted once accounting is exhausted', () => {
+      const { G, ctx, seat } = playState();
+      const other = G.players.find(p => p.id !== seat).id;
+      const withRent = {
+        ...G,
+        lastRentPayment: { payerSeat: seat, ownerSeat: other, amount: 340, turn: G.totalTurns },
+        persuasion: { attempts: { rent: { [seat]: { [other]: 1 } }, duel: {}, trade: {} }, globalUsed: { [seat]: 1 } },
+      };
+      const d = stateDigest(withRent, ctx, seat);
+      expect(d).not.toContain('PERSUASION');
+    });
+
+    test('duel taunt window: hinted to the challenger during response phase, not the owner', () => {
+      const { G, ctx, seat } = playState();
+      const other = G.players.find(p => p.id !== seat).id;
+      const withDuel = { ...G, turnPhase: 'duel', duel: { phase: 'response', propertyId: 1, ownerId: other, challengerId: seat, rent: 50 } };
+      const dChallenger = stateDigest(withDuel, ctx, seat);
+      expect(dChallenger).toContain(`PERSUASION: you may attemptPersuasion(kind:'duel', targetSeat:'${other}')`);
+      expect(dChallenger).toContain('taunt before they respond');
+      const dOwner = stateDigest(withDuel, ctx, other);
+      expect(dOwner).not.toContain('PERSUASION');
+    });
+
+    test('duel taunt window: NOT hinted during the offer sub-phase (response only)', () => {
+      const { G, ctx, seat } = playState();
+      const other = G.players.find(p => p.id !== seat).id;
+      const withDuel = { ...G, turnPhase: 'duel', duel: { phase: 'offer', propertyId: 1, ownerId: other, challengerId: seat, rent: 50 } };
+      const d = stateDigest(withDuel, ctx, seat);
+      expect(d).not.toContain('PERSUASION');
+    });
+
+    test('trade lobby window: hinted to the proposer, not the target', () => {
+      const { G, ctx, seat } = playState();
+      const other = G.players.find(p => p.id !== seat).id;
+      const withTrade = {
+        ...G,
+        turnPhase: 'trade',
+        trade: { proposerId: seat, targetPlayerId: other, offeredProperties: [], requestedProperties: [], offeredMoney: 0, requestedMoney: 0 },
+      };
+      const dProposer = stateDigest(withTrade, ctx, seat);
+      expect(dProposer).toContain(`PERSUASION: you may attemptPersuasion(kind:'trade', targetSeat:'${other}')`);
+      expect(dProposer).toContain('lower their acceptance threshold');
+      const dTarget = stateDigest(withTrade, ctx, other);
+      expect(dTarget).not.toContain('PERSUASION');
+    });
   });
 });

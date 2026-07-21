@@ -122,7 +122,7 @@ describe('stdio smoke', () => {
     } catch (e) { /* not created — fine */ }
   });
 
-  test('initialize -> 9 tools -> create/join/state/legal/move round-trip', async () => {
+  test('initialize -> 10 tools -> create/join/state/legal/move round-trip', async () => {
     if (!gamePort) return; // loud skip happened in beforeAll
     const init = await mcp.request('initialize', {
       protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'smoke', version: '0' } });
@@ -131,8 +131,18 @@ describe('stdio smoke', () => {
 
     const tools = await mcp.request('tools/list', {});
     const names = tools.result.tools.map(t => t.name).sort();
-    expect(names).toEqual(['create_match', 'get_events', 'get_state', 'get_state_digest',
+    // MT2-SP5 direction C2 "舌战群儒", T4: attempt_persuasion joins the roster.
+    expect(names).toEqual(['attempt_persuasion', 'create_match', 'get_events', 'get_state', 'get_state_digest',
       'join_match', 'list_legal_moves', 'list_matches', 'make_move', 'wait_for_my_turn']);
+
+    // Pin the attempt_persuasion tool's own schema shape (same style as the
+    // create_match/make_move pins below) — kind is a closed enum (rent/duel/
+    // trade only), targetSeat accepts either wire shape (string or number,
+    // matching join_match's own seat param), text is optional/capped.
+    const persuasionTool = tools.result.tools.find(t => t.name === 'attempt_persuasion');
+    expect(persuasionTool.inputSchema.properties.kind).toMatchObject({ enum: ['rent', 'duel', 'trade'] });
+    expect(persuasionTool.inputSchema.required).toEqual(expect.arrayContaining(['kind', 'targetSeat']));
+    expect(persuasionTool.inputSchema.required).not.toEqual(expect.arrayContaining(['text']));
 
     // Pin the raw-shape -> real JSON Schema serialization (SDK 1.29's registerTool
     // accepts a plain object of zod fields, not z.object(...) — verified empirically

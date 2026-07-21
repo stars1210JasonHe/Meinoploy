@@ -33,6 +33,21 @@ afterAll(() => {
 });
 
 function freshClient(numPlayers, seed) {
+  // T4 fix (root-caused via instrumentation, not guessed): freshClient used
+  // to reset ONLY the map, not the mod — a classic-board test declared
+  // AFTER an atlas test in this file (freshAtlasClient calls
+  // resolveModMap('terra-titans'), mutating the shared RULES singleton in
+  // place, e.g. duel.enabled true) silently ran under terra-titans' RULES
+  // until this file's single afterAll finally restored 'dominion'. Harmless
+  // for the pre-existing classic tests (declared BEFORE any atlas test, and
+  // otherwise mod-insensitive), but MT2-SP5 persuasion's rent seam is
+  // materially different under duel.enabled=true (rent-due landings offer a
+  // duel instead of auto-paying, so G.lastRentPayment stops getting set from
+  // a plain landing) — observed: a rent-window drift scenario passed in
+  // isolation but failed inside the full suite, purely from declaration
+  // order. Resetting the mod here makes every classic-board test's RULES
+  // deterministic regardless of what ran before it in this file.
+  setActiveMod('dominion');
   setActiveMap(loadMap(classicMapJson));
   const game = Object.assign({}, Monopoly, { seed: String(seed) });
   const client = Client({ game, numPlayers, debug: false });
@@ -93,6 +108,14 @@ function sampleArgs(entry, G, seat, counters) {
       const others = G.players.filter(p => p.id !== seat && !p.bankrupt);
       const other = others[nextIndex(counters, 'proposeTrade', others.length)];
       return [{ targetPlayerId: other.id }];
+    }
+    case 'attemptPersuasion': {
+      // MT2-SP5 direction C2, T4: argsHint is {kind, targetSeat} for all
+      // three seams (rent/duel/trade) — echo it straight back, plus empty
+      // flavor text (this oracle only exercises listed=>accepted structure,
+      // not judge/text content). String() on targetSeat: some seams (e.g.
+      // G.lastRentPayment.ownerSeat) may carry it as a number internally.
+      return [entry.argsHint.kind, String(entry.argsHint.targetSeat), ''];
     }
     default: {
       const ids = entry.argsHint && entry.argsHint.propertyIds;
@@ -274,6 +297,67 @@ test('drift: classic board via rollOnly (loop-map immediate-move branch), seed 1
   expect(dispatched.has('rollOnly')).toBe(true);
   expect(dispatched.has('rollDice')).toBe(false); // rollOnly won every pre-roll state
   expect(dispatched.has('commitRoute')).toBe(false); // loop map: no route pause ever opened
+});
+
+// --- Persuasion (MT2-SP5 direction C2 "舌战群儒", T4) --------------------------
+// Unsteered, default-order walks never reach attemptPersuasion: for the
+// 'rent' kind, mortgageProperty/proposeTrade (both defined earlier in
+// Game.js's move object than attemptPersuasion) always win the "first
+// listed wins" scan the instant they're ALSO available at a G-state where
+// the rent-refund window happens to be open too; for 'duel'/'trade', the
+// cross-seat response moves (respondDuel/declineDuel, acceptTrade/
+// rejectTrade — all also defined earlier) win the same way. Each scenario
+// below puts 'attemptPersuasion' at the FRONT of the priority list so it
+// wins the race the moment its window opens, proving getLegalMoves'
+// listed=>accepted claim for every one of the three seams — same steering
+// discipline as the atlas duel scenarios above.
+test('drift: classic board, rent-refund persuasion window (attemptPersuasion kind:rent), seed 1', () => {
+  const dispatched = driveSteeredGame(freshClient(2, 1), ['attemptPersuasion']);
+  expect(dispatched.has('attemptPersuasion')).toBe(true);
+});
+
+test('drift: classic board, trade-lobby persuasion window (attemptPersuasion kind:trade), seed 1', () => {
+  // proposeTrade must win FIRST (opens G.trade) before attemptPersuasion can
+  // ever have a trade-kind window to list. acceptTrade is ALSO steered,
+  // right after attemptPersuasion — root-caused via instrumentation
+  // (scratch probe, not guessed): without it, once the one-shot trade
+  // persuasion attempt is spent, the walk's default-order fallback toggles
+  // mortgageProperty/unmortgageProperty on the same property back and forth
+  // for 200+ steps (both are listed regardless of the OTHER's outcome, and
+  // neither is trade-gated — see this file's own header note on that Game.js
+  // quirk) while G.trade sits open the whole time; the resulting flood of
+  // property_mortgaged/unmortgaged events trims RULES.core.eventLogCap (200)
+  // past the original trade_proposed event, so decisionSeq(G) — and with it
+  // acceptTrade's OWN listability — fails closed (this file's documented
+  // "Fail-closed listability" behavior, legal-moves.js's own header note).
+  // Once unlisted that way, a BLIND client.moves.acceptTrade() dispatch
+  // still structurally succeeds at the raw engine level (accept/reject
+  // decisionSeq correlation is an MCP make_move-layer concept the raw move
+  // itself never enforces) — tripping the oracle's separate "unlisted move
+  // must be rejected" check. Not a legal-moves.js bug: prioritizing
+  // acceptTrade resolves the trade before the toggle loop can ever start.
+  const dispatched = driveSteeredGame(freshClient(2, 1), ['proposeTrade', 'attemptPersuasion', 'acceptTrade']);
+  expect(dispatched.has('proposeTrade')).toBe(true);
+  expect(dispatched.has('attemptPersuasion')).toBe(true);
+  expect(dispatched.has('acceptTrade')).toBe(true);
+});
+
+// Atlas (terra-titans, duel.enabled): 'attemptPersuasion' ranked ABOVE
+// respondDuel — the challenger's own taunt window (G.duel.phase 'response')
+// is listed to the SAME querying seat (ctx.currentPlayer, i.e. the
+// challenger — hot-seat's actorMatches is trivially true regardless of real
+// seat, per this file's own header note) that respondDuel/declineDuel are
+// ALSO listed to, so without this priority ordering respondDuel (earlier in
+// Game.js's move object) always wins first, exactly like the two existing
+// duel-respond/decline scenarios above (neither ever dispatches
+// attemptPersuasion — confirmed: they stay green with 'attemptPersuasion'
+// absent from their own dispatched sets).
+test.each([1, 6])('drift: atlas board (terra-titans), duel-taunt persuasion window (attemptPersuasion kind:duel), seed %i', (seed) => {
+  const dispatched = driveSteeredGame(freshAtlasClient(2, seed),
+    ['rollOnly', 'commitRoute', 'initiateDuel', 'attemptPersuasion', 'respondDuel', 'buyProperty', 'endTurn']);
+  expect(dispatched.has('initiateDuel')).toBe(true);
+  expect(dispatched.has('attemptPersuasion')).toBe(true);
+  expect(dispatched.has('respondDuel')).toBe(true); // window closes (accounting) -> normal response still fires later
 });
 
 // m9 self-verification: does the round-robin actually fire in the full-game

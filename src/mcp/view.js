@@ -2,6 +2,7 @@
 // raw G — this shaping is the wire contract (and the future redaction point).
 import { RULES } from '../../mods/active-rules';
 import { isDuelCooldownBlocked } from '../events';
+import { canAttempt, resolvePersuasionRules, globalAttemptCount } from '../persuasion/engine';
 
 // Byte-faithful mirror of boardgame.io's IsPlayerActive (spec §1 tool 4,
 // verified against reducer source: `playerID in ctx.activePlayers` when the
@@ -128,6 +129,32 @@ export function stateDigest(G, ctx, seat) {
     } else {
       lines.push(`DUEL ${d.phase} on ${spaceName(G, d.propertyId)} between seats ${d.challengerId} and ${d.ownerId}.`);
     }
+  }
+  // Persuasion windows (MT2-SP5 direction C2 "舌战群儒", T4) — deliberately
+  // NOT "DECISION:" lines like canBuy/pendingCard/awaitingRoute/duel above:
+  // these are OPTIONAL side actions (the game proceeds normally whether or
+  // not the seat uses them), so a distinct "PERSUASION:" prefix avoids
+  // implying the seat must act before anything else can happen. Reuses
+  // canAttempt directly — a window is hinted here IFF attemptPersuasion
+  // would actually be dispatchable right now (same predicate
+  // list_legal_moves uses), so this silently disappears whenever
+  // RULES.persuasion.enabled is false — including the server-side
+  // online-disable gate (T4 item 1) — with zero extra code.
+  const persuasionRules = resolvePersuasionRules(RULES);
+  const persuasionState = G.persuasion || {};
+  const persuasionHint = (kind, targetSeat, label) => {
+    if (!canAttempt(G, ctx, kind, seat, targetSeat, RULES).ok) return;
+    const globalLeft = persuasionRules.globalCapPerGame - globalAttemptCount(persuasionState.globalUsed, seat);
+    lines.push(`PERSUASION: you may attemptPersuasion(kind:'${kind}', targetSeat:'${targetSeat}') — ${label} (${globalLeft} attempt(s) left this game).`);
+  };
+  if (G.lastRentPayment && String(G.lastRentPayment.payerSeat) === seat) {
+    persuasionHint('rent', G.lastRentPayment.ownerSeat, `ask for a refund on the $${G.lastRentPayment.amount} rent you just paid this turn`);
+  }
+  if (G.duel && G.duel.phase === 'response' && String(G.duel.challengerId) === seat) {
+    persuasionHint('duel', G.duel.ownerId, 'taunt before they respond to your duel challenge');
+  }
+  if (G.trade && String(G.trade.proposerId) === seat) {
+    persuasionHint('trade', G.trade.targetPlayerId, 'lower their acceptance threshold for your pending trade offer');
   }
   return lines.join('\n');
 }

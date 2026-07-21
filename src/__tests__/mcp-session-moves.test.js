@@ -259,6 +259,92 @@ describe('layers 2-4 over a real trade window', () => {
   });
 });
 
+describe('attempt_persuasion (MT2-SP5 direction C2 "舌战群儒", T4)', () => {
+  // Crafted rent-refund window (求情): seat 0 (session) is the payer, seat 1
+  // the owner. turn.onBegin fires ONCE automatically as part of match init
+  // (see seatClients.js's own header note) and increments G.totalTurns from
+  // its setup default (0) to 1 BEFORE any test code runs — so the window's
+  // own `turn` must be pinned to G.totalTurns + 1 (read at patchG time,
+  // before that automatic increment happens), not G.totalTurns itself, or
+  // canAttempt's `lrp.turn !== G.totalTurns` check would immediately close it.
+  const rentPatch = (G) => {
+    G.phase = 'play';
+    G.players.forEach((p, i) => { p.character = MODS.dominion.characters[i]; });
+    G.lastRentPayment = { payerSeat: '0', ownerSeat: '1', amount: 340, turn: G.totalTurns + 1 };
+    return G;
+  };
+
+  test('missing kind/targetSeat throws a tool error before ever dispatching', async () => {
+    const { session, cleanup } = await harness();
+    await expect(session.attemptPersuasion({ targetSeat: '1' })).rejects.toThrow(/kind is required/i);
+    await expect(session.attemptPersuasion({ kind: 'rent' })).rejects.toThrow(/targetSeat is required/i);
+    cleanup();
+  });
+
+  test('list_legal_moves surfaces the rent window with the exact kind/targetSeat argsHint', async () => {
+    const { session, cleanup } = await harness({ patchG: rentPatch });
+    const entry = session.listLegalMoves().find(e => e.move === 'attemptPersuasion');
+    expect(entry).toBeDefined();
+    expect(entry.argsHint).toEqual({ kind: 'rent', targetSeat: '1' });
+    cleanup();
+  });
+
+  test('get_state_digest mentions the open window and remaining attempts', async () => {
+    const { session, cleanup } = await harness({ patchG: rentPatch });
+    const digest = session.getStateDigest();
+    expect(digest).toContain("PERSUASION: you may attemptPersuasion(kind:'rent', targetSeat:'1')");
+    expect(digest).toMatch(/\d+ attempt\(s\) left this game/);
+    cleanup();
+  });
+
+  test('happy path: keyless dispatch resolves accepted:true via the persuasion_resolved signature', async () => {
+    const { session, cleanup } = await harness({ patchG: rentPatch });
+    const r = await session.attemptPersuasion({ kind: 'rent', targetSeat: '1', text: 'please, for old times sake' });
+    expect(r.accepted).toBe(true);
+    // Window consumed regardless of tier (accounting burns on every attempt,
+    // success or fail — design doc: "attempts are not free rerolls") — the
+    // SAME window is no longer listed for a second attempt.
+    expect(session.listLegalMoves().find(e => e.move === 'attemptPersuasion')).toBeUndefined();
+    cleanup();
+  });
+
+  test('text defaults to empty string when omitted (still a well-formed dispatch)', async () => {
+    const { session, cleanup } = await harness({ patchG: rentPatch });
+    const r = await session.attemptPersuasion({ kind: 'rent', targetSeat: '1' });
+    expect(r.accepted).toBe(true);
+    cleanup();
+  });
+
+  test('no window open -> accepted:false (same rejected-move shape as any other move)', async () => {
+    const { session, driver, cleanup } = await harness();
+    await selectBoth(session, driver); // real play state, no rent/duel/trade window
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {}); // bgio logs INVALID_MOVE
+    const r = await session.attemptPersuasion({ kind: 'rent', targetSeat: '1' });
+    errSpy.mockRestore();
+    expect(r.accepted).toBe(false);
+    cleanup();
+  });
+
+  test('disabled server-side (RULES.persuasion.enabled false, mirrors the online-disable gate) -> accepted:false, never a thrown error', async () => {
+    const origEnabled = RULES.persuasion.enabled;
+    RULES.persuasion.enabled = false;
+    try {
+      const { session, cleanup } = await harness({ patchG: rentPatch });
+      // The window is no longer even listed (canAttempt fails closed on
+      // rules.enabled — same predicate list_legal_moves/get_state_digest use).
+      expect(session.listLegalMoves().find(e => e.move === 'attemptPersuasion')).toBeUndefined();
+      expect(session.getStateDigest()).not.toContain('PERSUASION');
+      const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const r = await session.attemptPersuasion({ kind: 'rent', targetSeat: '1' });
+      errSpy.mockRestore();
+      expect(r.accepted).toBe(false); // engine-side INVALID_MOVE, not a tool crash
+      cleanup();
+    } finally {
+      RULES.persuasion.enabled = origEnabled;
+    }
+  });
+});
+
 describe('(h) single-flight + concurrent waits', () => {
   test('second make_move mid-flight throws', async () => {
     const { session, cleanup } = await harness();
