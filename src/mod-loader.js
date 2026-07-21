@@ -157,6 +157,11 @@ export const DEFAULT_RULES = {
       banter: 0.001,
       intro: 0.001,
       chat: 0.01,
+      // T2 (persuasion judge) — kept in lockstep with src/dialogue/
+      // memory.js's DEFAULT_DIALOGUE_RULES.callPriceUSD block AND mods/
+      // dominion/rules.js's dialogue.callPriceUSD block (drift-guard
+      // covered, same three-copy discipline as every other field here).
+      judge: 0.0005,
     },
     // T4 (src/bot-driver.js decideTradeResponse) — kept in lockstep with
     // mods/dominion/rules.js's dialogue.botTradeAttitude block (drift-guard
@@ -193,6 +198,19 @@ export const DEFAULT_RULES = {
     },
     trade: {
       tierShifts: [0, -25, -50],
+    },
+    // T2 (judge + fallback) — kept in lockstep with mods/dominion/rules.js's
+    // persuasion.judge block AND src/persuasion/engine.js's own
+    // DEFAULT_PERSUASION_RULES.judge (drift-guard covered by
+    // persuasion.test.js, same three-copy discipline as every other field
+    // in this block).
+    judge: {
+      tierBands: [[0, 4], [5, 7], [8, 10]],
+      clamp: {
+        grudgeHostileThreshold: 6,
+        grudgeHatredThreshold: 9,
+      },
+      timeoutMs: 8000,
     },
   },
   display: {

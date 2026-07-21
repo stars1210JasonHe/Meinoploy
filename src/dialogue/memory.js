@@ -104,6 +104,15 @@ export const DEFAULT_DIALOGUE_RULES = {
     banter: 0.001,
     intro: 0.001,
     chat: 0.01,
+    // T2 (MT2-SP5 direction C2, persuasion judge, character-ai.js
+    // judgeCall): the mini model with a deliberately tiny max_tokens (the
+    // whole expected response is a ~15-character {"score": N} JSON object)
+    // — cheaper than 'reaction' (which allows up to 150 tokens), still a
+    // conservative over-estimate. Kept in lockstep with mods/dominion/
+    // rules.js's dialogue.callPriceUSD block AND src/mod-loader.js's
+    // DEFAULT_RULES.dialogue.callPriceUSD (drift-guard covered, same
+    // three-copy discipline as every other field in this table).
+    judge: 0.0005,
   },
   // T4 (src/bot-driver.js decideTradeResponse) — magnitudes for the
   // attitude-aware trade-acceptance-threshold shift. Unread by memory.js

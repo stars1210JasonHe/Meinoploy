@@ -21,7 +21,7 @@ import { decideTradeResponse } from '../bot-driver';
 import {
   DEFAULT_PERSUASION_RULES, resolvePersuasionRules, sanitizeText, canAttempt,
   freshAttemptsState, attemptCount, recordAttempt, globalAttemptCount, recordGlobalAttempt,
-  rollTier, rentRefundPctForTier, computeRentRefund, duelEffectForTier, tradeShiftForTier,
+  rollTier, scoreToTier, rentRefundPctForTier, computeRentRefund, duelEffectForTier, tradeShiftForTier,
 } from '../persuasion/engine';
 import {
   createLedgerState, applyEvent, getAttitude, DEFAULT_DIALOGUE_RULES,
@@ -165,6 +165,25 @@ describe('defaults drift guard — three copies stay in sync (mirrors dialogue-m
     expect(RULES.dialogue.weights.persuasionTradeFailTrust).toBe(DEFAULT_DIALOGUE_RULES.weights.persuasionTradeFailTrust);
     expect(DEFAULT_RULES.dialogue.weights.persuasionRentFailGrudge).toBe(DEFAULT_DIALOGUE_RULES.weights.persuasionRentFailGrudge);
   });
+  // T2 (judge + fallback) — persuasion.judge is already covered by the
+  // whole-object equality assertions above (it's a field of the same
+  // `persuasion` block), this just pins the new sub-fields explicitly for
+  // readability, mirroring the dialogue.weights precedent right above.
+  test('persuasion.judge fields present + in sync across all three copies', () => {
+    expect(RULES.persuasion.judge).toEqual(DEFAULT_PERSUASION_RULES.judge);
+    expect(DominionRules.persuasion.judge).toEqual(DEFAULT_PERSUASION_RULES.judge);
+    expect(DEFAULT_RULES.persuasion.judge).toEqual(DEFAULT_PERSUASION_RULES.judge);
+    expect(RULES.persuasion.judge.tierBands).toEqual([[0, 4], [5, 7], [8, 10]]);
+  });
+  // callPriceUSD.judge (character-ai.js judgeCall's price entry) lives
+  // under RULES.dialogue, not RULES.persuasion — dialogue-memory.test.js's
+  // own "defaults drift guard" already covers full-object equality across
+  // its three copies; this just pins the new field for readability here,
+  // next to the rest of this task's additions.
+  test('dialogue.callPriceUSD.judge present + in sync across all three copies', () => {
+    expect(RULES.dialogue.callPriceUSD.judge).toBe(DEFAULT_DIALOGUE_RULES.callPriceUSD.judge);
+    expect(DEFAULT_RULES.dialogue.callPriceUSD.judge).toBe(DEFAULT_DIALOGUE_RULES.callPriceUSD.judge);
+  });
 });
 
 describe('sanitizeText', () => {
@@ -262,6 +281,42 @@ describe('rollTier — deterministic charisma check', () => {
 
   test('non-finite charisma inputs treated as 0 (NaN-hole guard)', () => {
     expect(() => rollTier(() => 0.5, NaN, undefined, RULES)).not.toThrow();
+  });
+});
+
+describe('scoreToTier — T2 code-side score->tier map', () => {
+  test('every score maps to the DEFAULT tierBands exactly (0-4 / 5-7 / 8-10)', () => {
+    expect(scoreToTier(0, RULES)).toBe(0);
+    expect(scoreToTier(4, RULES)).toBe(0);
+    expect(scoreToTier(5, RULES)).toBe(1);
+    expect(scoreToTier(7, RULES)).toBe(1);
+    expect(scoreToTier(8, RULES)).toBe(2);
+    expect(scoreToTier(10, RULES)).toBe(2);
+  });
+
+  test('boundaries land on the HIGHER tier, exactly at the cut (4/5 and 7/8)', () => {
+    expect(scoreToTier(4, RULES)).toBe(0);
+    expect(scoreToTier(5, RULES)).toBe(1);
+    expect(scoreToTier(7, RULES)).toBe(1);
+    expect(scoreToTier(8, RULES)).toBe(2);
+  });
+
+  test('non-finite/negative/out-of-range input never throws, degrades to tier 0', () => {
+    expect(() => scoreToTier(NaN, RULES)).not.toThrow();
+    expect(scoreToTier(NaN, RULES)).toBe(0);
+    expect(scoreToTier(-5, RULES)).toBe(0);
+    expect(scoreToTier(undefined, RULES)).toBe(0);
+  });
+
+  test('a score ABOVE the top band still resolves to the top tier (defensive, not a throw)', () => {
+    expect(scoreToTier(999, RULES)).toBe(2);
+  });
+
+  test('a custom tierBands override is honored', () => {
+    const custom = resolvePersuasionRules({ persuasion: { judge: { tierBands: [[0, 2], [3, 6], [7, 10]] } } });
+    expect(scoreToTier(2, custom)).toBe(0);
+    expect(scoreToTier(3, custom)).toBe(1);
+    expect(scoreToTier(7, custom)).toBe(2);
   });
 });
 
@@ -580,6 +635,120 @@ describe('attemptPersuasion — malformed args (blind-dispatch safety)', () => {
     const G = withRentPayment(freshG());
     expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'rent', undefined, 'text')).toBe(INVALID_MOVE);
     expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'rent', null, 'text')).toBe(INVALID_MOVE);
+  });
+});
+
+// T2 (judge + fallback) — the optional 6th `score` arg. Malformed-args
+// discipline first (mirrors the kind/targetSeat block right above): a bad
+// score is rejected before touching G or ctx.random, exactly like every
+// other guard in this move.
+describe('attemptPersuasion — score arg validation (T2 judged path, malformed-args-first)', () => {
+  test.each([
+    ['NaN', NaN],
+    ['negative', -1],
+    ['above 10', 10.0001],
+    ['Infinity', Infinity],
+    ['-Infinity', -Infinity],
+    ['a string', '7'],
+    ['an object', {}],
+    ['a boolean', true],
+  ])('score = %s -> INVALID_MOVE, no G mutation, ctx.random never called', (label, badScore) => {
+    const G = withRentPayment(freshG());
+    const before = JSON.parse(JSON.stringify(G));
+    const ctx = makeCtx('0');
+    const result = Monopoly.moves.attemptPersuasion(G, ctx, 'rent', '1', 'please', badScore);
+    expect(result).toBe(INVALID_MOVE);
+    expect(JSON.parse(JSON.stringify(G))).toEqual(before);
+    expect(ctx._calls.count).toBe(0);
+  });
+
+  test('score = undefined -> the T1 keyless path, unaffected (ctx.random IS called)', () => {
+    const G = withRentPayment(freshG());
+    const ctx = makeCtx('0', { randomValue: TIER1_R });
+    const result = Monopoly.moves.attemptPersuasion(G, ctx, 'rent', '1', 'please', undefined);
+    expect(result).not.toBe(INVALID_MOVE);
+    expect(ctx._calls.count).toBe(1);
+    expect(G.events.find(e => e.type === 'persuasion_resolved').data.score).toBeNull();
+  });
+
+  test('score = null -> the T1 keyless path, unaffected (ctx.random IS called)', () => {
+    const G = withRentPayment(freshG());
+    const ctx = makeCtx('0', { randomValue: TIER1_R });
+    const result = Monopoly.moves.attemptPersuasion(G, ctx, 'rent', '1', 'please', null);
+    expect(result).not.toBe(INVALID_MOVE);
+    expect(ctx._calls.count).toBe(1);
+  });
+
+  test('score = 0 (a legitimately awful attempt) is honored, NOT treated as falsy/missing', () => {
+    const G = withRentPayment(freshG());
+    const ctx = makeCtx('0');
+    const result = Monopoly.moves.attemptPersuasion(G, ctx, 'rent', '1', 'please', 0);
+    expect(result).not.toBe(INVALID_MOVE);
+    expect(ctx._calls.count).toBe(0); // judged path never draws ctx.random
+    const resolved = G.events.find(e => e.type === 'persuasion_resolved');
+    expect(resolved.data.score).toBe(0);
+    expect(resolved.data.tier).toBe(0);
+  });
+
+  test('a valid score (0-10 finite) NEVER calls ctx.random.Number() — the judge already supplied it', () => {
+    const G = withRentPayment(freshG());
+    const ctx = makeCtx('0');
+    Monopoly.moves.attemptPersuasion(G, ctx, 'rent', '1', 'please', 7);
+    expect(ctx._calls.count).toBe(0);
+  });
+});
+
+describe('attemptPersuasion — score honored end-to-end (score->tier->effect, every band boundary)', () => {
+  test.each([
+    [0, 0], [4, 0], // tier 0 band
+    [5, 1], [7, 1], // tier 1 band
+    [8, 2], [10, 2], // tier 2 band
+  ])('score %i -> tier %i, and the rent refund matches that tier exactly', (score, expectedTier) => {
+    const G = withRentPayment(freshG(), { amount: 100 });
+    const payerBefore = G.players[0].money;
+    const ownerBefore = G.players[1].money;
+    Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'rent', '1', 'please', score);
+    const resolved = G.events.find(e => e.type === 'persuasion_resolved');
+    expect(resolved.data.tier).toBe(expectedTier);
+    expect(resolved.data.score).toBe(score);
+    const expectedRefund = Math.round(100 * RULES.persuasion.rent.tierRefundPct[expectedTier]);
+    expect(G.players[0].money).toBe(payerBefore + expectedRefund);
+    expect(G.players[1].money).toBe(ownerBefore - expectedRefund);
+  });
+
+  test('the judged path applies the SAME accounting caps as the keyless path (seam exhausted, global cap)', () => {
+    const G = withRentPayment(freshG());
+    const first = Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'rent', '1', 'please', 6);
+    expect(first).not.toBe(INVALID_MOVE);
+    withRentPayment(G);
+    const second = Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'rent', '1', 'again', 6);
+    expect(second).toBe(INVALID_MOVE); // seam_exhausted, same as the keyless path
+  });
+
+  test('the judged path still routes through canAttempt — window guards apply identically', () => {
+    const G = freshG(); // no G.lastRentPayment at all
+    expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'rent', '1', 'x', 9)).toBe(INVALID_MOVE);
+  });
+
+  test('duel kind: a judged tier-2 score banks the SAME activeModifier shape as the keyless path', () => {
+    const G = withDuelResponse(freshG());
+    Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'duel', '1', 'x', 10);
+    expect(G.persuasion.activeModifier).toEqual({
+      kind: 'duel', tier: 2, actorSeat: '0', targetSeat: '1', lever: 'targetMinus', amount: 2,
+    });
+  });
+
+  test('duel kind: a judged tier-0 score applies the SAME engine-mechanical failure cost', () => {
+    const G = withDuelResponse(freshG());
+    Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'duel', '1', 'x', 2);
+    expect(G.players[0].persuasionDuelPenalty).toBe(RULES.persuasion.duel.failureNextDuelPenalty);
+    expect(G.persuasion.activeModifier).toBeNull();
+  });
+
+  test('trade kind: a judged tier-1 score applies the SAME threshold shift as the keyless path', () => {
+    const G = withTrade(freshG());
+    Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'trade', '1', 'x', 5);
+    expect(G.trade.persuasionThresholdShift).toBe(-25);
   });
 });
 

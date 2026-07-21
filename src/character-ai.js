@@ -704,8 +704,18 @@ export class CharacterAI {
   // Call OpenAI API. `callType` (T2, $3 hard cap — owner decision item 0)
   // prices this call against RULES.dialogue.callPriceUSD; every public
   // method funnels through this SINGLE choke point, so gating here covers
-  // every LLM call site (reactions/chat/intro/diary/banter) uniformly.
-  async _callApi(messages, model, callType = 'reaction') {
+  // every LLM call site (reactions/chat/intro/diary/banter/judge)
+  // uniformly. `options` (MT2-SP5 direction C2, T2, judgeCall below —
+  // OPTIONAL, 4th param, backward compatible with every pre-existing 3-arg
+  // call site) overrides the request's own max_tokens/temperature; every
+  // call site before this task shared one hardcoded 150/0.8 pair, so both
+  // default to exactly that when omitted — a judge call is the first
+  // caller that ever needs a tiny max_tokens (the response is ~15 chars)
+  // and temperature 0 (deterministic judging, not creative writing). The
+  // budget/concurrency gating below is completely unaware of `options` —
+  // it prices purely off `callType`, so this can never be used to smuggle
+  // a cheaper-priced-but-actually-expensive request past the cap.
+  async _callApi(messages, model, callType = 'reaction', options = {}) {
     if (!this.apiKey) throw new Error('No API key configured');
 
     // Hard cap: checked BEFORE any client/network work — a capped session
@@ -732,6 +742,9 @@ export class CharacterAI {
 
     this._pendingRequests++;
 
+    const maxTokens = Number.isFinite(options.max_tokens) ? options.max_tokens : 150;
+    const temperature = Number.isFinite(options.temperature) ? options.temperature : 0.8;
+
     try {
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -742,8 +755,8 @@ export class CharacterAI {
         body: JSON.stringify({
           model: model || this.model,
           messages: messages,
-          max_tokens: 150,
-          temperature: 0.8,
+          max_tokens: maxTokens,
+          temperature: temperature,
         }),
       });
 
@@ -873,6 +886,39 @@ export class CharacterAI {
       return await this._callApi(messages, this.model, 'intro');
     } catch (e) {
       console.warn('CharacterAI intro failed:', e.message);
+      return null;
+    }
+  }
+
+  // Judge call (MT2-SP5 direction C2, T2, "舌战群儒") — the ai client seam
+  // src/persuasion/judge.js's judgePersuasion is designed to be bound to
+  // (e.g. `(prompt) => characterAI.judgeCall(prompt)`). Routes through the
+  // SAME _callApi choke point as every other AI call above, so the $3 hard
+  // cap + call-count fuse + RULES.dialogue.callPriceUSD.judge price all
+  // apply automatically — no budget logic is duplicated here. Always the
+  // mini model (this.model, never this.chatModel — a judge verdict needs
+  // no conversational polish), a deliberately tiny max_tokens (the entire
+  // expected response is a ~15-character JSON object, e.g. {"score": 7})
+  // and temperature 0 (a JUDGE, not a creative writer — matching this
+  // whole system's "same seed/inputs -> same outcome" determinism
+  // discipline elsewhere, e.g. src/persuasion/engine.js's rollTier).
+  //
+  // `prompt` is judge.js's buildJudgePrompt() output — a single fully
+  // self-contained string (persona + fenced player text + output contract
+  // already all inside it), sent as the sole user message; no system
+  // prompt is added here (there is nothing left for one to say). Returns
+  // the raw text response, or null on no API key / budget-capped /
+  // concurrency-rejected / thrown network error — judge.js's
+  // parseJudgeResponse is the next consumer and already treats a null (or
+  // any non-strict-JSON) input as a parse failure, so this method needs no
+  // special-casing beyond "never throw".
+  async judgeCall(prompt) {
+    if (!this.apiKey) return null;
+    const messages = [{ role: 'user', content: String(prompt || '') }];
+    try {
+      return await this._callApi(messages, this.model, 'judge', { max_tokens: 20, temperature: 0 });
+    } catch (e) {
+      console.warn('CharacterAI judge call failed:', e.message);
       return null;
     }
   }

@@ -93,6 +93,58 @@ export const DEFAULT_PERSUASION_RULES = {
   trade: {
     tierShifts: [0, -25, -50],
   },
+  // T2 (MT2-SP5 direction C2, judge + fallback) — the OPTIONAL judged-score
+  // path. attemptPersuasion's 6th arg (`score`) is undefined/null on the
+  // T1 keyless path (unchanged, this block is unread then); when a caller
+  // supplies a finite 0-10 score (src/persuasion/judge.js's client-side LLM
+  // judge, or a future non-LLM scorer), scoreToTier below maps it to the
+  // SAME tier 0/1/2 the keyless dice-like check already produces — every
+  // downstream consumer (effect math, accounting, failure costs) is tier-
+  // only and cannot tell which path produced it. Consumed by BOTH this
+  // engine (scoreToTier, server/engine-side — "tier mapping is code-side"
+  // per the design doc's anti-injection pillar) AND src/persuasion/judge.js
+  // (clampScore reads the SAME tierBands to find "the highest score still
+  // inside a tier's band" — one table, two readers, never two numbers that
+  // could drift apart).
+  judge: {
+    // [minScore, maxScore] inclusive, one pair per tier index. A score
+    // lands in the tier whose band it falls in; scoreToTier walks tiers
+    // HIGH-to-low and returns the first whose band[0] <= score, so gaps or
+    // a truncated/malformed override degrade to tier 0 rather than
+    // throwing. Design doc's own table, verbatim: specs/2026-07-18-
+    // dialogue-c-design.md's C2 section ("判定: score 7 ... tier 1").
+    tierBands: [[0, 4], [5, 7], [8, 10]],
+    // Attitude clamp (design doc "Prompt injection" pillar #1: "Score is
+    // CLAMPED by attitude ... at 宿怨▲▲▲ the best possible outcome is
+    // capped low regardless of eloquence"). Thresholds are RAW grudge
+    // values (ledger range 0-RULES.dialogue.caps.grudge, default cap 10) —
+    // calibrated directly off RULES.dialogue.attitudeDisplay.grudgeTiers
+    // ([3, 6, 9], the SAME thresholds that already draw a player's ▲/▲▲/▲▲▲
+    // grudge chip, MT2-SP4 direction B) so "the number a player can already
+    // see on the target" is the number that governs the ceiling — but
+    // deliberately engages ONE tier later than the first glyph: a single ▲
+    // (mild irritation, grudge 3-5) does not yet clamp anything; only once
+    // grudge crosses the ▲▲ ("hostile") threshold does eloquence stop being
+    // enough to reach tier 2, and only past ▲▲▲ ("hatred") does it stop
+    // being enough to reach tier 1 either. See src/persuasion/judge.js's
+    // clampScore for the exact algorithm (owner decision item, this task's
+    // T2 brief) — trust is intentionally NOT a field here: high trust never
+    // RAISES the achievable tier past its natural ceiling, it only ever
+    // refrains from clamping (i.e. contributes nothing either way), a
+    // deliberate design choice pinned by that module's own test suite.
+    clamp: {
+      grudgeHostileThreshold: 6, // >= this (▲▲) -> max achievable tier 1
+      grudgeHatredThreshold: 9,  // >= this (▲▲▲) -> max achievable tier 0
+    },
+    // Client-side judge call timeout (ms, src/persuasion/judge.js's
+    // judgePersuasion) — a slow/hung LLM call is treated exactly like any
+    // other soft failure (bad JSON, no key): the orchestrator returns null,
+    // the caller dispatches attemptPersuasion with NO score, and the SAME
+    // keyless charisma check resolves the attempt. No engine-side meaning
+    // whatsoever (the move itself has no concept of "pending" or "timeout"
+    // — see this task's report for why that's safe).
+    timeoutMs: 8000,
+  },
 };
 
 const PERSUASION_RULE_KEYS = Object.keys(DEFAULT_PERSUASION_RULES);
@@ -247,6 +299,32 @@ export function rollTier(rng, actorCharisma, targetCharisma, rulesLike) {
   const r = typeof rng === 'function' ? rng() : 0.5;
   if (r >= tier2Cut) return 2;
   if (r >= tier1Cut) return 1;
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// T2 — score -> tier mapping (the CODE-SIDE half of the anti-injection
+// pillar: the LLM judge only ever produces a 0-10 score; this function,
+// never the judge, decides which tier that becomes). Walks tiers HIGH to
+// low and returns the first whose band lower-bound the score clears, so a
+// score sitting in a gap between bands (a malformed override) still lands
+// on a definite, defensible tier rather than falling through to undefined.
+// Out-of-range/non-finite scores are Game.js's job to reject BEFORE this is
+// ever called (attemptPersuasion's malformed-args guard) — this function
+// itself still degrades to tier 0 rather than throwing, for any caller
+// (tests, a future non-move consumer) that invokes it directly.
+// ---------------------------------------------------------------------------
+
+export function scoreToTier(score, rulesLike) {
+  const rules = resolvePersuasionRules(rulesLike);
+  const judgeRules = (rules.judge && typeof rules.judge === 'object') ? rules.judge : DEFAULT_PERSUASION_RULES.judge;
+  const bands = Array.isArray(judgeRules.tierBands) && judgeRules.tierBands.length
+    ? judgeRules.tierBands : DEFAULT_PERSUASION_RULES.judge.tierBands;
+  const s = Number.isFinite(score) ? score : 0;
+  for (let tier = bands.length - 1; tier >= 0; tier--) {
+    const band = bands[tier];
+    if (Array.isArray(band) && Number.isFinite(band[0]) && s >= band[0]) return tier;
+  }
   return 0;
 }
 

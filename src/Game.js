@@ -10,7 +10,7 @@ import { logEvent, resetMessages, playerName, isDuelCooldownBlocked } from './ev
 import {
   ATTEMPT_KINDS, resolvePersuasionRules, sanitizeText, canAttempt,
   freshAttemptsState, recordAttempt, recordGlobalAttempt,
-  rollTier, rentRefundPctForTier, computeRentRefund, duelEffectForTier, tradeShiftForTier,
+  rollTier, scoreToTier, rentRefundPctForTier, computeRentRefund, duelEffectForTier, tradeShiftForTier,
 } from './persuasion/engine';
 
 // Active map data — defaults to classic mod, can be overridden via setActiveMap().
@@ -2228,18 +2228,28 @@ export const Monopoly = {
       if (G.enforceSeats) ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
     },
 
-    // --- Persuasion (MT2-SP5 direction C2 "舌战群儒", T1) ---
-    // ONE engine move, three seams (kind: 'rent' | 'duel' | 'trade'), the
-    // KEYLESS deterministic path only — T2 adds an LLM judge alongside this
-    // SAME accounting/tier machinery (design doc's "fairness without a key"
-    // pillar: the judge only ever replaces this dice-like check with a
-    // judged score, never a bigger weapon). The actor is ALWAYS
-    // ctx.currentPlayer for every kind (the persuader is always the current
-    // turn-holder at each of these three seams — same as payRent/
-    // initiateDuel/proposeTrade's own requireActor gate). `text` is
-    // sanitized and carried on the emitted event for T2's judge to consume
-    // later; it does NOT influence this move's own (keyless) outcome.
-    attemptPersuasion: (G, ctx, kind, targetSeat, text) => {
+    // --- Persuasion (MT2-SP5 direction C2 "舌战群儒", T1 + T2) ---
+    // ONE engine move, three seams (kind: 'rent' | 'duel' | 'trade'), TWO
+    // resolution paths sharing every downstream byte (design doc's
+    // "fairness without a key" pillar: the judge only ever REPLACES the
+    // dice-like check with a judged score, never a bigger weapon):
+    //   - keyless (T1, `score` omitted/null): a deterministic charisma
+    //     check, unchanged from T1 — see rollTier below.
+    //   - judged (T2, `score` a finite 0-10 number): src/persuasion/
+    //     judge.js's client-side LLM judge (or any future scorer) already
+    //     produced this number; scoreToTier (engine-side, code-only —
+    //     the anti-injection pillar's "tier mapping is code-side") maps it
+    //     to the SAME tier 0/1/2 space, and every line below this point
+    //     (effect math, accounting, failure costs, events) has no idea
+    //     which path produced its `tier` value.
+    // The actor is ALWAYS ctx.currentPlayer for every kind (the persuader
+    // is always the current turn-holder at each of these three seams — same
+    // as payRent/initiateDuel/proposeTrade's own requireActor gate). `text`
+    // is sanitized and carried on the emitted event for the judge to
+    // consume (already consumed, on the judged path — the judge runs BEFORE
+    // this move is dispatched, client-side); it never influences this
+    // move's own resolution directly (the score already encodes that).
+    attemptPersuasion: (G, ctx, kind, targetSeat, text, score) => {
       // Malformed-args guard FIRST (proposeTrade precedent, ~line 1799) —
       // also the reason this move needs no special-casing in the MCP
       // legal-moves drift oracle (mcp-legal-moves-drift.test.js): a blind
@@ -2247,6 +2257,16 @@ export const Monopoly = {
       // every G shape the walk can reach.
       if (typeof kind !== 'string' || !ATTEMPT_KINDS.includes(kind)) return INVALID_MOVE;
       if (targetSeat === undefined || targetSeat === null) return INVALID_MOVE;
+      // T2: `score` is OPTIONAL — undefined/null is the T1 keyless path,
+      // byte-identical to before this arg existed. When SUPPLIED it must be
+      // a finite number in [0, 10] (the judge's own output contract,
+      // src/persuasion/judge.js parseJudgeResponse) or the move is rejected
+      // right here, before touching G/ctx.random — same malformed-args-
+      // first discipline as kind/targetSeat above, so a garbage score can
+      // never partially resolve an attempt (all-or-nothing, matching every
+      // other guard in this move).
+      const hasScore = score !== undefined && score !== null;
+      if (hasScore && (!Number.isFinite(score) || score < 0 || score > 10)) return INVALID_MOVE;
       if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
 
       const rules = resolvePersuasionRules(RULES);
@@ -2270,14 +2290,19 @@ export const Monopoly = {
       G.persuasion.attempts = recordAttempt(G.persuasion.attempts, kind, actorSeat, targetSeatStr);
       G.persuasion.globalUsed = recordGlobalAttempt(G.persuasion.globalUsed, actorSeat);
 
-      // Keyless resolution: a single ctx.random.Number() draw (T1's ONLY
-      // resolution path — never Math.random) against a charisma-vs-charisma
-      // curve. actor/target charisma default to 0 when either lacks a
-      // character (should not happen in 'play' phase; defensive only, same
-      // posture as calculateRent's own "only if visitor has a character").
+      // Resolution: judged path (score -> tier, code-side map, NO
+      // ctx.random draw at all — the judge already supplied the
+      // randomness-equivalent externally) OR keyless path (T1's ONLY
+      // resolution path before this task — a single ctx.random.Number()
+      // draw, never Math.random, against a charisma-vs-charisma curve).
+      // actor/target charisma default to 0 when either lacks a character
+      // (should not happen in 'play' phase; defensive only, same posture as
+      // calculateRent's own "only if visitor has a character").
       const actorCharisma = actor.character ? actor.character.stats.charisma : 0;
       const targetCharisma = target.character ? target.character.stats.charisma : 0;
-      const tier = rollTier(() => ctx.random.Number(), actorCharisma, targetCharisma, rules);
+      const tier = hasScore
+        ? scoreToTier(score, rules)
+        : rollTier(() => ctx.random.Number(), actorCharisma, targetCharisma, rules);
 
       let effect = null;
       if (kind === 'rent') {
@@ -2333,7 +2358,7 @@ export const Monopoly = {
       }
 
       logEvent(G, 'persuasion_resolved', actorSeat, {
-        kind, tier, score: null, actorSeat, targetSeat: targetSeatStr, effect,
+        kind, tier, score: hasScore ? score : null, actorSeat, targetSeat: targetSeatStr, effect,
       });
     },
 

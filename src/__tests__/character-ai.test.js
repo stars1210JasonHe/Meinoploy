@@ -571,6 +571,54 @@ describe('CharacterAI', () => {
     });
   });
 
+  describe('judgeCall (MT2-SP5 direction C2, T2, persuasion judge seam)', () => {
+    test('returns null when no API key, never calls fetch', async () => {
+      const ai = new CharacterAI('');
+      const result = await ai.judgeCall('judge this: <player_words>please</player_words>');
+      expect(result).toBeNull();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    test('calls the mini model with the prompt as the sole user message, tiny max_tokens, temperature 0', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: '{"score": 7}' } }] }),
+      });
+      const ai = new CharacterAI('sk-test');
+      const prompt = 'JUDGE PROMPT <player_words>have mercy</player_words> output JSON';
+      const result = await ai.judgeCall(prompt);
+      expect(result).toBe('{"score": 7}');
+      const body = JSON.parse(fetch.mock.calls[0][1].body);
+      expect(body.model).toBe('gpt-4o-mini');
+      expect(body.max_tokens).toBe(20);
+      expect(body.temperature).toBe(0);
+      expect(body.messages).toEqual([{ role: 'user', content: prompt }]);
+    });
+
+    test('never uses the chat model, even when chatModel is configured differently', async () => {
+      fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: '{"score": 5}' } }] }) });
+      const ai = new CharacterAI('sk-test', { model: 'gpt-4o-mini', chatModel: 'gpt-4o' });
+      await ai.judgeCall('x');
+      const body = JSON.parse(fetch.mock.calls[0][1].body);
+      expect(body.model).toBe('gpt-4o-mini');
+    });
+
+    test('a thrown/rejected fetch resolves to null, never throws', async () => {
+      fetch.mockRejectedValueOnce(new Error('network down'));
+      const ai = new CharacterAI('sk-test');
+      await expect(ai.judgeCall('x')).resolves.toBeNull();
+    });
+
+    test('other public methods (max_tokens 150, temperature 0.8) are UNAFFECTED by judgeCall existing', async () => {
+      fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ choices: [{ message: { content: 'hi' } }] }) });
+      const ai = new CharacterAI('sk-test', { verbosity: VERBOSITY.ALL });
+      await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      const body = JSON.parse(fetch.mock.calls[0][1].body);
+      expect(body.max_tokens).toBe(150);
+      expect(body.temperature).toBe(0.8);
+    });
+  });
+
   describe('$3 session cost hard-cap (T2, owner decision item 0)', () => {
     test('getCostEstimate reflects RULES.dialogue defaults with zero spend at construction', () => {
       const ai = new CharacterAI('sk-test');
@@ -596,8 +644,41 @@ describe('CharacterAI', () => {
       await expect(ai.introduce(mockCharacter, mockLore)).resolves.toBeNull();
       await expect(ai.writeDiaryEntry(mockCharacter, mockLore, {})).resolves.toBeNull();
       await expect(ai.banterLine(mockCharacter, mockLore, {}, 'hi')).resolves.toBeNull();
+      await expect(ai.judgeCall('judge this')).resolves.toBeNull();
       expect(poisonFetch).not.toHaveBeenCalled();
       global.fetch = fetch; // restore the jest.fn() mock for subsequent tests
+    });
+
+    // T2 (MT2-SP5 direction C2) — judgeCall routes through the SAME _callApi
+    // choke point, so it must be budget-charged exactly like every other
+    // call type, at its OWN (cheaper) price from callPriceUSD.judge — no
+    // separate budget logic exists for it to duplicate/diverge from.
+    test('judgeCall is budget-charged at callPriceUSD.judge and trips the SAME fuse', async () => {
+      fetch.mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: '{"score": 5}' } }] }) });
+      const ai = new CharacterAI('sk-test', { dialogueRules: { costBudgetUSD: DEFAULT_DIALOGUE_RULES.callPriceUSD.judge } });
+      expect(ai.getCostEstimate()).toMatchObject({ spentUSD: 0, callCount: 0 });
+      const r1 = await ai.judgeCall('x');
+      expect(r1).toBe('{"score": 5}');
+      expect(ai.getCostEstimate()).toMatchObject({ spentUSD: DEFAULT_DIALOGUE_RULES.callPriceUSD.judge, callCount: 1 });
+      // Budget now exactly exhausted -> the very next call (any type) is capped.
+      const r2 = await ai.judgeCall('y');
+      expect(r2).toBeNull();
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(ai.getCostEstimate().capped).toBe(true);
+    });
+
+    test('judgeCall counts toward maxCallsPerSession alongside every other call type', async () => {
+      fetch.mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: 'x' } }] }) });
+      const ai = new CharacterAI('sk-test', {
+        verbosity: VERBOSITY.ALL,
+        dialogueRules: { maxCallsPerSession: 2 },
+      });
+      await ai.respondToEvent(mockCharacter, mockLore, EVENT_TYPES.BUY_PROPERTY, {}, {});
+      await ai.judgeCall('x');
+      expect(ai.getCostEstimate().callCount).toBe(2);
+      const blocked = await ai.judgeCall('y');
+      expect(blocked).toBeNull();
+      expect(fetch).toHaveBeenCalledTimes(2);
     });
 
     test('spend estimate is monotonic non-decreasing across successive successful calls', async () => {

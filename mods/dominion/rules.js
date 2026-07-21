@@ -282,6 +282,10 @@ export const RULES = {
       banter: 0.001,
       intro: 0.001,
       chat: 0.01,
+      // T2 (persuasion judge) — kept in lockstep with
+      // src/dialogue/memory.js's DEFAULT_DIALOGUE_RULES.callPriceUSD block
+      // for the full rationale (drift-guard covered).
+      judge: 0.0005,
     },
     // T4 (bot linkage, src/bot-driver.js decideTradeResponse): magnitudes for
     // the attitude-aware trade-acceptance-threshold shift. High grudge toward
@@ -365,6 +369,17 @@ export const RULES = {
     // forces a human's decision either way).
     trade: {
       tierShifts: [0, -25, -50],
+    },
+    // T2 (judge + fallback) — optional judged-score path. See
+    // src/persuasion/engine.js DEFAULT_PERSUASION_RULES.judge for the full
+    // rationale (this block must stay byte-identical, drift-guard covered).
+    judge: {
+      tierBands: [[0, 4], [5, 7], [8, 10]],
+      clamp: {
+        grudgeHostileThreshold: 6,
+        grudgeHatredThreshold: 9,
+      },
+      timeoutMs: 8000,
     },
   },
 
