@@ -222,6 +222,14 @@ export const DEFAULT_RULES = {
       probability: 0.35,
       timeoutSeconds: 12,
     },
+    // T3.5 (duel-taunt window vs bot responders) — kept in lockstep with
+    // mods/dominion/rules.js's persuasion.tauntWindow block AND
+    // src/persuasion/engine.js's own DEFAULT_PERSUASION_RULES.tauntWindow
+    // (drift-guard covered by persuasion.test.js, same three-copy
+    // discipline as every other field in this block).
+    tauntWindow: {
+      timeoutSeconds: 12,
+    },
   },
   display: {
     playerColors: [

@@ -194,6 +194,14 @@ describe('defaults drift guard — three copies stay in sync (mirrors dialogue-m
     expect(DEFAULT_RULES.persuasion.botPlea).toEqual(DEFAULT_PERSUASION_RULES.botPlea);
     expect(RULES.persuasion.botPlea).toEqual({ enabled: true, probability: 0.35, timeoutSeconds: 12 });
   });
+  // T3.5 (duel-taunt window vs bot responders) — same precedent as
+  // persuasion.botPlea right above.
+  test('persuasion.tauntWindow fields present + in sync across all three copies', () => {
+    expect(RULES.persuasion.tauntWindow).toEqual(DEFAULT_PERSUASION_RULES.tauntWindow);
+    expect(DominionRules.persuasion.tauntWindow).toEqual(DEFAULT_PERSUASION_RULES.tauntWindow);
+    expect(DEFAULT_RULES.persuasion.tauntWindow).toEqual(DEFAULT_PERSUASION_RULES.tauntWindow);
+    expect(RULES.persuasion.tauntWindow).toEqual({ timeoutSeconds: 12 });
+  });
 });
 
 describe('sanitizeText', () => {

@@ -390,6 +390,13 @@ export const RULES = {
       probability: 0.35,
       timeoutSeconds: 12,
     },
+    // T3.5 (duel-taunt window vs bot responders) — kept in lockstep with
+    // src/persuasion/engine.js's DEFAULT_PERSUASION_RULES.tauntWindow for
+    // the full rationale (drift-guard covered, same three-copy discipline
+    // as every other field in this block).
+    tauntWindow: {
+      timeoutSeconds: 12,
+    },
   },
 
   // ── Player Display ──────────────────────────────────────

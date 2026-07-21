@@ -353,6 +353,27 @@ class MonopolyBoard {
     // capture guard (`const c = this.client; ... if (this.client === c)`)
     // one level up, for the same class of stale-async-continuation hazard.
     this._persuadeEpoch = 0;
+    // T3.5 (duel-taunt window vs bot responders): non-null while a LOCAL
+    // HUMAN challenger's taunt window is showing — App.js holds the paced
+    // bot driver (same sibling-pause mechanism as _pleaPending) so a bot
+    // OWNER can't auto-respond (~700-1100ms pacing) before the human even
+    // sees the option to taunt. `{challengerSeat, ownerSeat, dismissed}` —
+    // see _syncTauntHold's doc comment for the full lifecycle (creation,
+    // dismissal via 直接开打/persuasion_resolved/timeout/modal-cancel, and
+    // why the object is kept around post-dismissal instead of nulled
+    // immediately). _tauntTimer is the armed RULES.persuasion.tauntWindow.
+    // timeoutSeconds auto-proceed, mirroring _pleaTimer.
+    this._tauntHold = null;
+    this._tauntTimer = null;
+    // T3.5: which `kind` the CURRENTLY-open persuasion modal (if any) was
+    // opened for — lets closeUiModal() tell "the user cancelled OUT of the
+    // taunt-linked modal" (should auto-proceed the hold, item 4) apart from
+    // "the user closed some UNRELATED modal (lore, AI settings, a tile/chip
+    // popover) that merely happened to be opened while a hold was active"
+    // (must NOT auto-proceed). Set by _openPersuasionModal, cleared by
+    // closeUiModal on every close (so it's never stale across an unrelated
+    // later modal open/close pair).
+    this._activePersuasionModalKind = null;
     // Speech-bubble transient display state (T3). Keyed by player id (String
     // index, matches chipHtml's data-chip / player.id — see _showSpeechBubble's
     // doc comment). _bubbles holds the CURRENTLY-shown bubble per player;
@@ -1590,6 +1611,14 @@ class MonopolyBoard {
     // family as the two calls just above. May set this._pleaPending, which
     // the bot-driver guard at the bottom of this method reads.
     this._processPersuasionEvents(G, ctx);
+    // T3.5 (duel-taunt window vs bot responders): arms/clears the taunt
+    // hold for the CURRENT G.duel state. Must run AFTER
+    // _processPersuasionEvents (whose persuasion_resolved handling may
+    // just have dismissed the hold this same tick — a stale hold should
+    // never linger an extra tick) and BEFORE every render call below (so
+    // renderTurnbox/renderBoard's _duelPromptHtml calls see this tick's
+    // correct hold state, not last tick's).
+    this._syncTauntHold(G, ctx);
     this.renderBoard(G, ctx);
     this._renderLegend(G, ctx);
     this.renderTokens(G, ctx);
@@ -1637,7 +1666,13 @@ class MonopolyBoard {
     // called this tick, so its own single-flight `scheduled` flag stays
     // false and the very next tick after the popup resolves picks up
     // exactly where the bot would have been.
-    if (this._botDriver && !this._pleaPending) this._botDriver.onUpdate();
+    // T3.5: ALSO paused while a duel-taunt hold is active+undismissed
+    // (this._tauntHold) — same sibling mechanism, same reasoning: the bot
+    // OWNER is the acting seat once G.duel.phase is 'response', and would
+    // otherwise auto-respond (FIGHT/DECLINE) within its own pacing before
+    // the human challenger ever sees the 叫阵/直接开打 window.
+    const tauntHolding = !!(this._tauntHold && !this._tauntHold.dismissed);
+    if (this._botDriver && !this._pleaPending && !tauntHolding) this._botDriver.onUpdate();
   }
 
   // Chrome-band sizing (Task 2 review fix; STATIC constants as of Redesign B).
@@ -2117,6 +2152,32 @@ class MonopolyBoard {
     }
 
     // phase === 'response'
+    //
+    // T3.5 (duel-taunt window vs bot responders) — takes priority over the
+    // owner-facing FIGHT/DECLINE prompt below: while this._tauntHold is
+    // active for THIS exact duel (set by _syncTauntHold, called earlier in
+    // update() this same tick — see its doc comment for the full creation/
+    // dismissal lifecycle), the responder is a BOT and the driver is
+    // explicitly PAUSED, so the human here is only ever the CHALLENGER —
+    // they must never be shown (and be able to click) the bot's own
+    // FIGHT/DECLINE decision. Two actions: 叫阵 opens the SAME shared
+    // persuasion modal every other seam uses (dispatches attemptPersuasion
+    // normally); 直接开打 releases the hold immediately with no attempt
+    // burned, letting the (now-unpaused) driver resolve the duel on its own
+    // pacing, same as if the human had simply never had this option.
+    if (this._tauntHold && !this._tauntHold.dismissed
+        && String(this._tauntHold.challengerSeat) === String(duel.challengerId)
+        && String(this._tauntHold.ownerSeat) === String(duel.ownerId)) {
+      return `
+        <div class="centerslot__prompt">
+          <div class="cp__name">${t('persuasion.duelHoldHint', { name: esc(ownerName) })}</div>
+          <div class="cp__btns">
+            <button class="pix-btn pix-btn--ghost pix-btn--sm" id="btn-persuade-duel">${t('persuasion.duelButton')}</button>
+            <button class="pix-btn pix-btn--primary pix-btn--sm" id="btn-taunt-proceed">${t('persuasion.duelProceed')}</button>
+          </div>
+        </div>`;
+    }
+
     const isOwnerSeat = !G.enforceSeats || !this.onlinePlayerID || String(this.onlinePlayerID) === String(duel.ownerId);
     if (!isOwnerSeat) {
       return `<div class="centerslot__hint">${t('duel.waitingResponse', { name: esc(ownerName) })}</div>`;
@@ -3342,7 +3403,18 @@ class MonopolyBoard {
     // since a bot never needs an actionable prompt of any kind. Checked before
     // either so no button row (jail/roll/card/duel/trade/end-turn) can ever render
     // for a bot seat; humans' turns are completely unaffected by this branch.
-    if (this._isBotSeat(deriveActingSeat(G, ctx))) {
+    //
+    // T3.5 precondition (duel-taunt window vs bot responders): deriveActingSeat
+    // resolves to G.duel.ownerId while phase is 'response' — a bot owner would
+    // otherwise ALWAYS hit this early return, on ATLAS maps (the only place a
+    // duel-enabled mod exists today, terra-titans), hiding the CHALLENGER's own
+    // taunt-window prompt (_duelPromptHtml) behind a "BOT thinking…" line that
+    // never even lets the human see the option. this._tauntHold is only ever
+    // non-null while App.js has explicitly HELD the driver for exactly this
+    // window (_syncTauntHold, called earlier in update() this same tick) — so
+    // bypassing the gate here is safe: it never fires for a bot's own genuine
+    // turn, only for this one deliberately-paused cross-seat state.
+    if (!(this._tauntHold && !this._tauntHold.dismissed) && this._isBotSeat(deriveActingSeat(G, ctx))) {
       html += `<div class="turnbox__waiting">${t('turnbox.botThinking')}</div></div>`;
       this._writeTurnbox(html);
       return;
@@ -3673,6 +3745,9 @@ class MonopolyBoard {
     click('btn-persuade-duel', () => {
       if (G.duel) this._openPersuasionModal(G, ctx, 'duel', G.duel.ownerId);
     });
+    // T3.5 (duel-taunt window vs bot responders): 直接开打 — releases the
+    // hold with no attempt burned, same id-based rebind convention.
+    click('btn-taunt-proceed', () => this._proceedTauntFromUI());
     click('btn-save', () => this.saveGame(G, ctx));
     if (this.saveBtnEl) this.saveBtnEl.onclick = () => this.saveGame(G, ctx);
 
@@ -3920,6 +3995,30 @@ class MonopolyBoard {
     // and unresolved (the button handlers and the auto-timeout all resolve
     // FIRST, then call this) — is treated as a REJECT.
     if (this._pleaPending && !this._pleaPending.resolved) this._resolvePlea(false);
+    // T3.5 (duel-taunt window vs bot responders, plan item 4): closing the
+    // persuasion modal WITHOUT a completed submit (Escape, scrim-click, or
+    // the Cancel button — all funnel through this method) while it was
+    // opened FOR the currently-active taunt hold is a "proceed", mirroring
+    // the plea's auto-reject-on-close discipline just above. Scoped by
+    // this._activePersuasionModalKind (set by _openPersuasionModal, cleared
+    // right below) so an UNRELATED modal (lore, AI settings, a tile/chip
+    // popover) merely closing while a hold happens to be active can never
+    // trigger this — only a close of the taunt-linked persuasion modal
+    // itself does. A COMPLETED submit already released the hold (via the
+    // persuasion_resolved event, see _submitPersuasion's dispatch-before-
+    // close ordering) BEFORE this runs, so `!this._tauntHold.dismissed` is
+    // already false by then and this is a no-op for that path.
+    const wasTauntModal = this._activePersuasionModalKind === 'duel'
+      && this._tauntHold && !this._tauntHold.dismissed;
+    this._activePersuasionModalKind = null;
+    // _proceedTauntFromUI (not the pure _proceedTaunt): this is a plain
+    // DOM-event reaction (Escape/scrim-click/Cancel — never called from
+    // inside an active update() pass; a completed submit's own
+    // dispatch-then-close ordering means `wasTauntModal` is already false
+    // by the time a submit reaches here, so this branch never double-fires
+    // for that path), so nothing else will otherwise notice the release —
+    // see _proceedTauntFromUI's own doc comment.
+    if (wasTauntModal) this._proceedTauntFromUI();
     this.uiModalEl.classList.remove('open');
     this.uiModalBoxEl.innerHTML = '';
     document.body.style.overflow = '';
@@ -4279,6 +4378,11 @@ class MonopolyBoard {
     const globalLeft = Math.max(0, rules.globalCapPerGame - globalAttemptCount(G.persuasion.globalUsed, actorSeat));
     const titleKey = { rent: 'persuasion.rentTitle', duel: 'persuasion.duelTitle', trade: 'persuasion.tradeTitle' }[kind];
     const myEpoch = ++this._persuadeEpoch;
+    // T3.5: lets closeUiModal() tell "this modal was FOR the active taunt
+    // hold" (a cancel-without-submit should auto-proceed it) apart from any
+    // unrelated modal that might be opened/closed while a hold happens to
+    // be active — see closeUiModal's own doc comment.
+    this._activePersuasionModalKind = kind;
     this.openUiModal(`
       <div class="persuade">
         <div class="persuade__head">${t(titleKey, { name: esc(targetName) })}</div>
@@ -4348,8 +4452,20 @@ class MonopolyBoard {
     }
 
     if (myEpoch !== this._persuadeEpoch) return; // superseded — see doc comment above
-    this.closeUiModal();
+    // T3.5: dispatch BEFORE closing (order matters, was closeUiModal-then-
+    // dispatch pre-T3.5) for two reasons: (1) local play notifies
+    // client.subscribe SYNCHRONOUSLY inside client.moves[name](...) (same
+    // fact _buildBotDriver's dispatch() doc comment documents), so by the
+    // time this line returns, update() has ALREADY run — including
+    // _processPersuasionEvents, which releases a matching taunt hold via
+    // the resulting persuasion_resolved event BEFORE closeUiModal() ever
+    // runs; closing first would let closeUiModal()'s own taunt-hold check
+    // (below) fire on a still-active hold and race the driver resuming
+    // against this exact move actually landing in G. (2) it also means
+    // closeUiModal()'s check correctly sees an ALREADY-dismissed hold for a
+    // real submit and never double-releases it.
     this.client.moves.attemptPersuasion(kind, targetSeat, text, score);
+    this.closeUiModal();
   }
 
   // ─────────────────────────────────────────────────────────
@@ -4365,14 +4481,21 @@ class MonopolyBoard {
   //     line itself is T1's i18n-log.js formatter, unaffected by this).
   //   - rent_paid where the payer is a BOT and the owner is a local human
   //     -> maybe pop the bot-plea popup (owner-as-judge, plan item 7).
+  //   - persuasion_resolved for kind 'duel' matching an active taunt hold
+  //     (T3.5) -> release the hold, same as an explicit 直接开打 click —
+  //     see _proceedTaunt's doc comment.
   // ─────────────────────────────────────────────────────────
   _processPersuasionEvents(G, ctx) {
     const { newEvents, nextSeq } = consumeNewEvents(G.events, this._lastPersuasionSeq);
     this._lastPersuasionSeq = nextSeq;
     if (newEvents.length === 0) return;
     newEvents.forEach(ev => {
-      if (ev.type === 'persuasion_resolved') this._showPersuasionVerdictBubble(G, ev);
-      else if (ev.type === 'rent_paid') this._maybeTriggerBotPlea(G, ctx, ev);
+      if (ev.type === 'persuasion_resolved') {
+        this._showPersuasionVerdictBubble(G, ev);
+        this._releaseTauntHoldOnVerdict(ev);
+      } else if (ev.type === 'rent_paid') {
+        this._maybeTriggerBotPlea(G, ctx, ev);
+      }
     });
   }
 
@@ -4384,6 +4507,20 @@ class MonopolyBoard {
     const tierKey = tier > 0 ? `tier${tier}` : 'fail';
     const line = t(`persuasion.verdict.${kind}.${tierKey}`);
     this._showSpeechBubble(targetSeat, char, line);
+  }
+
+  // T3.5: a resolved 叫阵 attempt against the taunt hold's own (challenger,
+  // owner) pair releases the hold — same as 直接开打, see _proceedTaunt.
+  // Any OTHER persuasion_resolved event (rent/trade, or a duel attempt from
+  // a different pair — shouldn't happen given canAttempt's own actor/target
+  // guards, but checked explicitly rather than assumed) is a no-op here.
+  _releaseTauntHoldOnVerdict(ev) {
+    if (!this._tauntHold || this._tauntHold.dismissed) return;
+    const { kind, actorSeat, targetSeat } = ev.data;
+    if (kind !== 'duel') return;
+    if (String(actorSeat) !== String(this._tauntHold.challengerSeat)) return;
+    if (String(targetSeat) !== String(this._tauntHold.ownerSeat)) return;
+    this._proceedTaunt();
   }
 
   // Bot plea (owner-as-judge, plan item 7): a bot just paid rent
@@ -4470,6 +4607,120 @@ class MonopolyBoard {
     const { humanSeat, pleaText } = this._pleaPending;
     this._pleaPending = null;
     if (this.client) this.client.moves.attemptPersuasion('rent', humanSeat, pleaText, accept ? 10 : 0);
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Duel-taunt window vs bot responders (T3.5) — duels only exist in
+  // duel-enabled mods (today: terra-titans, an ATLAS map); without this, a
+  // LOCAL HUMAN challenger's bot-controlled opponent auto-responds within
+  // its own paced ~700-1100ms think delay, closing the 叫阵 window before
+  // the human ever gets a chance to click it (the design's PRIMARY 叫阵
+  // scenario per the spec transcript — taunting an NPC, not another human).
+  //
+  // Hold lifecycle:
+  //   1. CREATE (_syncTauntHold, called every update() tick, right after
+  //      _processPersuasionEvents — see that call site): the FIRST tick
+  //      G.duel.phase flips to 'response' with a local-human challenger, a
+  //      bot owner, and canAttempt('duel', ...) still open, arms
+  //      this._tauntHold = {challengerSeat, ownerSeat, dismissed: false}
+  //      and a RULES.persuasion.tauntWindow.timeoutSeconds auto-proceed
+  //      timer. update()'s own bot-driver-pause condition (mirroring
+  //      _pleaPending) holds the driver for as long as the hold is active
+  //      and undismissed, so the bot literally cannot respond during this
+  //      window — no race to lose.
+  //   2. RENDER: renderTurnbox's early bot-seat gate yields (an explicit
+  //      precondition, see that method's own T3.5 comment) so
+  //      _duelPromptHtml's response-phase branch is reached; ITS OWN T3.5
+  //      branch (checked first, before the owner-facing FIGHT/DECLINE code)
+  //      shows the CHALLENGER two actions: 叫阵 (opens the shared
+  //      persuasion modal, wired identically to every other seam) and
+  //      直接开打 (this._proceedTaunt(), wired in wireActions).
+  //   3. DISMISS (always via _proceedTaunt — the ONE release path, one-shot
+  //      guarded exactly like _resolvePlea): explicit 直接开打 click, a
+  //      persuasion_resolved event for kind 'duel' matching this hold
+  //      (_releaseTauntHoldOnVerdict, fired by a successful 叫阵 submit —
+  //      attempt IS burned), the modal being cancelled/Escaped/scrim-
+  //      clicked without submitting while it was open FOR this hold
+  //      (closeUiModal's own T3.5 check — attempt NOT burned, same as a
+  //      direct 直接开打), or the timeout (attempt NOT burned).
+  //      Dismissal does NOT null this._tauntHold immediately — it stays
+  //      around (marked dismissed) until G.duel itself no longer matches it
+  //      (_syncTauntHold's own clear-stale-hold check, run every tick
+  //      BEFORE the create check): a purely canAttempt-based re-check would
+  //      otherwise immediately re-arm on the very next tick (the attempt
+  //      wasn't consumed, so canAttempt is still true) even though the
+  //      human just explicitly dismissed THIS exact duel's window.
+  _syncTauntHold(G, ctx) {
+    const duel = G.duel;
+    if (this._tauntHold && (!duel || duel.phase !== 'response'
+        || String(duel.challengerId) !== String(this._tauntHold.challengerSeat)
+        || String(duel.ownerId) !== String(this._tauntHold.ownerSeat))) {
+      // Stale — the duel this hold was about has resolved/changed/cleared.
+      if (this._tauntTimer) { clearTimeout(this._tauntTimer); this._tauntTimer = null; }
+      this._tauntHold = null;
+    }
+    if (this._tauntHold) return; // active OR dismissed-but-still-tracked for THIS duel
+    if (!duel || duel.phase !== 'response') return;
+    if (!this._persuasionUIEnabled()) return;
+    const challengerSeat = String(duel.challengerId);
+    const ownerSeat = String(duel.ownerId);
+    if (!this._isBotSeat(ownerSeat)) return; // only for a BOT responder — human-vs-human is unaffected (T3's existing tauntBtn)
+    if (this._isBotSeat(challengerSeat)) return; // challenger must be a local human
+    if (!canAttempt(G, ctx, 'duel', challengerSeat, ownerSeat, RULES).ok) return;
+    this._tauntHold = { challengerSeat, ownerSeat, dismissed: false };
+    const rules = resolvePersuasionRules(RULES);
+    const seconds = Number.isFinite(rules.tauntWindow.timeoutSeconds) && rules.tauntWindow.timeoutSeconds > 0
+      ? rules.tauntWindow.timeoutSeconds : 12;
+    this._tauntTimer = setTimeout(() => this._proceedTauntFromUI(), seconds * 1000);
+  }
+
+  // The ONE state-mutation release path for a taunt hold (see
+  // _syncTauntHold's lifecycle doc comment above for every caller).
+  // One-shot guarded — a button click racing the timeout, or a
+  // persuasion_resolved event arriving right as the timeout also fires,
+  // can never double-process. PURE — does not itself trigger a render (see
+  // _proceedTauntFromUI immediately below for why that matters and who
+  // needs which version). Called directly (not via _proceedTauntFromUI) by
+  // _releaseTauntHoldOnVerdict, which ALWAYS runs from inside an
+  // already-in-progress update() pass (a successful 叫阵 submit dispatches
+  // attemptPersuasion, which client.subscribe notifies SYNCHRONOUSLY,
+  // landing us inside update() -> _processPersuasionEvents already) — that
+  // SAME pass's own remaining render calls (still ahead of it this tick)
+  // and its own end-of-method bot-driver-pause check already pick up the
+  // now-dismissed hold correctly; forcing a SECOND, recursive update() call
+  // here would be redundant at best and risks the exact reentrant-update()
+  // hazard _buildBotDriver's dispatch() doc comment warns about elsewhere.
+  _proceedTaunt() {
+    if (!this._tauntHold || this._tauntHold.dismissed) return;
+    this._tauntHold.dismissed = true;
+    if (this._tauntTimer) { clearTimeout(this._tauntTimer); this._tauntTimer = null; }
+  }
+
+  // Every OTHER release path — the 直接开打 button, the auto-proceed
+  // timeout, and closeUiModal()'s Escape/scrim-click fallback — reaches
+  // this wrapper instead of _proceedTaunt() directly. UNLIKE a submitted
+  // 叫阵 (which dispatches attemptPersuasion and therefore triggers
+  // client.subscribe -> update() synchronously on its own), "proceed"
+  // deliberately makes NO engine move at all — nothing in G changes, so
+  // nothing would ever call update() again on its own. Without this,
+  // _proceedTaunt()'s state flip is invisible: the DOM keeps showing the
+  // (stale) taunt window forever, AND the paced bot driver — paused via
+  // update()'s own `!tauntHolding` check, which only ever re-evaluates
+  // inside update() — never gets another chance to notice the pause lifted
+  // and resume its own response. INSTRUMENTED, not guessed: the very
+  // soft-lock this task exists to prevent, reproduced live (E2E: clicking
+  // 直接开打 left #btn-taunt-proceed on screen indefinitely) before this
+  // fix. Forcing update(this.client.getState()) here is safe (not
+  // reentrant) precisely because every caller of THIS method runs from a
+  // plain DOM/timer event handler, never from inside an active update()
+  // pass — the one caller that IS mid-update() (_releaseTauntHoldOnVerdict)
+  // deliberately calls the pure _proceedTaunt() above instead.
+  _proceedTauntFromUI() {
+    this._proceedTaunt();
+    if (this.client) {
+      const state = this.client.getState();
+      if (state) this.update(state);
+    }
   }
 
   // ─────────────────────────────────────────────────────────
@@ -4963,6 +5214,10 @@ class MonopolyBoard {
     // safe no-op either way).
     if (this._pleaTimer) { clearTimeout(this._pleaTimer); this._pleaTimer = null; }
     this._pleaPending = null;
+    // T3.5: same belt-and-braces treatment for a stray taunt hold/timer.
+    if (this._tauntTimer) { clearTimeout(this._tauntTimer); this._tauntTimer = null; }
+    this._tauntHold = null;
+    this._activePersuasionModalKind = null;
     // Dialogue memory is per-GAME, not per-boot (MT2-SP4 T2): a fresh game
     // (including "Play Again", which routes here) starts with a clean
     // attitude ledger AND diary store — grudges/entries from a finished
@@ -5068,6 +5323,10 @@ class MonopolyBoard {
     // showing right before Load was clicked can never survive the swap.
     if (this._pleaTimer) { clearTimeout(this._pleaTimer); this._pleaTimer = null; }
     this._pleaPending = null;
+    // T3.5: same explicit clear for a stray taunt hold/timer.
+    if (this._tauntTimer) { clearTimeout(this._tauntTimer); this._tauntTimer = null; }
+    this._tauntHold = null;
+    this._activePersuasionModalKind = null;
     // MT2-SP4 T2: restore dialogue memory from the save envelope. A save
     // with no `dialogueMemory` field at all (pre-T2 save) -> deserializeDialogueMemory(undefined)
     // -> fresh empty ledger/diaries/spentEstimate — same "the save predates

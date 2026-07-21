@@ -315,6 +315,11 @@ export const STRINGS = {
     'persuasion.rentTitle': '向 {name} 求情',
     'persuasion.duelTitle': '向 {name} 叫阵',
     'persuasion.tradeTitle': '游说 {name}',
+    // T3.5 (duel-taunt window vs bot responders): shown to the CHALLENGER
+    // while App.js holds the bot driver so {name} (the bot owner) can't
+    // auto-respond before the human gets a chance to taunt.
+    'persuasion.duelHoldHint': '{name} 即将应战——要叫阵吗？',
+    'persuasion.duelProceed': '直接开打',
     'persuasion.placeholder': '输入你的说辞……',
     'persuasion.submit': '发送',
     'persuasion.cancel': '取消',
@@ -661,6 +666,11 @@ export const STRINGS = {
     'persuasion.rentTitle': 'Plead with {name}',
     'persuasion.duelTitle': 'Taunt {name}',
     'persuasion.tradeTitle': 'Lobby {name}',
+    // T3.5 (duel-taunt window vs bot responders): shown to the CHALLENGER
+    // while App.js holds the bot driver so {name} (the bot owner) can't
+    // auto-respond before the human gets a chance to taunt.
+    'persuasion.duelHoldHint': '{name} is about to respond — taunt first?',
+    'persuasion.duelProceed': 'PROCEED',
     'persuasion.placeholder': 'Type your words…',
     'persuasion.submit': 'SEND',
     'persuasion.cancel': 'CANCEL',

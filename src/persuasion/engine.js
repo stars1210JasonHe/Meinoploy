@@ -166,6 +166,28 @@ export const DEFAULT_PERSUASION_RULES = {
     probability: 0.35,
     timeoutSeconds: 12,
   },
+  // T3.5 (duel-taunt window vs bot responders) — when a LOCAL HUMAN
+  // challenger initiates a duel whose RESPONDER is a bot seat, App.js
+  // holds its paced bot driver and shows the challenger a window (叫阵 or
+  // 直接开打/proceed) instead of letting the bot auto-respond within its
+  // own ~700-1100ms pacing before the human ever gets a chance to taunt —
+  // duels only exist in duel-enabled mods (today: terra-titans, an ATLAS
+  // map) and the driver's own pacing would otherwise close this out before
+  // any human could react. `timeoutSeconds` bounds how long the window
+  // waits before auto-proceeding (App.js's "must not soft-lock" discipline,
+  // same shape as botPlea.timeoutSeconds above) if the human does nothing.
+  // No `enabled`/`probability` fields here (unlike botPlea) — this window
+  // is not optional/randomized: it opens deterministically whenever
+  // canAttempt(kind:'duel') would otherwise be usable but the responder is
+  // a bot, the whole point being that a human should never be denied the
+  // OPPORTUNITY to taunt just because their opponent is bot-controlled.
+  // Kept in lockstep with mods/dominion/rules.js's persuasion.tauntWindow
+  // block AND src/mod-loader.js's DEFAULT_RULES.persuasion.tauntWindow
+  // (drift-guard covered by persuasion.test.js, same three-copy discipline
+  // as every other field in this block).
+  tauntWindow: {
+    timeoutSeconds: 12,
+  },
 };
 
 const PERSUASION_RULE_KEYS = Object.keys(DEFAULT_PERSUASION_RULES);

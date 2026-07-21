@@ -26,6 +26,24 @@ const { test, expect } = require('@playwright/test');
 //      Asserts the popup appears with ACCEPT/REJECT, REJECT closes it, the
 //      attempt is burned (read via the same SAVE-flow technique), and the
 //      game keeps running afterward (one more human turn completes cleanly).
+//  (c)+(d) duel-taunt window vs a bot responder (T3.5, terra-titans —
+//      duel.enabled=true's only shipped mod, an ATLAS/globe world): a
+//      1-human+1-bot game, adapting duel.spec.js's proven convergent-route/
+//      cash-floor duel-hunting policy with a bot-turn wait/poll spliced in
+//      (bots.spec.js's own convention). TWO INDEPENDENT tests, each its own
+//      fresh game hunting for exactly ONE duel — not one game chasing two
+//      (the human challenger's own RULES.duel.cooldownTurns, 3, would force
+//      a long wait between a first and second duel in the SAME game, which
+//      the two-independent-tests split avoids entirely while still
+//      exercising both release paths):
+//   (c) 直接开打 (proceed): asserts the taunt window renders with BOTH
+//       buttons and NEITHER of the bot-owner's own FIGHT/DECLINE (the human
+//       here is only the CHALLENGER), then that proceeding releases the
+//       hold and the (now-unpaused) driver actually resolves the duel.
+//   (d) 叫阵 -> modal submit: asserts the SAME modal every other seam uses
+//       resolves the duel via the persuasion_resolved event path (not a
+//       direct proceed), with the attempt burned (read via the SAVE flow) —
+//       either tier outcome (keyless charisma check, no key set).
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -334,6 +352,213 @@ test.describe('Bot pleas (owner-as-judge, forced probability via __MP_FORCE_PLEA
       if (advanced) break; // a SECOND plea is also an acceptable "still running" signal
       if (await page.locator('#btn-roll').isVisible().catch(() => false)) break;
     }
+
+    expect(pageErrors).toEqual([]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// (c)+(d) Duel-taunt window vs a bot responder (T3.5) — terra-titans, 1 bot
+// ═══════════════════════════════════════════════════════════════════════
+
+async function gotoTerraTitansSetup(page) {
+  await page.goto('/');
+  await page.waitForSelector('#btn-mode-local', { timeout: 10000 });
+  await page.click('#btn-mode-local');
+  await page.waitForSelector('.map-card[data-mod-idx]', { timeout: 10000 });
+  await page.locator('.map-card[data-mod-idx]', { hasText: 'Terra Titans' }).click();
+  await page.waitForSelector('.map-card[data-map-idx]', { timeout: 10000 });
+  await page.locator('.map-card[data-map-idx]', { hasText: 'Terra Titans' }).click();
+}
+
+// count:2/bots:1 -> seat '0' human, seat '1' bot (App.js's startGameWithPlayers
+// hands bots the LAST seats). Survival victory EXPLICITLY picked — duel.spec.js's
+// own documented reason still applies: Terra Titans defaults to DOMINION
+// victory, which races this spec's buying-driven duel hunt.
+async function startTerraTitansWithOneBot(page) {
+  await gotoTerraTitansSetup(page);
+  await page.click('.count-btn[data-count="2"]');
+  await page.waitForSelector('.bot-btn[data-bots="1"]', { timeout: 10000 });
+  await page.click('.bot-btn[data-bots="1"]');
+  await page.locator('.vic-card[data-mode="survival"]').click();
+  await page.waitForSelector('#btn-vic-start', { timeout: 10000 });
+  await page.click('#btn-vic-start');
+  await page.waitForSelector('.charcard', { timeout: 10000 });
+  await pickAndConfirm(page); // human (seat 0); bot (seat 1) auto-completes with zero clicks
+  await page.waitForSelector('#btn-roll', { timeout: 20000 });
+}
+
+const TERRA_CASH_FLOOR = 700; // duel.spec.js's own floor — same world/pricing, same stake-safety reasoning
+
+// One step of a hot-seat-vs-bot Terra Titans turn, ADAPTING duel.spec.js's
+// convergent-route/cash-floor policy (roll -> resolve route fork -> buy
+// above the cash floor -> ALWAYS escalate an eligible duel offer to DUEL!,
+// never PAY RENT, since generating a duel IS the point) with bots.spec.js's
+// bot-turn wait/poll spliced in (only ONE seat here can ever be a bot: '1').
+// Checks the taunt window FIRST, every call, before anything else — it's a
+// modal-adjacent overlay that can appear the instant this human's own
+// initiateDuel dispatch lands (App.js holds the driver the same tick, see
+// _syncTauntHold), so there's no race to lose by checking it first.
+async function terraStepHuntingTaunt(page) {
+  if (await page.locator('#btn-taunt-proceed').isVisible().catch(() => false)) return 'taunt-window';
+
+  const waitingBot = await page.locator('.turnbox__waiting', { hasText: 'BOT' }).count();
+  if (waitingBot > 0) { await page.waitForTimeout(400); return 'continue'; }
+
+  const evAccept = page.locator('#ev-accept');
+  if (await evAccept.isVisible().catch(() => false)) { await evAccept.click(); await page.waitForTimeout(300); return 'continue'; }
+
+  const passAuction = page.locator('#btn-pass-auction');
+  if (await passAuction.isVisible().catch(() => false)) { await passAuction.click(); await page.waitForTimeout(300); return 'continue'; }
+
+  const duelBtn = page.locator('#btn-duel');
+  if (await duelBtn.isVisible().catch(() => false)) {
+    if (await duelBtn.isEnabled().catch(() => false)) {
+      await duelBtn.click(); // initiate — the responder here is ALWAYS the bot (only 2 seats)
+      await page.waitForTimeout(300);
+    } else {
+      // cooldown-disabled (shouldn't happen — this is the challenger's
+      // first-ever duel this game, same reasoning duel.spec.js's own
+      // assertion relies on) — pay rent instead rather than getting stuck.
+      await page.click('#btn-payrent');
+      await page.waitForTimeout(300);
+    }
+    return 'continue';
+  }
+
+  const rollBtn = page.locator('#btn-roll');
+  if (await rollBtn.isVisible().catch(() => false)) {
+    await rollBtn.click();
+    await page.waitForTimeout(1100);
+    const awaitingRoute = await page.locator('.centerslot__hint', { hasText: 'CHOOSE YOUR ROUTE' })
+      .first().isVisible().catch(() => false);
+    if (awaitingRoute) {
+      const target = page.locator('.gcity--route').first();
+      await target.waitFor({ state: 'visible', timeout: 8000 });
+      await target.click();
+      await page.waitForTimeout(350);
+    }
+    return 'continue';
+  }
+
+  const buyBtn = page.locator('#btn-buy');
+  if (await buyBtn.isVisible().catch(() => false)) {
+    const cash = await activePlayerMoney(page);
+    if (cash > TERRA_CASH_FLOOR) {
+      await buyBtn.click();
+      await page.waitForTimeout(300);
+    } else {
+      await page.click('#btn-pass');
+      await page.waitForTimeout(400);
+      const passAuctionBtn = page.locator('#btn-pass-auction');
+      for (let i = 0; i < 6; i++) {
+        if (await passAuctionBtn.isVisible().catch(() => false)) {
+          await passAuctionBtn.click();
+          await page.waitForTimeout(200);
+        } else break;
+      }
+    }
+    return 'continue';
+  }
+
+  const endBtn = page.locator('#btn-end');
+  if (await endBtn.isVisible().catch(() => false) && await endBtn.isEnabled().catch(() => false)) {
+    await endBtn.click();
+    await page.waitForTimeout(300);
+    return 'continue';
+  }
+
+  await page.waitForTimeout(300);
+  return 'continue';
+}
+
+async function huntTauntWindow(page, maxSteps) {
+  let signal = 'continue';
+  for (let i = 0; i < maxSteps && signal !== 'taunt-window'; i++) {
+    if (await page.locator('.results__victory').isVisible().catch(() => false)) break;
+    signal = await terraStepHuntingTaunt(page);
+  }
+  return signal;
+}
+
+test.describe('Duel-taunt window vs a bot responder (T3.5, terra-titans)', () => {
+  test('taunt window renders with both actions (no bot FIGHT/DECLINE leak); 直接开打 releases the hold and the bot resolves the duel', async ({ page }) => {
+    test.setTimeout(480000);
+    const pageErrors = [];
+    page.on('pageerror', err => pageErrors.push(err.message));
+
+    await startTerraTitansWithOneBot(page);
+
+    const signal = await huntTauntWindow(page, 800);
+    expect(signal).toBe('taunt-window');
+
+    await expect(page.locator('#btn-persuade-duel')).toBeVisible();
+    await expect(page.locator('#btn-taunt-proceed')).toBeVisible();
+    // The human here is ONLY the challenger — the bot owner's own
+    // FIGHT/DECLINE decision must never be exposed to them (item 1/2).
+    await expect(page.locator('#btn-fight')).toHaveCount(0);
+    await expect(page.locator('#btn-decline')).toHaveCount(0);
+
+    await page.click('#btn-taunt-proceed');
+    // Released: the window disappears, and the now-unpaused driver
+    // resolves the duel on its own pacing (no attempt burned — this test
+    // doesn't check the attempts ledger, it checks the hold/driver behavior).
+    await expect(page.locator('#btn-taunt-proceed')).toHaveCount(0, { timeout: 5000 });
+    // "duel reached resolution" — turnPhase returns to 'done' (END TURN
+    // enabled) regardless of WHICH way the bot resolved it. INSTRUMENTED,
+    // not guessed (a first pass here asserted the '.turnbox__slot' "WINS"
+    // strip specifically and failed live): sim/bot.js's owner-response
+    // decision (respondDuel FIGHT vs declineDuel) is a stat-strength
+    // comparison, policy-independent (src/sim/bot.js:329-335) — this specific
+    // bot seat/character pairing can genuinely DECLINE, which logs
+    // 'duel_declined' (rent auto-pays, opening ANOTHER rent-mercy window —
+    // visibly correct behavior, just not a 'duel_resolved'/"WINS" event) —
+    // so the outcome-agnostic proof below (readSavedG) is what actually
+    // pins "reached resolution", not a specific rendered string.
+    await expect(page.locator('#btn-end')).toBeEnabled({ timeout: 8000 });
+    const g = await readSavedG(page);
+    expect(g.duel).toBeNull();
+    const recentTypes = g.events.slice(-8).map(e => e.type);
+    expect(recentTypes.some(ty => ty === 'duel_resolved' || ty === 'duel_declined')).toBe(true);
+
+    expect(pageErrors).toEqual([]);
+  });
+
+  test('叫阵 -> shared modal submit resolves the duel; attempt burned, no hang', async ({ page }) => {
+    test.setTimeout(480000);
+    const pageErrors = [];
+    page.on('pageerror', err => pageErrors.push(err.message));
+
+    await startTerraTitansWithOneBot(page);
+
+    const signal = await huntTauntWindow(page, 800);
+    expect(signal).toBe('taunt-window');
+
+    await page.click('#btn-persuade-duel');
+    await expect(page.locator('.persuade')).toBeVisible();
+    await page.fill('#persuade-text', 'Your last victory was luck. Face me properly this time.');
+    await page.click('#btn-persuade-submit');
+    await expect(page.locator('#ui-modal')).not.toHaveClass(/open/);
+
+    // Released via the persuasion_resolved event (NOT a direct 直接开打
+    // click) — _releaseTauntHoldOnVerdict — and the driver resumes on its
+    // own; same "no hang" evidence as the other test.
+    await expect(page.locator('#btn-taunt-proceed')).toHaveCount(0, { timeout: 5000 });
+    // "duel reached resolution" — outcome-agnostic (see the other test's
+    // doc comment: the bot's FIGHT-vs-DECLINE response is a stat-strength
+    // comparison this test can't pin down in advance, and DECLINE never
+    // produces a "WINS" string).
+    await expect(page.locator('#btn-end')).toBeEnabled({ timeout: 8000 });
+
+    // Attempt burned (either tier outcome — keyless, no key set anywhere in
+    // this file) — read via the SAME real-G SAVE-flow technique as every
+    // other invariant assertion in this spec, which ALSO proves resolution
+    // (G.duel cleared + a duel_resolved/duel_declined event landed).
+    const g = await readSavedG(page);
+    expect(g.duel).toBeNull();
+    const recentTypes = g.events.slice(-8).map(e => e.type);
+    expect(recentTypes.some(ty => ty === 'duel_resolved' || ty === 'duel_declined')).toBe(true);
+    expect(g.persuasion.attempts.duel['0'] && g.persuasion.attempts.duel['0']['1']).toBe(1);
 
     expect(pageErrors).toEqual([]);
   });
