@@ -38,6 +38,7 @@ const TYPE_LIST = [
   'trade_cancelled', 'auction_started', 'auction_turn', 'bid_placed',
   'auction_passed', 'auction_ended', 'bankruptcy', 'season_changed', 'game_over',
   'jail_reminder', 'duel_offered', 'duel_initiated', 'duel_declined', 'duel_resolved',
+  'persuasion_attempted', 'persuasion_resolved',
 ];
 export const ENGINE_EVENTS = Object.freeze(Object.fromEntries(TYPE_LIST.map(t => [t, t])));
 
@@ -367,6 +368,27 @@ export function formatEventMessage(type, actor, data, G) {
       const o = G.players[data.ownerId];
       const w = G.players[data.winnerId];
       return `Duel! ${playerName(c)} ${data.challengerRoll.total} vs ${playerName(o)} ${data.defenderRoll.total} — ${playerName(w)} wins!`;
+    }
+
+    // persuasion_attempted: UI prompt/flavor only, no log line — same
+    // precedent as 'duel_offered' above (the resolution event carries the
+    // player-facing text).
+    case 'persuasion_attempted':
+      return null;
+
+    // persuasion_resolved (MT2-SP5 direction C2, T1): T1's keyless path only
+    // — data.score is always null here (T2's LLM judge is the first
+    // producer of a real 0-10 score). kindLabel/tier wording is a plain,
+    // deterministic engine line; T2/T3 may replace this with judged
+    // in-character flavor text without changing the event's own payload.
+    case 'persuasion_resolved': {
+      const p = G.players[actor];
+      const t = G.players[data.targetSeat];
+      const label = { rent: 'rent mercy', duel: 'a duel taunt', trade: 'a trade pitch' }[data.kind] || data.kind;
+      if (data.tier === 0) {
+        return `${playerName(p)}'s ${label} on ${playerName(t)} fails.`;
+      }
+      return `${playerName(p)} lands ${label} on ${playerName(t)} (tier ${data.tier})!`;
     }
 
     default:

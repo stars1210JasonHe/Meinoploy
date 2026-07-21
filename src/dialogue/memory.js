@@ -40,6 +40,15 @@ export const DEFAULT_DIALOGUE_RULES = {
     tradeAcceptedTrust: 1,
     bigRentGrudge: 1,
     forceBuyVictimGrudge: 2,
+    // T1 (MT2-SP5 direction C2, "舌战群儒") — failure-cost ledger deltas for
+    // a FAILED (tier 0) persuasion attempt. See this file's
+    // 'persuasion_resolved' applyEvent case below for exactly which kinds
+    // react here (duel failures are engine-mechanical only, no ledger row).
+    // Kept in lockstep with mods/dominion/rules.js's dialogue.weights block
+    // and src/mod-loader.js's DEFAULT_RULES.dialogue.weights (drift-guard
+    // covered, persuasion.test.js).
+    persuasionRentFailGrudge: 1,
+    persuasionTradeFailTrust: 1,
   },
   caps: {
     grudge: 10,
@@ -298,6 +307,32 @@ export function applyEvent(state, event, rulesLike) {
     // other event's data is needed to apply this row.
     case 'season_changed':
       return decayLedger(state, rules);
+
+    // Persuasion attempt resolved (MT2-SP5 direction C2, T1): a FAILED
+    // (tier 0) rent-mercy or trade-lobby attempt worsens the persuader's
+    // ledger position with the target they petitioned — the "failure has a
+    // cost" anti-spam lever from the design doc (specs/2026-07-18-dialogue-c-
+    // design.md). src/Game.js attemptPersuasion: actor = the persuader
+    // (actorSeat), data = { kind, tier, score, actorSeat, targetSeat,
+    // effect }. Only rent/trade react here: duel-kind failures carry a
+    // purely engine-mechanical cost instead (a next-duel dice debuff stored
+    // on the player object by src/persuasion/engine.js, consumed once by
+    // respondDuel) — no ledger row for 'duel', by design (see the plan's T1
+    // brief: "Engine stores ONLY engine-mechanical costs ... attitude costs
+    // are ledger-side"). Successes (tier > 0) are NOT wired to the ledger in
+    // T1 — only the documented failure costs are.
+    case 'persuasion_resolved': {
+      if (data.tier !== 0) return state;
+      const { kind, actorSeat, targetSeat } = data;
+      if (actorSeat == null || targetSeat == null || actorSeat === targetSeat) return state;
+      if (kind === 'rent') {
+        return withDelta(state, targetSeat, actorSeat, rules.weights.persuasionRentFailGrudge, 0, rules.caps);
+      }
+      if (kind === 'trade') {
+        return withDelta(state, targetSeat, actorSeat, 0, -rules.weights.persuasionTradeFailTrust, rules.caps);
+      }
+      return state; // 'duel' kind: engine-mechanical cost only, no ledger row
+    }
 
     // trade_proposed / trade_rejected / trade_cancelled: intentionally NOT a
     // ledger-mutating row. The spec's own transcript shows grudge/trust

@@ -41,6 +41,20 @@ export const MOVE_SCHEMAS = {
   initiateDuel: NO_ARGS,
   respondDuel: NO_ARGS,
   declineDuel: NO_ARGS,
+  // MT2-SP5 direction C2, T1: kind is one of the three seams; targetSeat is
+  // a player id (string, mirrors proposeTrade's targetPlayerId); text is the
+  // player's free-text plea/taunt/pitch, optional, capped at
+  // RULES.persuasion.maxTextLength (200 by default) — the schema itself only
+  // bounds the wire shape, not that runtime-configurable length. Full
+  // MCP-tool surfacing (argsHint, legal-moves listing) is T4's job; this
+  // entry exists so `make_move` can validate ANY move by name generically
+  // (this module's own header comment), which every engine move requires
+  // 1:1 (mcp-move-schemas.test.js "every engine move has a schema").
+  attemptPersuasion: z.tuple([
+    z.enum(['rent', 'duel', 'trade']),
+    z.string().min(1),
+    z.string().max(200).optional(),
+  ]),
   endTurn: NO_ARGS,
 };
 
@@ -97,6 +111,11 @@ const DEFAULT_SIGNATURE_EVENT = {
   payRent: 'rent_paid',
   initiateDuel: 'duel_initiated',
   declineDuel: 'duel_declined',
+  // MT2-SP5 direction C2, T1: fits the default pattern exactly —
+  // persuasion_resolved's actor is always actorSeat === the caller (same as
+  // every OTHER default-pattern move here; attemptPersuasion is never a
+  // cross-seat response, see src/Game.js's own doc comment on the move).
+  attemptPersuasion: 'persuasion_resolved',
 };
 
 // -> [{type, actor, result}] acceptable outcomes, or null (signature-less).

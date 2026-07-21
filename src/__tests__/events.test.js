@@ -54,14 +54,17 @@ describe('resetMessages', () => {
 });
 
 describe('ENGINE_EVENTS registry', () => {
-  test('contains the 42 spec types and is frozen', () => {
-    expect(Object.keys(ENGINE_EVENTS)).toHaveLength(42);
+  test('contains the 44 spec types and is frozen', () => {
+    expect(Object.keys(ENGINE_EVENTS)).toHaveLength(44);
     expect(ENGINE_EVENTS.dice_rolled).toBe('dice_rolled');
     expect(ENGINE_EVENTS.jail_reminder).toBe('jail_reminder');
     expect(ENGINE_EVENTS.duel_offered).toBe('duel_offered');
     expect(ENGINE_EVENTS.duel_initiated).toBe('duel_initiated');
     expect(ENGINE_EVENTS.duel_declined).toBe('duel_declined');
     expect(ENGINE_EVENTS.duel_resolved).toBe('duel_resolved');
+    // MT2-SP5 direction C2, T1 (persuasion engine move).
+    expect(ENGINE_EVENTS.persuasion_attempted).toBe('persuasion_attempted');
+    expect(ENGINE_EVENTS.persuasion_resolved).toBe('persuasion_resolved');
     expect(Object.isFrozen(ENGINE_EVENTS)).toBe(true);
   });
 });

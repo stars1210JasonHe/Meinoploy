@@ -233,6 +233,17 @@ export const RULES = {
       tradeAcceptedTrust: 1,      // completed a trade with X (symmetric)
       bigRentGrudge: 1,           // paid >= rentGrudgeThreshold rent to X
       forceBuyVictimGrudge: 2,    // X hostile-took-over a property from you
+      // T1 (MT2-SP5 direction C2): failure-cost ledger deltas for a FAILED
+      // (tier 0) persuasion attempt (src/persuasion/engine.js + Game.js
+      // attemptPersuasion). Only rent/trade failures react here — duel
+      // failures are a purely engine-mechanical next-duel dice flag, no
+      // ledger row (see src/dialogue/memory.js applyEvent's
+      // 'persuasion_resolved' case for the exact rationale). Kept here
+      // (dialogue.weights), NOT under RULES.persuasion below — this is a
+      // src/dialogue/memory.js AttitudeLedger concern; RULES.persuasion is
+      // the separate engine-accounting/tier-effect namespace.
+      persuasionRentFailGrudge: 1,   // target's grudge toward the actor, on a failed 求情
+      persuasionTradeFailTrust: 1,   // target's trust toward the actor DROPS by this, on a failed 游说
     },
     caps: { grudge: 10, trust: 10 },        // both axes clamp to [0, cap]
     decayPerSeason: { grudge: 1, trust: 1 }, // toward 0, applied on season_changed
@@ -296,6 +307,61 @@ export const RULES = {
       trustThresholdPerPoint: 15,  // per trust point (ledger range 0-caps.trust)
       maxGrudgeShift: 150,         // hard cap on total tightening
       maxTrustShift: 150,          // hard cap on total relaxation (before the bound's floor)
+    },
+  },
+
+  // ── Persuasion System (MT2-SP5 direction C2, "舌战群儒") ────
+  // Consumed by src/persuasion/engine.js (pure accounting/tier-effect core,
+  // zero engine changes there) and src/Game.js's attemptPersuasion move
+  // (the ONE engine seam — server-validated, seat-authorized, applies every
+  // effect; the LLM judge added in T2 never mutates state directly). Every
+  // field here has a matching fallback in src/mod-loader.js's DEFAULT_RULES
+  // AND in src/persuasion/engine.js's own DEFAULT_PERSUASION_RULES (a THIRD,
+  // independent layer — same three-copy drift-guard discipline as
+  // RULES.dialogue above; persuasion.test.js's "defaults drift guard"
+  // mirrors dialogue-memory.test.js's own).
+  persuasion: {
+    enabled: true,
+    maxTextLength: 200,
+    // Attempt accounting (design doc "Economic bounds"): once per
+    // (kind, actor, target) for the whole game, PLUS a global per-actor cap
+    // across every kind/target combined. Both consume the cap regardless of
+    // whether the attempt succeeds or fails — attempts are not free
+    // rerolls, the risk/reward lever the design centers on.
+    perOpponentSeamLimit: 1,
+    globalCapPerGame: 3,
+    // Keyless fallback curve (T1's ONLY resolution path; T2's LLM judge
+    // shares the SAME tier caps/accounting, per the design doc's "fairness
+    // without a key" pillar — it just replaces this dice-like check with a
+    // judged score). See src/persuasion/engine.js's rollTier for the exact
+    // formula: a single ctx.random.Number() draw compared against cutpoints
+    // derived from (persuader charisma - target charisma).
+    charismaCheck: {
+      baseTier1Chance: 0.45,
+      baseTier2Chance: 0.15,
+      perPointDiffBonus: 0.02,
+      maxDiffBonus: 0.30,
+    },
+    // 求情 (rent mercy): fraction knocked off the pending rent, by tier.
+    rent: {
+      tierDiscounts: [0, 0.10, 0.20],
+    },
+    // 叫阵 (duel taunt): this-duel-only dice adjustment, by tier. lever picks
+    // ONE side (design brief): 'targetMinus' (default) subtracts from the
+    // property owner's roll; failureNextDuelPenalty is the engine-mechanical
+    // failure cost (a next-duel dice debuff on the actor, consumed once).
+    duel: {
+      lever: 'targetMinus',
+      tierAmounts: [0, 1, 2],
+      failureNextDuelPenalty: 1,
+    },
+    // 游说 (trade lobby): threshold shift applied to the CURRENT G.trade
+    // proposal's bot acceptance evaluation (src/bot-driver.js
+    // decideTradeResponse), by tier. Negative = easier to accept. Vs a human
+    // target this rides G.trade as pure flavor (T3 may surface it; nothing
+    // forces a human's decision either way).
+    trade: {
+      tierShifts: [0, -25, -50],
     },
   },
 

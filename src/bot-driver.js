@@ -218,16 +218,20 @@ function attitudeShift(value, perPoint, maxShift) {
 }
 
 // Attitude-adjusted acceptance threshold. `attitude` is the acting seat's
-// {grudge, trust} toward the trade's OTHER party (or null/undefined —
-// returns baseThreshold UNCHANGED, so "no attitude" is a true identity, not
-// an approximation).
+// {grudge, trust} toward the trade's OTHER party, or null/undefined.
+// `persuasionShift` (MT2-SP5 direction C2, T1 — optional, LAST arg, backward
+// compatible) is a 游说 (trade lobby) modifier riding G.trade.
+// persuasionThresholdShift (src/persuasion/engine.js tradeShiftForTier),
+// already a negative-or-zero number (RULES.persuasion.trade.tierShifts) —
+// absent/non-finite treated as 0, so omitting it is a true identity too.
 //
-// grudgeShift tightens (adds to) the threshold; trustShift relaxes
-// (subtracts from) it — both linear-per-point, each independently capped at
-// max*Shift. The combined shift is then floored at lowerBound =
-// min(baseThreshold, 0):
+// grudgeShift tightens (adds to) the threshold; trustShift AND
+// persuasionShift both relax (subtract from — persuasionShift is already
+// signed negative, so it's added directly) it — linear-per-point (attitude)
+// or flat (persuasion), each independently capped/bounded. The combined
+// shift is then floored at lowerBound = min(baseThreshold, 0):
 //
-//   effectiveThreshold = max(baseThreshold + grudgeShift - trustShift, lowerBound)
+//   effectiveThreshold = max(baseThreshold + grudgeShift - trustShift + persuasionShift, lowerBound)
 //
 // BOUND (never accept a strictly-losing trade it would otherwise reject on
 // value): for ANY net < lowerBound — i.e. a net value the base (no-
@@ -235,17 +239,18 @@ function attitudeShift(value, perPoint, maxShift) {
 // itself a losing deal relative to the bot's own baseline (net < 0 when
 // baseThreshold >= 0, the common/default case) — effectiveThreshold can
 // never drop to or below net, because effectiveThreshold >= lowerBound >
-// net always. Trust can relax acceptance down to (but never past)
-// lowerBound; it can never make the bot MORE lenient than its own
-// unmodified base policy already was at the floor. Grudge has no such cap
-// on the tightening side — making a bot harder to trade with is always
+// net always. Trust AND persuasion can relax acceptance down to (but never
+// past) lowerBound; neither can make the bot MORE lenient than its own
+// unmodified base policy already was at the floor — a successful 游说 tilts
+// the bot's math, it does not talk it into taking a loss. Grudge has no such
+// cap on the tightening side — making a bot harder to trade with is always
 // safe (it can only turn an accept into a reject, never the reverse).
-function resolveEffectiveThreshold(baseThreshold, attitude, pol) {
-  if (!attitude) return baseThreshold;
-  const grudgeShift = attitudeShift(attitude.grudge, pol.grudgeThresholdPerPoint, pol.maxGrudgeShift);
-  const trustShift = attitudeShift(attitude.trust, pol.trustThresholdPerPoint, pol.maxTrustShift);
+function resolveEffectiveThreshold(baseThreshold, attitude, pol, persuasionShift) {
+  const grudgeShift = attitude ? attitudeShift(attitude.grudge, pol.grudgeThresholdPerPoint, pol.maxGrudgeShift) : 0;
+  const trustShift = attitude ? attitudeShift(attitude.trust, pol.trustThresholdPerPoint, pol.maxTrustShift) : 0;
+  const pShift = Number.isFinite(persuasionShift) ? persuasionShift : 0;
   const lowerBound = Math.min(baseThreshold, 0);
-  return Math.max(baseThreshold + grudgeShift - trustShift, lowerBound);
+  return Math.max(baseThreshold + grudgeShift - trustShift + pShift, lowerBound);
 }
 
 // Face-value price of a board space, discounted per mortgagedPropertyRate if
@@ -295,7 +300,15 @@ export function decideTradeResponse(G, seat, policy, attitude) {
     .reduce((sum, pid) => sum + tradePropertyValue(G, pid, pol.mortgagedPropertyRate), 0);
 
   const net = incomingValue - outgoingValue;
-  const effectiveThreshold = resolveEffectiveThreshold(pol.tradeAcceptThreshold, attitude, pol);
+  // 游说 (trade lobby, MT2-SP5 direction C2 T1): the shift is always
+  // proposer -> target (attemptPersuasion's actor is always G.trade's
+  // proposer — see src/persuasion/engine.js canAttempt's 'trade' window),
+  // so it only applies when THIS call is evaluating the target's side of
+  // the deal — not the (largely theoretical) proposer-evaluating-their-own-
+  // offer call shape this function's doc comment allows for.
+  const persuasionShift = (actingIsTarget && trade && Number.isFinite(trade.persuasionThresholdShift))
+    ? trade.persuasionThresholdShift : 0;
+  const effectiveThreshold = resolveEffectiveThreshold(pol.tradeAcceptThreshold, attitude, pol, persuasionShift);
   return net >= effectiveThreshold ? [['acceptTrade']] : [['rejectTrade']];
 }
 

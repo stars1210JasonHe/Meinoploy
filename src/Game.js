@@ -7,6 +7,11 @@ import { MODS, PRISTINE } from '../mods/index';
 import { deepMerge, DEFAULT_RULES } from './mod-loader';
 import { refreshConstants } from './constants';
 import { logEvent, resetMessages, playerName, isDuelCooldownBlocked } from './events';
+import {
+  ATTEMPT_KINDS, resolvePersuasionRules, sanitizeText, canAttempt,
+  freshAttemptsState, recordAttempt, recordGlobalAttempt,
+  rollTier, rentDiscountForTier, applyRentDiscount, duelEffectForTier, tradeShiftForTier,
+} from './persuasion/engine';
 
 // Active map data — defaults to classic mod, can be overridden via setActiveMap().
 // Per-match board config is snapshotted into G.board at setup(); all engine readers
@@ -141,6 +146,18 @@ export function setVictoryConfig(cfg) {
   _victoryOverride = cfg || null;
 }
 
+// Fresh, empty G.persuasion envelope — the shape setup() seeds and
+// rehydrateSavedG backfills for an old save with no `persuasion` field at
+// all. Exported so tests can build the exact shape without duplicating it.
+export function freshPersuasionState() {
+  return {
+    attempts: freshAttemptsState(), // { rent: {}, duel: {}, trade: {} }
+    globalUsed: {},
+    pending: null,       // reserved for T2's async LLM judge in-flight state
+    activeModifier: null, // the ONE modifier a later move (respondDuel) still needs to consume — duel-kind only in T1
+  };
+}
+
 // Rehydrate a saved G (App.js loadGame's setup() override) into a valid
 // resume payload. Single seam for "field added by a later engine feature is
 // missing on an older save" backfills — events/eventSeq/enforceSeats were
@@ -156,13 +173,38 @@ export function setVictoryConfig(cfg) {
 // "the save predates this field -> safe default" treatment loadGame already
 // gives botSeats (defaults to an empty Set). Exported so this can be unit
 // tested without needing App.js/DOM.
+//
+// G.persuasion (MT2-SP5 direction C2, T1): a save from before this wave has
+// NO `persuasion` field at all -> fresh envelope. A save taken mid-C2-
+// development could in principle have a PARTIAL shape (e.g. missing one
+// attempts sub-bucket if a later task adds a 4th kind) — defended field-by-
+// field, same NaN-hole discipline as the rest of this function, rather than
+// a single `savedG.persuasion || fresh` that would trust a partial shape.
+// player.persuasionDuelPenalty gets the same per-player backfill treatment
+// as luckRedraws immediately below (a save from before this wave has no
+// such field on any player object).
 export function rehydrateSavedG(savedG) {
+  const savedPersuasion = savedG.persuasion || {};
+  const savedAttempts = savedPersuasion.attempts || {};
   return {
     ...savedG,
     events: savedG.events || [],
     eventSeq: savedG.eventSeq || 0,
     enforceSeats: savedG.enforceSeats || false,
-    players: (savedG.players || []).map(p => (p.luckRedraws === undefined ? { ...p, luckRedraws: 0 } : p)),
+    players: (savedG.players || []).map(p => {
+      const next = p.luckRedraws === undefined ? { ...p, luckRedraws: 0 } : p;
+      return next.persuasionDuelPenalty === undefined ? { ...next, persuasionDuelPenalty: 0 } : next;
+    }),
+    persuasion: {
+      attempts: {
+        rent: savedAttempts.rent || {},
+        duel: savedAttempts.duel || {},
+        trade: savedAttempts.trade || {},
+      },
+      globalUsed: savedPersuasion.globalUsed || {},
+      pending: savedPersuasion.pending || null,
+      activeModifier: savedPersuasion.activeModifier || null,
+    },
     _resumeLoad: true,
   };
 }
@@ -212,6 +254,13 @@ function createPlayer(id) {
     distanceTraveled: 0,
     affinityBonus: 0,
     lastDuelTurn: null,
+    // MT2-SP5 direction C2, T1: engine-mechanical failure cost for a FAILED
+    // (tier 0) 叫阵 (duel-taunt) persuasion attempt — a dice debuff on THIS
+    // player's own NEXT duel roll (either seat), consumed exactly once by
+    // respondDuel's roll() closure. A count (not a boolean) so repeated
+    // failures before the next duel actually happens stack, rather than the
+    // second failure being a silent no-op.
+    persuasionDuelPenalty: 0,
   };
 }
 
@@ -1328,6 +1377,10 @@ export const Monopoly = {
       trade: null,
       auction: null,
       duel: null,
+      // MT2-SP5 direction C2, T1: persuasion attempt accounting + the ONE
+      // cross-move modifier (duel-kind) a later move still needs to consume
+      // — see freshPersuasionState's own doc comment for the field shapes.
+      persuasion: freshPersuasionState(),
       freeParkingPot: 0,
       victory: resolveVictory(),
       _resumeLoad: false, // one-shot: set true by loadGame so the first onBegin doesn't bump turn/season
@@ -2066,12 +2119,37 @@ export const Monopoly = {
         for (let i = 0; i < RULES.duel.diceCount; i++) dice.push(Math.floor(ctx.random.Number() * 6) + 1);
         const stamina = p.character.stats[RULES.duel.statPrimary];
         const luckBonus = Math.floor(p.character.stats[RULES.duel.statSecondary] / RULES.duel.secondaryDivisor);
-        return { dice, stamina, luckBonus, total: dice.reduce((a, b) => a + b, 0) + stamina + luckBonus };
+        let total = dice.reduce((a, b) => a + b, 0) + stamina + luckBonus;
+        // Persuasion failure cost (MT2-SP5 direction C2, T1): a FAILED 叫阵
+        // attempt debuffs the ACTOR's (whichever seat that was, challenger or
+        // defender) own NEXT duel roll by RULES.persuasion.duel.
+        // failureNextDuelPenalty, consumed exactly once here regardless of
+        // which side of THIS duel they end up rolling for.
+        if (p.persuasionDuelPenalty > 0) {
+          total -= p.persuasionDuelPenalty;
+          p.persuasionDuelPenalty = 0;
+        }
+        return { dice, stamina, luckBonus, total };
       };
       const challenger = G.players[G.duel.challengerId];
       const owner = G.players[G.duel.ownerId];
       const challengerRoll = roll(challenger);   // pinned order: challenger first
       const defenderRoll = roll(owner);
+
+      // Persuasion 'duel' modifier consumption (MT2-SP5 direction C2, T1): a
+      // this-duel-only dice adjustment banked by attemptPersuasion(kind:
+      // 'duel') during THIS duel's 'response' phase, consumed exactly once
+      // here regardless of outcome. Matched against G.duel's own
+      // challenger/owner (not just truthiness) so a stale modifier from an
+      // earlier, already-resolved duel can never bleed into a new one.
+      const persuasionMod = G.persuasion && G.persuasion.activeModifier;
+      if (persuasionMod && persuasionMod.kind === 'duel'
+          && String(persuasionMod.actorSeat) === String(G.duel.challengerId)
+          && String(persuasionMod.targetSeat) === String(G.duel.ownerId)) {
+        if (persuasionMod.lever === 'ownPlus') challengerRoll.total += persuasionMod.amount;
+        else defenderRoll.total -= persuasionMod.amount; // 'targetMinus' (default)
+        G.persuasion.activeModifier = null;
+      }
       const challengerWins = RULES.duel.tieGoesToDefender
         ? challengerRoll.total > defenderRoll.total
         : challengerRoll.total >= defenderRoll.total;
@@ -2114,6 +2192,107 @@ export const Monopoly = {
       payRentAmount(G, ctx, duel.challengerId, duel.ownerId, duel.propertyId, duel.rent);
       G.turnPhase = 'done';
       if (G.enforceSeats) ctx.events.setActivePlayers({ currentPlayer: Stage.NULL });
+    },
+
+    // --- Persuasion (MT2-SP5 direction C2 "舌战群儒", T1) ---
+    // ONE engine move, three seams (kind: 'rent' | 'duel' | 'trade'), the
+    // KEYLESS deterministic path only — T2 adds an LLM judge alongside this
+    // SAME accounting/tier machinery (design doc's "fairness without a key"
+    // pillar: the judge only ever replaces this dice-like check with a
+    // judged score, never a bigger weapon). The actor is ALWAYS
+    // ctx.currentPlayer for every kind (the persuader is always the current
+    // turn-holder at each of these three seams — same as payRent/
+    // initiateDuel/proposeTrade's own requireActor gate). `text` is
+    // sanitized and carried on the emitted event for T2's judge to consume
+    // later; it does NOT influence this move's own (keyless) outcome.
+    attemptPersuasion: (G, ctx, kind, targetSeat, text) => {
+      // Malformed-args guard FIRST (proposeTrade precedent, ~line 1799) —
+      // also the reason this move needs no special-casing in the MCP
+      // legal-moves drift oracle (mcp-legal-moves-drift.test.js): a blind
+      // zero-arg dispatch always fails right here, before touching G, for
+      // every G shape the walk can reach.
+      if (typeof kind !== 'string' || !ATTEMPT_KINDS.includes(kind)) return INVALID_MOVE;
+      if (targetSeat === undefined || targetSeat === null) return INVALID_MOVE;
+      if (!requireActor(G, ctx, ctx.currentPlayer)) return INVALID_MOVE;
+
+      const rules = resolvePersuasionRules(RULES);
+      if (!rules.enabled) return INVALID_MOVE;
+
+      const actorSeat = ctx.currentPlayer;
+      const targetSeatStr = String(targetSeat);
+      const check = canAttempt(G, ctx, kind, actorSeat, targetSeatStr, rules);
+      if (!check.ok) return INVALID_MOVE;
+
+      const actor = G.players[actorSeat];
+      const target = G.players[targetSeatStr];
+      const cleanText = sanitizeText(text, rules.maxTextLength);
+
+      logEvent(G, 'persuasion_attempted', actorSeat, { kind, targetSeat: targetSeatStr, text: cleanText });
+
+      // Accounting is consumed REGARDLESS of outcome (design doc: "attempts
+      // are not free rerolls" — a failure worsens the ledger position AND
+      // burns the one-shot slot). Recorded right after the window/cap
+      // checks pass, before resolution.
+      G.persuasion.attempts = recordAttempt(G.persuasion.attempts, kind, actorSeat, targetSeatStr);
+      G.persuasion.globalUsed = recordGlobalAttempt(G.persuasion.globalUsed, actorSeat);
+
+      // Keyless resolution: a single ctx.random.Number() draw (T1's ONLY
+      // resolution path — never Math.random) against a charisma-vs-charisma
+      // curve. actor/target charisma default to 0 when either lacks a
+      // character (should not happen in 'play' phase; defensive only, same
+      // posture as calculateRent's own "only if visitor has a character").
+      const actorCharisma = actor.character ? actor.character.stats.charisma : 0;
+      const targetCharisma = target.character ? target.character.stats.charisma : 0;
+      const tier = rollTier(() => ctx.random.Number(), actorCharisma, targetCharisma, rules);
+
+      let effect = null;
+      if (kind === 'rent') {
+        // Anchor: the ALREADY-COMPUTED rent for the pending payment
+        // (G.duel.rent — calculateRent's own charisma discount already
+        // baked in at landing time) is what gets discounted here, so this
+        // stacks AFTER that discount. Floored at 0 dollars (applyRentDiscount).
+        if (tier > 0) {
+          const originalRent = G.duel.rent;
+          const discountedRent = applyRentDiscount(originalRent, tier, rules);
+          G.duel.rent = discountedRent;
+          effect = { type: 'rentDiscount', discountPct: rentDiscountForTier(tier, rules), originalRent, discountedRent };
+        }
+        // tier 0 (failure): no G mutation here — the target's grudge toward
+        // the actor reacts to the emitted event below, ledger-side
+        // (src/dialogue/memory.js applyEvent's 'persuasion_resolved' case).
+      } else if (kind === 'duel') {
+        if (tier > 0) {
+          // This-duel-only dice modifier, consumed exactly once by
+          // respondDuel (matched against G.duel's challenger/owner there).
+          const { lever, amount } = duelEffectForTier(tier, rules);
+          G.persuasion.activeModifier = { kind: 'duel', tier, actorSeat, targetSeat: targetSeatStr, lever, amount };
+          effect = { type: 'duelModifier', lever, amount };
+        } else {
+          // Failure cost is purely engine-mechanical (design brief: "engine
+          // stores ONLY engine-mechanical costs") — a next-duel dice debuff
+          // on the ACTOR themselves, consumed once by respondDuel's roll().
+          actor.persuasionDuelPenalty = (actor.persuasionDuelPenalty || 0) + rules.duel.failureNextDuelPenalty;
+          effect = { type: 'nextDuelPenalty', amount: rules.duel.failureNextDuelPenalty };
+        }
+      } else if (kind === 'trade') {
+        // Threshold shift rides G.trade itself so it also works vs a human
+        // target as pure flavor (src/bot-driver.js decideTradeResponse is
+        // the one REAL consumer — bot acceptance math for the CURRENT
+        // proposal only; G.trade is nulled the moment this proposal
+        // resolves, so no separate cleanup is needed).
+        if (tier > 0) {
+          const shift = tradeShiftForTier(tier, rules);
+          const priorShift = Number.isFinite(G.trade.persuasionThresholdShift) ? G.trade.persuasionThresholdShift : 0;
+          G.trade.persuasionThresholdShift = priorShift + shift;
+          effect = { type: 'thresholdShift', shift };
+        }
+        // tier 0 (failure): no G mutation — trust toward the actor reacts
+        // ledger-side, same as the rent-kind failure above.
+      }
+
+      logEvent(G, 'persuasion_resolved', actorSeat, {
+        kind, tier, score: null, actorSeat, targetSeat: targetSeatStr, effect,
+      });
     },
 
     endTurn: (G, ctx) => {

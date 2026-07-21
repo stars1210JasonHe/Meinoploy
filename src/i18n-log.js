@@ -13,7 +13,7 @@
 //          parity proof against the golden fixtures
 //          (src/__tests__/fixtures/golden-messages.json).
 //
-//   zh   — ZH_FORMATTERS covers every one of events.js's 42 registered event
+//   zh   — ZH_FORMATTERS covers every one of events.js's 44 registered event
 //          types. Types that are always- or conditionally-null in EN return
 //          null under the EXACT SAME conditions in zh (a half-rendered event
 //          would be worse than a missing one). Any type NOT in the table —
@@ -72,7 +72,7 @@ const ZH_FORMATTERS = {
   // route_committed: unhandled in the EN switch too (falls to `default:
   // return null`, formatEventMessage) — no rendered line in either locale.
   // Explicit entry (rather than relying on the EN fallback) so the coverage
-  // test can assert ALL 42 registered types, not 41-plus-one-exception.
+  // test can assert ALL 44 registered types, not 43-plus-one-exception.
   route_committed() {
     return null;
   },
@@ -300,6 +300,19 @@ const ZH_FORMATTERS = {
   duel_resolved(actor, data, G) {
     return `决斗！${playerName(G.players[actor])} ${data.challengerRoll.total} 对 ${playerName(G.players[data.ownerId])} ${data.defenderRoll.total}——${playerName(G.players[data.winnerId])} 获胜！`;
   },
+
+  // persuasion_attempted: UI prompt/flavor only, no log line — same as EN.
+  persuasion_attempted() {
+    return null;
+  },
+
+  persuasion_resolved(actor, data, G) {
+    const label = { rent: '求情', duel: '叫阵', trade: '游说' }[data.kind] || data.kind;
+    if (data.tier === 0) {
+      return `${playerName(G.players[actor])} 对 ${playerName(G.players[data.targetSeat])} 的${label}失败了。`;
+    }
+    return `${playerName(G.players[actor])} 对 ${playerName(G.players[data.targetSeat])} 的${label}奏效了（${data.tier} 级）！`;
+  },
 };
 
 // Renders a single already-logged event { type, actor, data } (a G.events
@@ -421,6 +434,13 @@ export function logLineKind(ev, G) {
 
     case 'auction_ended':
       return data.winnerId === null ? 'neutral' : 'good';
+
+    // persuasion_resolved: tier > 0 landed the effect (good for the
+    // persuader); tier 0 is the failure branch, which also carries the
+    // failure cost (bad). Not golden-covered — a straightforward call, same
+    // idiom as auction_ended's data-aware classification above.
+    case 'persuasion_resolved':
+      return data.tier > 0 ? 'good' : 'bad';
 
     default:
       return 'neutral';

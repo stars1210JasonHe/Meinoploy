@@ -129,6 +129,12 @@ export const DEFAULT_RULES = {
       tradeAcceptedTrust: 1,
       bigRentGrudge: 1,
       forceBuyVictimGrudge: 2,
+      // T1 (MT2-SP5 direction C2) — kept in lockstep with
+      // mods/dominion/rules.js's dialogue.weights block (drift-guard
+      // covered, see src/dialogue/memory.js DEFAULT_DIALOGUE_RULES.weights
+      // for the full field-by-field rationale).
+      persuasionRentFailGrudge: 1,
+      persuasionTradeFailTrust: 1,
     },
     caps: { grudge: 10, trust: 10 },
     decayPerSeason: { grudge: 1, trust: 1 },
@@ -160,6 +166,33 @@ export const DEFAULT_RULES = {
       trustThresholdPerPoint: 15,
       maxGrudgeShift: 150,
       maxTrustShift: 150,
+    },
+  },
+  // Persuasion system fallback (MT2-SP5 direction C2) — kept in lockstep
+  // with mods/dominion/rules.js's `persuasion` block AND
+  // src/persuasion/engine.js's DEFAULT_PERSUASION_RULES (drift-guard
+  // covered by persuasion.test.js, mirroring the dialogue precedent above).
+  persuasion: {
+    enabled: true,
+    maxTextLength: 200,
+    perOpponentSeamLimit: 1,
+    globalCapPerGame: 3,
+    charismaCheck: {
+      baseTier1Chance: 0.45,
+      baseTier2Chance: 0.15,
+      perPointDiffBonus: 0.02,
+      maxDiffBonus: 0.30,
+    },
+    rent: {
+      tierDiscounts: [0, 0.10, 0.20],
+    },
+    duel: {
+      lever: 'targetMinus',
+      tierAmounts: [0, 1, 2],
+      failureNextDuelPenalty: 1,
+    },
+    trade: {
+      tierShifts: [0, -25, -50],
     },
   },
   display: {

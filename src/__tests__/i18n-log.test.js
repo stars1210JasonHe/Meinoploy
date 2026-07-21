@@ -12,7 +12,7 @@
 //      runScenario/expectedWindow below for why this is a per-STEP
 //      reconstruction rather than a flattened full-history diff.
 //   2. zh COVERAGE + INTERPOLATION + NULL-PARITY: every one of events.js's
-//      42 registered event types has a zh formatter (or is a documented
+//      44 registered event types has a zh formatter (or is a documented
 //      always-null type); a handful of representative zh lines are asserted
 //      verbatim; every EN-null case (event-only types, conditional nulls)
 //      stays null in zh too; an unknown/future type falls back to the EN
@@ -331,9 +331,9 @@ describe('i18n-log — EN parity against the golden fixtures', () => {
 });
 
 describe('i18n-log — zh coverage', () => {
-  test('ZH_FORMATTERS has an entry for every one of the 42 registered engine event types', () => {
+  test('ZH_FORMATTERS has an entry for every one of the 44 registered engine event types', () => {
     const types = Object.keys(ENGINE_EVENTS);
-    expect(types.length).toBe(42);
+    expect(types.length).toBe(44);
     types.forEach((type) => {
       expect(_ZH_FORMATTERS).toHaveProperty(type);
       expect(typeof _ZH_FORMATTERS[type]).toBe('function');
