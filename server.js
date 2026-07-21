@@ -14,6 +14,20 @@
 // boardgame.io's storage never trims this log, so long matches leak server
 // memory AND make every reconnect fatter. See
 // src/server/log-capped-storage.js for the full measurement + rationale.
+//
+// MEINOPOLY_PERSUASION (default unset = disabled, `1` = opt back in): the
+// owner decided persuasion (MT2-SP5 direction C2 "舌战群儒") is DISABLED for
+// ALL online matches in v1 (docs/superpowers/specs/2026-07-18-dialogue-c-
+// design.md open question 4). App.js's own UI gate (hide the 求情/叫阵/游说
+// buttons when online) is presentation-only — an MCP seat is an online
+// socket client too, and could dispatch attemptPersuasion directly
+// regardless of what the browser shows. This process forces
+// RULES.persuasion.enabled = false at boot unless MEINOPOLY_PERSUASION=1, so
+// src/Game.js's attemptPersuasion move (which already returns INVALID_MOVE
+// whenever rules.enabled is false) rejects it for real, server-side. Local
+// hot-seat (the browser's own in-memory G, no server involved) and the sim
+// (a separate one-shot process that imports Game.js directly and never
+// boots this file) are UNTOUCHED — RULES is a per-process singleton.
 
 const { Server } = require('boardgame.io/server');
 const serve = require('koa-static');
@@ -23,6 +37,7 @@ const path = require('path');
 // file to CommonJS on the fly, so require() works normally here.
 const { Monopoly } = require('./src/Game');
 const { capMatchLog } = require('./src/server/log-capped-storage');
+const { RULES } = require('./mods/active-rules');
 
 // Boot-time mod/map activation (MT2-SP3, spec §0): one mod+map per server
 // process; the browser client aligns to G.activeModId/activeMapId on first sync.
@@ -32,6 +47,18 @@ if (process.env.MOD) {
   console.log(`Active mod: ${r.modId}  map: ${r.mapId === null ? '(mod default board)' : r.mapId}`);
 } else if (process.env.MAP) {
   throw new Error('MAP= requires MOD= (a map id only means something within a mod)');
+}
+
+// Persuasion online-disable (MT2-SP5 direction C2, T4 — see header doc above
+// for the full rationale). Placed AFTER the MOD=/MAP= activation block:
+// resolveModMap's setActiveMod clears+reassigns EVERY RULES.* key (including
+// .persuasion) from the target mod's own rules object, so running this gate
+// any earlier would just get overwritten the moment a mod switch reseeds
+// RULES — this line always runs LAST, once, at boot, whether or not MOD= was
+// passed (RULES is already populated from the default dominion import even
+// with no MOD= env, so the gate still applies to that default path too).
+if (process.env.MEINOPOLY_PERSUASION !== '1') {
+  RULES.persuasion.enabled = false;
 }
 
 const server = Server({
