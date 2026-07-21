@@ -160,9 +160,17 @@ Decomposed 2026-07-06 into: SP1 foundation (events+seats) → SP2 duel/对战 �
 > for the whole repo. OWNER SIGN-OFF at acceptance: grudge stacking magnitude (one
 > chain can +6, cap 10), OFF silences diaries/banter + MAJOR==ALL for them, every
 > trade builds trust (no fairness data on the event), $3 cap is per-game semantics.
-- **Other mechanisms (TBD — to discuss):** alliances/voting, world events; dialogue
-  direction C (谈判有牙 — persuasion with bounded gameplay modifiers) queued as the
-  next MT2 wave after B's acceptance.
+> **OWNER ACCEPTANCE PASSED 2026-07-21 ("宿怨手感可以 签字都过")** — all 6 sign-offs
+> confirmed in a live bot-game playtest. B is closed; C unblocked.
+- **MT2-SP5 — Dialogue direction C: OWNER DECISIONS LOCKED 2026-07-21.** Direction =
+  **C2 舌战群儒** (one PersuasionEngine, three seams: 求情 rent / 叫阵 duel / 游说 trade;
+  C1 rent-mercy ships first as its milestone). Failure-costs-attitude ACCEPTED as the
+  anti-spam lever (求情 fail → grudge+1, 叫阵 fail → next-duel −1, 游说 fail → trust−1).
+  Bot pleas to the human: OWNER-AS-JUDGE (free accept/reject buttons, no LLM spend).
+  Online v1: persuasion DISABLED (local+bots first). Design: docs/superpowers/specs/
+  2026-07-18-dialogue-c-design.md. IMPLEMENTATION IN PROGRESS.
+- **Other mechanisms (TBD — to discuss):** alliances/voting, world events; C3 alliance
+  whispers deferred to the alliances wave.
 
 ## Next wave (owner feedback 2026-07-11, experience-first)
 > **Experience wave: DONE 2026-07-12 (main `6bc10dc`, 10 commits, 1128 unit + 30 E2E).**
@@ -377,6 +385,15 @@ Decomposed 2026-07-06 into: SP1 foundation (events+seats) → SP2 duel/对战 �
 > deltalog beside it is ~130-230B); reconnect `sync` carries an UNBOUNDED server-side log
 > (104KB / 510 entries observed — and leave+rejoin is the A1 workaround); client steady state
 > ~140KB/s innerHTML re-parse + ~4.3k regex calls/s (UI unkeyed outside the turnbox).
+> **Sync-slim A-1 MERGED 2026-07-21 (976497e)**: server-side per-match action log capped
+> via in-place storage patch (src/server/log-capped-storage.js; InMemory isn't exported so
+> the constructed server.db is patched at its public method boundary, loud-fail on a bgio
+> bump). `MEINOPOLY_MATCH_LOG_CAP` (default 200, 0=legacy unlimited). Live before/after
+> proof: uncapped sync logLen 380 → capped exactly 200. +13 tests (1764 unit / 49 E2E /
+> build green). A-2 (strip G.events from update frames) DESIGNED but DEFERRED — after A-1
+> every frame is bounded; A-2's ~22KB/frame saving only matters for high-latency play and
+> costs a full wave across 5 consumers (anim/log/dialogue/MCP/save). Design + consumer
+> inventory: docs/superpowers/specs/2026-07-21-online-sync-slim-design.md.
 
 1. Near-term: entry-UI polish (small, visible).
 2. Then pick ONE major task to design first. Task 1 (create-mod engine) compounds content velocity;
