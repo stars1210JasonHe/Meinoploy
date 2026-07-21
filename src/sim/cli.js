@@ -19,6 +19,18 @@
 //                    DEFAULT_POLICY — a no-op unless the active mod has
 //                    RULES.duel.enabled). 'always' | 'strength' also accepted
 //                    (see src/sim/bot.js DEFAULT_POLICY.duelPolicy).
+//   --persuasion-policy p  persuasionPolicy (MT2-SP5 direction C2) for BOTH
+//                    contestants in every tournament this run drives ('never'
+//                    default, matching bot.js's DEFAULT_POLICY — same
+//                    default-off convention as --duel-policy). 'always' |
+//                    'valueful' also accepted (see src/sim/bot.js
+//                    DEFAULT_POLICY.persuasionPolicy). Unlike --duel-policy,
+//                    this never needs to force a RULES flag on — every mod's
+//                    RULES.persuasion.enabled already defaults to true.
+//                    Only the rent-refund (求情) and — when --duel-policy
+//                    also makes a bot a challenger — duel-taunt (叫阵) seams
+//                    are reachable; trade lobby (游说) is unreachable (the
+//                    sim bot never proposes trades).
 //
 // Prints, for each fairness question the map supports:
 //   1. best-fit vs worst-fit CHARACTER win% (both maps)
@@ -57,6 +69,7 @@ function parseArgs(argv) {
     chars: null,
     strategy: 'camper',
     duelPolicy: 'never',
+    persuasionPolicy: 'never',
     seats: 8, // melee seat cap
   };
   for (let i = 0; i < argv.length; i++) {
@@ -73,6 +86,7 @@ function parseArgs(argv) {
       case 'chars': out.chars = val.split(',').map(s => s.trim()); i++; break;
       case 'strategy': out.strategy = val; i++; break;
       case 'duel-policy': out.duelPolicy = val; i++; break;
+      case 'persuasion-policy': out.persuasionPolicy = val; i++; break;
       case 'seats': out.seats = parseInt(val, 10); i++; break;
       default: break;
     }
@@ -197,6 +211,18 @@ function main() {
     console.log(`Note: --duel-policy=${args.duelPolicy} forces RULES.duel.enabled=true for this run.`);
   }
 
+  // Same fail-loud discipline as --duel-policy above (MT2-SP5 direction C2,
+  // T4) — a typo'd --persuasion-policy must not silently fall through to
+  // bot.js's decideMoves treating it as an implicit 'never' (persuasionPolicy
+  // is checked with strict === comparisons throughout bot.js, so an unknown
+  // string WOULD silently behave as 'never' rather than erroring — catch it
+  // here instead of producing a misleading run).
+  const VALID_PERSUASION_POLICIES = ['never', 'always', 'valueful'];
+  if (!VALID_PERSUASION_POLICIES.includes(args.persuasionPolicy)) {
+    console.error(`Unknown --persuasion-policy "${args.persuasionPolicy}". Known: ${VALID_PERSUASION_POLICIES.join(', ')}`);
+    process.exit(1);
+  }
+
   console.log('Mod Balance Simulator');
   console.log(`mod=${mod.id} (${mod.name})  map=${resolved.label}  games=${args.games}  baseSeed=${args.seed}  maxTurns=${args.maxTurns}`);
 
@@ -212,7 +238,7 @@ function main() {
       world, mapJson, modId,
       maxTurns: args.maxTurns,
       maxSeats: args.seats,
-      policy: { routeStrategy: isAtlas ? args.strategy : 'camper', duelPolicy: args.duelPolicy },
+      policy: { routeStrategy: isAtlas ? args.strategy : 'camper', duelPolicy: args.duelPolicy, persuasionPolicy: args.persuasionPolicy },
     });
     printMelee(melee, charNameById);
   }
@@ -230,8 +256,8 @@ function main() {
   const charResult = runTournament({
     world, mapJson, modId,
     contestants: [
-      { label: `best-fit:${bestId}`, charId: bestId, policy: { routeStrategy: charStrategy, duelPolicy: args.duelPolicy } },
-      { label: `worst-fit:${worstId}`, charId: worstId, policy: { routeStrategy: charStrategy, duelPolicy: args.duelPolicy } },
+      { label: `best-fit:${bestId}`, charId: bestId, policy: { routeStrategy: charStrategy, duelPolicy: args.duelPolicy, persuasionPolicy: args.persuasionPolicy } },
+      { label: `worst-fit:${worstId}`, charId: worstId, policy: { routeStrategy: charStrategy, duelPolicy: args.duelPolicy, persuasionPolicy: args.persuasionPolicy } },
     ],
     games: args.games,
     baseSeed: args.seed,
@@ -256,7 +282,7 @@ function main() {
       charB: charY,
       strategyA: 'camper',
       strategyB: 'tourer',
-      policyBase: { duelPolicy: args.duelPolicy },
+      policyBase: { duelPolicy: args.duelPolicy, persuasionPolicy: args.persuasionPolicy },
       games: args.games,
       baseSeed: args.seed,
       maxTurns: args.maxTurns,

@@ -1,4 +1,8 @@
-import { decideMoves, chooseRoute, upgradeableSpaces, DEFAULT_POLICY } from '../sim/bot';
+import {
+  decideMoves, chooseRoute, upgradeableSpaces, DEFAULT_POLICY,
+  VALUEFUL_MIN_EXPECTED_RENT_GAIN, VALUEFUL_MIN_DUEL_CHANCE,
+} from '../sim/bot';
+import { RULES } from '../../mods/active-rules';
 
 // --- Crafted G builders --------------------------------------------------------
 // Minimal G states shaped like Game.js setup() output — only the fields the bot
@@ -358,5 +362,156 @@ describe('DEFAULT_POLICY', () => {
       auctionMaxFraction: expect.any(Number),
       routeStrategy: expect.any(String),
     });
+  });
+
+  test("defaults persuasionPolicy to 'never' (existing sim runs are byte-identical unless overridden)", () => {
+    expect(DEFAULT_POLICY.persuasionPolicy).toBe('never');
+  });
+});
+
+// --- persuasion (MT2-SP5 direction C2, T4) -------------------------------------
+// Keyless-only (score is never passed) — mirrors the duel describe blocks above:
+// G is hand-crafted to the exact shape canAttempt/decideMoves read.
+describe('decideMoves — persuasion: rent refund window (求情)', () => {
+  function rentG(overrides) {
+    const G = baseG({ hasRolled: true, phase: 'play', totalTurns: 5 });
+    G.players[0].character = { stats: { charisma: 5 } };
+    G.players[1].character = { stats: { charisma: 5 } };
+    G.lastRentPayment = { payerSeat: '0', ownerSeat: '1', amount: 1000, turn: 5 };
+    return Object.assign(G, overrides || {});
+  }
+
+  test("'never' (default) never attempts — falls straight to endTurn", () => {
+    const G = rentG();
+    expect(decideMoves(G, ctx0, '0', {})).toEqual([['endTurn']]);
+  });
+
+  test("'always' attempts as seat '0' (the payer) targeting the owner, with empty flavor text", () => {
+    const G = rentG();
+    expect(decideMoves(G, ctx0, '0', { persuasionPolicy: 'always' }))
+      .toEqual([['attemptPersuasion', 'rent', '1', '']]);
+  });
+
+  test("'always' does NOT attempt for a seat that isn't the payer", () => {
+    const G = rentG({ hasRolled: true }); // acting seat '1' is the OWNER, not the payer
+    G.players[1].money = 1500;
+    const ctx1 = { currentPlayer: '1' };
+    expect(decideMoves(G, ctx1, '1', { persuasionPolicy: 'always' })).toEqual([['endTurn']]);
+  });
+
+  test("'always' does NOT attempt once the window has closed (wrong turn — G.totalTurns advanced)", () => {
+    const G = rentG({ totalTurns: 6 }); // lastRentPayment.turn (5) !== G.totalTurns (6)
+    expect(decideMoves(G, ctx0, '0', { persuasionPolicy: 'always' })).toEqual([['endTurn']]);
+  });
+
+  test("'always' does NOT attempt once accounting is exhausted (already attempted this pair)", () => {
+    const G = rentG({ persuasion: { attempts: { rent: { 0: { 1: 1 } }, duel: {}, trade: {} }, globalUsed: { 0: 1 } } });
+    expect(decideMoves(G, ctx0, '0', { persuasionPolicy: 'always' })).toEqual([['endTurn']]);
+  });
+
+  test("'always' does NOT attempt when RULES.persuasion.enabled is false (respects the flag, not hand-mirrored)", () => {
+    const saved = RULES.persuasion.enabled;
+    RULES.persuasion.enabled = false;
+    try {
+      const G = rentG();
+      expect(decideMoves(G, ctx0, '0', { persuasionPolicy: 'always' })).toEqual([['endTurn']]);
+    } finally {
+      RULES.persuasion.enabled = saved;
+    }
+  });
+
+  test("'valueful' attempts when expected refund gain clears the bar (large rent paid)", () => {
+    // expectation = 1000 * tierRefundPct[1](0.10) * P(tier>=1 | equal charisma, 0.60) = 60 > bar
+    const G = rentG({ lastRentPayment: { payerSeat: '0', ownerSeat: '1', amount: 1000, turn: 5 } });
+    expect(RULES.persuasion.rent.tierRefundPct[1] * 1000 * 0.60).toBeGreaterThan(VALUEFUL_MIN_EXPECTED_RENT_GAIN);
+    expect(decideMoves(G, ctx0, '0', { persuasionPolicy: 'valueful' }))
+      .toEqual([['attemptPersuasion', 'rent', '1', '']]);
+  });
+
+  test("'valueful' does NOT attempt when expected gain is below the bar (small rent paid)", () => {
+    const G = rentG({ lastRentPayment: { payerSeat: '0', ownerSeat: '1', amount: 100, turn: 5 } });
+    expect(RULES.persuasion.rent.tierRefundPct[1] * 100 * 0.60).toBeLessThan(VALUEFUL_MIN_EXPECTED_RENT_GAIN);
+    expect(decideMoves(G, ctx0, '0', { persuasionPolicy: 'valueful' })).toEqual([['endTurn']]);
+  });
+});
+
+describe('decideMoves — persuasion: duel taunt window (叫阵), response phase only', () => {
+  function responsePersuasionG(challengerCharisma, ownerCharisma, overrides) {
+    const G = baseG({ hasRolled: true, phase: 'play', totalTurns: 5 });
+    G.duel = { phase: 'response', propertyId: 1, ownerId: '1', challengerId: '0', rent: 50 };
+    G.turnPhase = 'duel';
+    G.players[0].character = { stats: { stamina: 0, luck: 0, charisma: challengerCharisma } };
+    G.players[1].character = { stats: { stamina: 0, luck: 0, charisma: ownerCharisma } };
+    return Object.assign(G, overrides || {});
+  }
+
+  test("'never' skips the taunt window entirely — normal strength-based response", () => {
+    const G = responsePersuasionG(5, 5);
+    G.players[0].character.stats.stamina = 3;
+    G.players[1].character.stats.stamina = 6;
+    expect(decideMoves(G, ctx0, '0', { persuasionPolicy: 'never', duelPolicy: 'always' }))
+      .toEqual([['respondDuel']]);
+  });
+
+  test("'always' attempts the taunt first, targeting the owner, before any response is dispatched", () => {
+    const G = responsePersuasionG(5, 5);
+    expect(decideMoves(G, ctx0, '0', { persuasionPolicy: 'always', duelPolicy: 'always' }))
+      .toEqual([['attemptPersuasion', 'duel', '1', '']]);
+  });
+
+  test("'always' falls through to the normal response once the taunt accounting is exhausted", () => {
+    const G = responsePersuasionG(5, 5, {
+      persuasion: { attempts: { rent: {}, duel: { 0: { 1: 1 } }, trade: {} }, globalUsed: { 0: 1 } },
+    });
+    G.players[0].character.stats.stamina = 8; // challenger stronger -> defender declines
+    G.players[1].character.stats.stamina = 1;
+    expect(decideMoves(G, ctx0, '0', { persuasionPolicy: 'always', duelPolicy: 'always' }))
+      .toEqual([['declineDuel']]);
+  });
+
+  test("'always' does NOT attempt when RULES.persuasion.enabled is false", () => {
+    const saved = RULES.persuasion.enabled;
+    RULES.persuasion.enabled = false;
+    try {
+      const G = responsePersuasionG(5, 5);
+      G.players[0].character.stats.stamina = 8; // challenger stronger -> defender declines
+      G.players[1].character.stats.stamina = 1;
+      expect(decideMoves(G, ctx0, '0', { persuasionPolicy: 'always', duelPolicy: 'always' }))
+        .toEqual([['declineDuel']]);
+    } finally {
+      RULES.persuasion.enabled = saved;
+    }
+  });
+
+  test("'valueful' attempts when P(tier>=1) clears the chance bar (favorable charisma edge)", () => {
+    const G = responsePersuasionG(10, 5); // diff +5 -> chance 0.80, well above the 0.5 bar
+    expect(decideMoves(G, ctx0, '0', { persuasionPolicy: 'valueful', duelPolicy: 'always' }))
+      .toEqual([['attemptPersuasion', 'duel', '1', '']]);
+  });
+
+  test("'valueful' does NOT attempt when P(tier>=1) is below the chance bar (unfavorable charisma edge)", () => {
+    const G = responsePersuasionG(0, 10); // diff -10 -> chance 0.25, below the 0.5 bar
+    G.players[0].character.stats.stamina = 8; // challenger stronger -> defender declines
+    G.players[1].character.stats.stamina = 1;
+    expect(decideMoves(G, ctx0, '0', { persuasionPolicy: 'valueful', duelPolicy: 'always' }))
+      .toEqual([['declineDuel']]);
+  });
+
+  test('VALUEFUL_MIN_DUEL_CHANCE and VALUEFUL_MIN_EXPECTED_RENT_GAIN are exported policy constants', () => {
+    expect(VALUEFUL_MIN_DUEL_CHANCE).toEqual(expect.any(Number));
+    expect(VALUEFUL_MIN_EXPECTED_RENT_GAIN).toEqual(expect.any(Number));
+  });
+
+  test('the taunt window never opens during the OFFER sub-phase (only response)', () => {
+    const G = baseG({ hasRolled: true, phase: 'play', totalTurns: 5 });
+    G.duel = { phase: 'offer', propertyId: 1, ownerId: '1', challengerId: '0', rent: 50 };
+    G.turnPhase = 'duel';
+    G.players[0].character = { stats: { stamina: 0, luck: 0, charisma: 9 } };
+    G.players[1].character = { stats: { stamina: 0, luck: 0, charisma: 0 } };
+    G.players[0].lastDuelTurn = null;
+    // duelPolicy 'always' still wins the OFFER decision itself (initiateDuel) —
+    // persuasion has no say here, proving the taunt logic is response-only.
+    expect(decideMoves(G, ctx0, '0', { persuasionPolicy: 'always', duelPolicy: 'always' }))
+      .toEqual([['initiateDuel']]);
   });
 });

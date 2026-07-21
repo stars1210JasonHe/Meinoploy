@@ -17,6 +17,7 @@
 import { routeChoices } from '../atlas-movement';
 import { RULES } from '../../mods/active-rules';
 import { isDuelCooldownBlocked } from '../events';
+import { canAttempt } from '../persuasion/engine';
 
 // Default greedy-developer policy. Every knob here is overridable per contestant
 // via the `policy` arg so tournaments can vary aggression without code edits.
@@ -48,7 +49,102 @@ export const DEFAULT_POLICY = {
   // NOT gated by this knob (see duelDecision below): every policy value
   // must still answer sensibly when acting as the defender.
   duelPolicy: 'never',
+  // MT2-SP5 direction C2 "舌战群儒", T4: bot-side attempt policy for the
+  // persuasion seams the sim bot's own move walk ACTUALLY reaches —
+  //   - rent refund (求情): rent auto-pays as part of movement resolution
+  //     (Game.js handleLanding -> payRentAmount), zero bot move needed to
+  //     open the window; decideMoves just has to notice G.lastRentPayment on
+  //     the next call and decide whether to spend the attempt.
+  //   - duel taunt (叫阵): only reachable when duelPolicy makes THIS bot the
+  //     challenger who initiates (duelPolicy 'never' never opens this
+  //     window for itself) — see duelDecision's 'response' branch.
+  //   - trade lobby (游说): NOT implemented — the sim bot never calls
+  //     proposeTrade at all (see decideMoves' priority list), so this seam
+  //     is structurally unreachable and forcing it would be pure fiction.
+  // 'never'    never attempts (default — existing sim runs are byte-
+  //            identical unless a run opts in via --persuasion-policy,
+  //            same convention as duelPolicy's own default-off).
+  // 'always'   attempts whenever canAttempt allows.
+  // 'valueful' attempts only when the estimated expected gain clears a
+  //            small, fixed, RULES-INDEPENDENT bar (see
+  //            VALUEFUL_MIN_EXPECTED_RENT_GAIN / VALUEFUL_MIN_DUEL_CHANCE
+  //            below — bot-policy constants, not read from RULES).
+  persuasionPolicy: 'never',
 };
+
+// === Persuasion (MT2-SP5 direction C2, T4) ===================================
+// Keyless path ONLY — the sim never wires an LLM judge, so `score` is always
+// omitted on every attemptPersuasion dispatch below (same keyless-only
+// posture the whole sim already has for every other RNG-touching decision:
+// deterministic via ctx.random, never an external call).
+
+// 'valueful' bars — bot-policy constants, deliberately NOT read from RULES
+// (the point is a fixed, portable heuristic the bot applies regardless of
+// which mod's RULES.persuasion values are active).
+export const VALUEFUL_MIN_EXPECTED_RENT_GAIN = 15; // dollars
+export const VALUEFUL_MIN_DUEL_CHANCE = 0.5; // P(tier >= 1)
+
+// P(tier >= 1) under the SAME keyless charisma-check cutpoints
+// src/persuasion/engine.js's rollTier itself draws against — mirrors that
+// math exactly WITHOUT consuming an rng draw (this is an ESTIMATE the bot
+// uses to decide whether to attempt at all; the real draw, if any, happens
+// engine-side inside rollTier once the move is actually dispatched).
+function tier1PlusChance(actorCharisma, targetCharisma) {
+  const cc = RULES.persuasion.charismaCheck;
+  const diff = (actorCharisma || 0) - (targetCharisma || 0);
+  const edge = Math.min(cc.maxDiffBonus, Math.max(-cc.maxDiffBonus, diff * cc.perPointDiffBonus));
+  const tier1ChanceRaw = Math.min(1, Math.max(0, cc.baseTier1Chance + edge));
+  const tier2Chance = Math.min(1, Math.max(0, cc.baseTier2Chance + edge));
+  const tier2Cut = Math.min(1, Math.max(0, 1 - tier2Chance));
+  const tier1Cut = Math.min(tier2Cut, Math.max(0, tier2Cut - tier1ChanceRaw));
+  return 1 - tier1Cut; // P(r >= tier1Cut) = P(tier is 1 or 2)
+}
+
+function charismaOf(G, seat) {
+  const p = G.players[parseInt(seat)];
+  return p && p.character ? p.character.stats.charisma : 0;
+}
+
+// 求情 (rent refund) attempt decision. Returns a move tuple or null. Reuses
+// canAttempt directly (not hand-mirrored) — it is already the exact
+// predicate src/Game.js's attemptPersuasion move dispatches through
+// (window + accounting caps + RULES.persuasion.enabled), so this can never
+// dispatch an INVALID_MOVE the runner would have to silently absorb.
+function rentPersuasionMove(G, ctx, playerID, pol) {
+  if (pol.persuasionPolicy === 'never') return null;
+  const lrp = G.lastRentPayment;
+  if (!lrp || String(lrp.payerSeat) !== String(playerID)) return null;
+  if (!canAttempt(G, ctx, 'rent', playerID, lrp.ownerSeat, RULES).ok) return null;
+  if (pol.persuasionPolicy === 'valueful') {
+    // Expectation = (already-paid amount) x (tier-1 refund fraction) x
+    // P(tier >= 1) — deliberately uses the TIER-1 (not tier-2) refund
+    // fraction so 'valueful' never overstates its own expected value.
+    const tier1Pct = RULES.persuasion.rent.tierRefundPct[1] || 0;
+    const chance = tier1PlusChance(charismaOf(G, playerID), charismaOf(G, lrp.ownerSeat));
+    const expectedGain = lrp.amount * tier1Pct * chance;
+    if (expectedGain <= VALUEFUL_MIN_EXPECTED_RENT_GAIN) return null;
+  }
+  return [['attemptPersuasion', 'rent', String(lrp.ownerSeat), '']];
+}
+
+// 叫阵 (duel taunt) attempt decision, called from duelDecision's 'response'
+// branch (the challenger's OWN decideMoves call — ctx.currentPlayer stays
+// the challenger for the whole duel, see duelDecision's header). Returns a
+// move tuple or null.
+function duelPersuasionMove(G, ctx, duel, pol) {
+  if (pol.persuasionPolicy === 'never') return null;
+  if (!canAttempt(G, ctx, 'duel', duel.challengerId, duel.ownerId, RULES).ok) return null;
+  if (pol.persuasionPolicy === 'valueful') {
+    // No clean dollar EV exists for a dice-total shift (unlike rent's direct
+    // refund), so 'valueful' here uses a simple, honest probability bar
+    // instead of a fabricated dollar figure: attempt only when the
+    // charisma-check gives at least a coin-flip's chance of ANY beneficial
+    // tier.
+    const chance = tier1PlusChance(charismaOf(G, duel.challengerId), charismaOf(G, duel.ownerId));
+    if (chance < VALUEFUL_MIN_DUEL_CHANCE) return null;
+  }
+  return [['attemptPersuasion', 'duel', String(duel.ownerId), '']];
+}
 
 // Merge a partial policy over the defaults (shallow — all keys are scalars).
 export function resolvePolicy(policy) {
@@ -184,10 +280,15 @@ export function chooseRoute(G, ctx, choices, strategy) {
 //   1. jail (not yet rolled): pay fine if affordable+policy, else roll to escape
 //   2. roll: rollOnly+commitRoute (atlas) or rollDice (loop), once per turn
 //   3. resolve blocking card: acceptCard
-//   4. resolve duel: challenger offer (payRent/initiateDuel per duelPolicy) or
-//      owner response (respondDuel/declineDuel by strength, policy-independent)
+//   4. resolve duel: challenger offer (payRent/initiateDuel per duelPolicy), or
+//      — during the 'response' sub-phase — a persuasion taunt attempt per
+//      persuasionPolicy (T4), THEN owner response (respondDuel/declineDuel by
+//      strength, policy-independent) once that window closes
 //   5. resolve auction: bid up to cap, else passAuction
 //   6. resolve buy decision: buyProperty if affordable above buffer, else passProperty
+//   6.5 persuasion: rent-refund attempt per persuasionPolicy (T4), once per
+//      turn, right after rolling — before build so a successful refund can
+//      still feed that same turn's build budget
 //   7. build: upgrade cheapest eligible full-group space while buffer allows
 //   8. survive: mortgage lowest-value holdings if money < 0 (shouldn't normally
 //      happen post-resolution, but covers a card/tax that dipped us negative)
@@ -208,9 +309,10 @@ export function decideMoves(G, ctx, playerID, policy) {
   // duelDecision derives the acting player directly from G.duel.challengerId/
   // ownerId rather than the `playerID` argument (mirrors auctionDecision's
   // acting-bidder derivation below) — correct regardless of which seat the
-  // runner's actingSeat computation currently points at.
+  // runner's actingSeat computation currently points at. `ctx` is threaded
+  // through (T4) purely for duelPersuasionMove's canAttempt call.
   if (G.duel) {
-    return duelDecision(G, pol);
+    return duelDecision(G, ctx, pol);
   }
   if (G.auction) {
     return auctionDecision(G, ctx, pol);
@@ -231,6 +333,14 @@ export function decideMoves(G, ctx, playerID, policy) {
   if (!G.hasRolled) {
     return rollMoves(G, ctx, atlas, pol);
   }
+
+  // --- 6.5: persuasion (rent refund window, T4). A no-op (null) for
+  // persuasionPolicy 'never' (DEFAULT_POLICY) or once the window's own
+  // accounting closes it (already attempted / cap hit) — the game then falls
+  // straight through to build/survive/endTurn exactly as before this feature
+  // existed, so 'never' runs stay byte-identical to pre-T4 behavior.
+  const rentPersuasion = rentPersuasionMove(G, ctx, playerID, pol);
+  if (rentPersuasion) return rentPersuasion;
 
   // --- 6: build. One upgrade per decideMoves call so the runner re-reads cash.
   const builds = upgradeableSpaces(G, playerID);
@@ -307,8 +417,12 @@ function auctionDecision(G, ctx, pol) {
 // Both branches derive their actors from G.duel itself (never from a `playerID`
 // argument) so the decision is correct regardless of which seat the runner
 // happens to be iterating — same reasoning as auctionDecision above deriving the
-// acting bidder from G.auction rather than trusting the caller's seat.
-function duelDecision(G, pol) {
+// acting bidder from G.auction rather than trusting the caller's seat. `ctx`
+// (T4) is threaded through ONLY for duelPersuasionMove's canAttempt call —
+// canAttempt itself never reads it today, but the real ctx is passed through
+// anyway rather than a stub, matching every other decideMoves helper's
+// signature discipline.
+function duelDecision(G, ctx, pol) {
   const duel = G.duel;
   if (duel.phase === 'offer') {
     if (pol.duelPolicy === 'never') return [['payRent']];
@@ -325,10 +439,21 @@ function duelDecision(G, pol) {
     if (chalStrength > ownerStrength && !duelCooldownBlocked(G, duel)) return [['initiateDuel']];
     return [['payRent']];
   }
-  // phase 'response': the owner (defender) decides. Policy-independent by spec —
-  // every duelPolicy value ('never' included, since a 'never' bot never
-  // INITIATES but can still be challenged as an owner) answers with the same
-  // strength rule: fight when at least as strong as the challenger (matches the
+  // phase 'response': persuasion (T4) FIRST — this is genuinely the
+  // CHALLENGER's own decideMoves call (ctx.currentPlayer, and therefore
+  // `pol`, stays the challenger's for the whole duel — see this function's
+  // header), so `pol.persuasionPolicy` here means "should THIS challenger
+  // taunt before the owner responds". Returns the taunt move once; the
+  // runner dispatches it, canAttempt's own accounting closes the window, and
+  // the VERY NEXT call (same G.duel, same ctx.currentPlayer) falls through
+  // to the strength-based response below — so a policy that declines (or a
+  // window that's already exhausted) never adds an extra no-op call.
+  const persuasion = duelPersuasionMove(G, ctx, duel, pol);
+  if (persuasion) return persuasion;
+  // The owner (defender) decides. Policy-independent by spec — every
+  // duelPolicy value ('never' included, since a 'never' bot never INITIATES
+  // but can still be challenged as an owner) answers with the same strength
+  // rule: fight when at least as strong as the challenger (matches the
   // engine's tieGoesToDefender default), else decline.
   const chalStrength = duelStrength(G, duel.challengerId);
   const defStrength = duelStrength(G, duel.ownerId);
