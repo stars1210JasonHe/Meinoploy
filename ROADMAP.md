@@ -352,6 +352,32 @@ Decomposed 2026-07-06 into: SP1 foundation (events+seats) → SP2 duel/对战 �
 > import error) and the MCP stdio smoke suite. Gates now run with node 20.19 pinned
 > per-process via PATH. If node 22 becomes the machine default, server.js needs a loader
 > migration (ticket).
+## Ticket wave (2026-07-18..21, autonomous): terra cards + roster balance + A1 probe
+> **Terra-titans card decks: DONE 2026-07-18 night (feat/terra-cards, main 411fc4b).** 15+15
+> hand-authored historical-conquest cards wired into `world.cards` (the real deck path — the
+> old mods/terra-titans/cards.js was an unimported decoy); moveTo hub targets resolved via
+> expandWorld at load; drift-oracle reseed adversarially cleared. 1749 unit + 49 E2E.
+> **Terra-titans roster imbalance: FIXED 2026-07-21 (feat/terra-roster-balance, 1ea3fd9).**
+> Root-caused by a driver-attribution probe over the full sim event log (NOT guessed):
+> Chandragupta Maurya + Mansa Musa are the roster's ONLY idealist-passive leaders, and
+> idealist's flat +$50/hub salary bonus was the only economic channel splitting them from the
+> field (~$813-825/game guaranteed vs exactly 0.0 for all 14 others; hub-crossing frequency
+> uniform across the roster, ruling out movement). Terra's globe crosses a hub ~every 9 turns
+> vs Dominion's one GO per lap, so the same value that is fine on Mira Dawnlight compounds
+> here. Fix: mod-scoped `passives.idealist.goBonus: 10` override in mods/terra-titans/rules.js
+> (Dominion untouched; no stat changes, identities intact). Swept 50/25/20/15/10/5/0 — 10 is
+> the smallest value clearing both flags on 5 tuning seeds, then adversarially re-verified on
+> 2 FRESH seeds (7, 11: zero flags, 1v1 + strategy gates PASS). +2 tests (stat-budget parity,
+> override scoping); 1751 unit green.
+> **A1 browser-freeze probe: NOT REPRODUCED 2026-07-21 (ticket stays open, no fix attempted).**
+> Purpose-built out-of-process harness (Web Worker heartbeat + native-call in-flight markers →
+> HTTP collector, scratchpad-only): 3 valid soak configs, ~66 min, ~11.5k driven actions, zero
+> freezes, steady state healthy (flat DOM/heap, no long tasks). Measured side-findings worth
+> tickets: every online `update` re-sends the full ~30KB state (74% = the 200-event log; the
+> deltalog beside it is ~130-230B); reconnect `sync` carries an UNBOUNDED server-side log
+> (104KB / 510 entries observed — and leave+rejoin is the A1 workaround); client steady state
+> ~140KB/s innerHTML re-parse + ~4.3k regex calls/s (UI unkeyed outside the turnbox).
+
 1. Near-term: entry-UI polish (small, visible).
 2. Then pick ONE major task to design first. Task 1 (create-mod engine) compounds content velocity;
    Task 2 (API/MCP + dialogue) deepens the play experience. Each gets its own design pass (likely a
