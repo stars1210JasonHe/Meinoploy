@@ -168,7 +168,25 @@ Decomposed 2026-07-06 into: SP1 foundation (events+seats) → SP2 duel/对战 �
   anti-spam lever (求情 fail → grudge+1, 叫阵 fail → next-duel −1, 游说 fail → trust−1).
   Bot pleas to the human: OWNER-AS-JUDGE (free accept/reject buttons, no LLM spend).
   Online v1: persuasion DISABLED (local+bots first). Design: docs/superpowers/specs/
-  2026-07-18-dialogue-c-design.md. IMPLEMENTATION IN PROGRESS.
+  2026-07-18-dialogue-c-design.md.
+  **C2 SHIPPED 2026-07-21 night (feat/dialogue-c2, 8 commits 29a592e..0a213cd + a test-timeout
+  fix; 2006 unit / 53 E2E / build green).** T1 engine move+accounting (ONE attemptPersuasion,
+  per-opponent-per-seam once + global 3/game, keyless ctx.random charisma curve, failure costs
+  via event→ledger); T1.5 rent seam = REFUND model (owner pick 追回制 — rent pays atomically,
+  same-turn refund window at the payRentAmount choke point, uniform across mods); T2 judge
+  (data-fenced prompt w/ self-closing-fence neutralization, strict {score} JSON, engine-side
+  tierBands, attitude clamp off B's grudge glyph tiers, $3 budget via _callApi, null→keyless);
+  T3 three-seam UI + bot plea popup (owner-as-judge, auto-reject timeout) + online/enabled
+  gating; T3.5 duel-taunt hold vs bot responders (driver paused during the challenger's taunt
+  window — REAL E2E caught a proceed-path soft-lock pre-merge, 3rd time the real-execution
+  mandate paid); T4 server-side online disable (MEINOPOLY_PERSUASION=1 escape hatch — client
+  gates aren't enforcement, MCP seats are online clients), sim persuasion-policy bots
+  (never/always/valueful) + measured fairness gate (both mods × 2 seeds × on/off: ZERO flags,
+  NO charisma double-dip — deltas bidirectional inside CI), MCP attempt_persuasion tool +
+  legal-moves + digest (deliberately NO score field on the tool — an external score would
+  bypass the client-side attitude clamp). KNOWN FOLLOW-UPS: engine move's score arg is
+  online-reachable if persuasion is ever server-enabled (re-review then); renderManage bot-gate
+  during taunt hold untouched (orthogonal); sim trade seam unreachable (sim bots never propose).
 - **Other mechanisms (TBD — to discuss):** alliances/voting, world events; C3 alliance
   whispers deferred to the alliances wave.
 

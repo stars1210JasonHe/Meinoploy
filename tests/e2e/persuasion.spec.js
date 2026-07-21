@@ -179,7 +179,14 @@ async function stepTurnHuntingRentWindow(page) {
 
 test.describe('Rent-mercy (求情, keyless, MT2-SP5 direction C2)', () => {
   test('button appears in the window, hidden when online-gated, submits within tier bounds, gone after use', async ({ page }) => {
-    test.setTimeout(480000);
+    // 12min, not 8: the duel hunt's wall time is dice-luck × WORKER CONTENTION.
+    // Measured 2026-07-21: solo this test passes in ~4.5m, but in the full
+    // 5-worker suite the same hunt shares CPU with 4 other chromiums and one
+    // run blew through 480s mid-hunt (timed out on a perfectly normal bot
+    // route-pick frame — rerun solo passed first try). The isolated-port T3.5
+    // runs measured up to ~10.7m for this describe block, so 720s per test
+    // gives the worst measured case honest headroom instead of flaking.
+    test.setTimeout(720000);
     const MAX_TURNS = 150;
     const pageErrors = [];
     page.on('pageerror', err => pageErrors.push(err.message));
@@ -313,7 +320,14 @@ test.describe('Bot pleas (owner-as-judge, forced probability via __MP_FORCE_PLEA
   });
 
   test('popup appears with the bot portrait/line, REJECT closes it, attempt is burned, game continues', async ({ page }) => {
-    test.setTimeout(480000);
+    // 12min, not 8: the duel hunt's wall time is dice-luck × WORKER CONTENTION.
+    // Measured 2026-07-21: solo this test passes in ~4.5m, but in the full
+    // 5-worker suite the same hunt shares CPU with 4 other chromiums and one
+    // run blew through 480s mid-hunt (timed out on a perfectly normal bot
+    // route-pick frame — rerun solo passed first try). The isolated-port T3.5
+    // runs measured up to ~10.7m for this describe block, so 720s per test
+    // gives the worst measured case honest headroom instead of flaking.
+    test.setTimeout(720000);
     const MAX_ITER = 400;
     const pageErrors = [];
     page.on('pageerror', err => pageErrors.push(err.message));
@@ -483,7 +497,14 @@ async function huntTauntWindow(page, maxSteps) {
 
 test.describe('Duel-taunt window vs a bot responder (T3.5, terra-titans)', () => {
   test('taunt window renders with both actions (no bot FIGHT/DECLINE leak); 直接开打 releases the hold and the bot resolves the duel', async ({ page }) => {
-    test.setTimeout(480000);
+    // 12min, not 8: the duel hunt's wall time is dice-luck × WORKER CONTENTION.
+    // Measured 2026-07-21: solo this test passes in ~4.5m, but in the full
+    // 5-worker suite the same hunt shares CPU with 4 other chromiums and one
+    // run blew through 480s mid-hunt (timed out on a perfectly normal bot
+    // route-pick frame — rerun solo passed first try). The isolated-port T3.5
+    // runs measured up to ~10.7m for this describe block, so 720s per test
+    // gives the worst measured case honest headroom instead of flaking.
+    test.setTimeout(720000);
     const pageErrors = [];
     page.on('pageerror', err => pageErrors.push(err.message));
 
@@ -525,7 +546,14 @@ test.describe('Duel-taunt window vs a bot responder (T3.5, terra-titans)', () =>
   });
 
   test('叫阵 -> shared modal submit resolves the duel; attempt burned, no hang', async ({ page }) => {
-    test.setTimeout(480000);
+    // 12min, not 8: the duel hunt's wall time is dice-luck × WORKER CONTENTION.
+    // Measured 2026-07-21: solo this test passes in ~4.5m, but in the full
+    // 5-worker suite the same hunt shares CPU with 4 other chromiums and one
+    // run blew through 480s mid-hunt (timed out on a perfectly normal bot
+    // route-pick frame — rerun solo passed first try). The isolated-port T3.5
+    // runs measured up to ~10.7m for this describe block, so 720s per test
+    // gives the worst measured case honest headroom instead of flaking.
+    test.setTimeout(720000);
     const pageErrors = [];
     page.on('pageerror', err => pageErrors.push(err.message));
 
