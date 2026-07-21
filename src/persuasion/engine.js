@@ -145,6 +145,27 @@ export const DEFAULT_PERSUASION_RULES = {
     // — see this task's report for why that's safe).
     timeoutMs: 8000,
   },
+  // T3 (bot pleas, owner-as-judge) — when a BOT pays rent to a LOCAL HUMAN
+  // and the rent-mercy window is open (canAttempt kind:'rent'), App.js may
+  // pop a free ACCEPT/REJECT popup on the human's screen instead of running
+  // the LLM judge or the keyless charisma check — the human's own click IS
+  // the verdict (score 10 on ACCEPT, 0 on REJECT, fed straight through the
+  // SAME scoreToTier -> tier -> effect pipeline every other path uses).
+  // Zero LLM spend either way. `enabled` is the master switch; `probability`
+  // is a per-eligible-payment coin flip (App.js, NOT engine-authoritative —
+  // this module never rolls it, same as this whole block's other UI-facing
+  // fields) deciding whether the bot bothers to plea at all; `timeoutSeconds`
+  // bounds how long the popup waits before auto-resolving as a REJECT
+  // (App.js's own "must not soft-lock" requirement) if the human never
+  // clicks either button. Kept in lockstep with mods/dominion/rules.js's
+  // persuasion.botPlea block AND src/mod-loader.js's DEFAULT_RULES.
+  // persuasion.botPlea (drift-guard covered by persuasion.test.js, same
+  // three-copy discipline as every other field in this block).
+  botPlea: {
+    enabled: true,
+    probability: 0.35,
+    timeoutSeconds: 12,
+  },
 };
 
 const PERSUASION_RULE_KEYS = Object.keys(DEFAULT_PERSUASION_RULES);

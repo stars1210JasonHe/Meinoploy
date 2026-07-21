@@ -51,6 +51,14 @@ import { bloomSprite } from './wr-bloom';
 // to follow (its own decide() never calls resolvePolicy itself).
 import { createBotDriver, deriveActingSeat, policyForSeat, stateModalBotMode } from './bot-driver';
 import { decideMoves, decideRoute as decideBotRoute } from './sim/bot';
+// MT2-SP5 direction C2 "舌战群儒" (T3): the persuasion pure core (window
+// predicate + attempt-accounting readers, both read-only here — the ONLY
+// write path is Game.js's attemptPersuasion move, dispatched via
+// this.client.moves.attemptPersuasion(...) same as every other move) and
+// the client-side LLM judge orchestrator (never throws, null = keyless
+// fallback — see src/persuasion/judge.js's own doc comment).
+import { canAttempt, attemptCount, globalAttemptCount, resolvePersuasionRules } from './persuasion/engine';
+import { judgePersuasion } from './persuasion/judge';
 
 // Client-side mod registry — static bundle imports (Parcel v1 forces all imports static, so
 // every registered mod is bundled at build; only WHICH is active is chosen at runtime). This
@@ -320,6 +328,31 @@ class MonopolyBoard {
     // dialogueLedger at every exitToMenu/loadGame (same "per-GAME, not
     // per-boot" reasoning).
     this.dialogueDiaries = createDiaryState();
+    // MT2-SP5 direction C2 "舌战群儒" (T3): a THIRD independent lazy cursor
+    // over G.events (see _lastEventSeq/_lastLedgerSeq just above for the
+    // same pattern) — consumed unconditionally by _processPersuasionEvents
+    // every render, watching for persuasion_resolved (verdict speech
+    // bubbles) and rent_paid (bot-plea popup triggers). Kept separate from
+    // the other two cursors for the same reason they're separate from each
+    // other: each pass's own gating must never suppress another's.
+    this._lastPersuasionSeq = undefined;
+    // Bot-plea popup state (T3, owner-as-judge): non-null while a bot's
+    // rent-mercy plea popup is showing and awaiting the human's ACCEPT/
+    // REJECT (or the auto-reject timeout/Escape/scrim-click, all funneled
+    // through _resolvePlea — see closeUiModal's own doc comment). Also
+    // consulted by update() to PAUSE the paced bot driver while a popup is
+    // pending, so the paying bot's own turn can't auto-advance past the
+    // window before the human resolves it (see update()'s doc comment).
+    this._pleaPending = null;
+    this._pleaTimer = null;
+    // Epoch guard for the human-initiated persuasion modal's async judge
+    // call (T3) — bumped on EVERY closeUiModal() call (Escape, scrim-click,
+    // Cancel, or a completed Submit), so an in-flight _submitPersuasion
+    // whose modal was dismissed mid-judge-call can detect it was superseded
+    // and skip dispatching — mirrors _buildBotDriver's dispatch() identity-
+    // capture guard (`const c = this.client; ... if (this.client === c)`)
+    // one level up, for the same class of stale-async-continuation hazard.
+    this._persuadeEpoch = 0;
     // Speech-bubble transient display state (T3). Keyed by player id (String
     // index, matches chipHtml's data-chip / player.id — see _showSpeechBubble's
     // doc comment). _bubbles holds the CURRENTLY-shown bubble per player;
@@ -569,6 +602,26 @@ class MonopolyBoard {
       const g = this._lastG;
       const p = g && g.players && g.players.find(pl => pl.id === String(playerId));
       if (p && p.character) this._showSpeechBubble(p.id, p.character, text);
+    };
+    // Test-only injection seam (tests/e2e/persuasion.spec.js, MT2-SP5
+    // direction C2 T3) — lets a spec exercise the online-vs-local
+    // persuasion gate (_persuasionUIEnabled's `this.onlinePlayerID == null`
+    // half) deterministically, WITHOUT standing up a real second online
+    // client/server. Same __MP_ test-hook convention as __MP_TEST_BUBBLE
+    // above. `id` defaults to the CURRENT ctx.currentPlayer (so every OTHER
+    // isMyTurn check in this file — keyed off `ctx.currentPlayer ===
+    // this.onlinePlayerID` — stays true and the rest of the UI keeps
+    // working normally; only persuasion-gated surfaces react), or pass an
+    // explicit seat/`null` to restore local play. Forces an immediate
+    // re-render (real online play only ever flips this field once, at
+    // client construction, well before any render) so the very next
+    // assertion sees the effect with no extra wait.
+    window.__MP_TEST_SET_ONLINE = (id) => {
+      if (!this.client) return;
+      const state = this.client.getState();
+      if (!state) return;
+      this.onlinePlayerID = id === undefined ? state.ctx.currentPlayer : id;
+      this.update(state);
     };
     // Chip click -> detail popover. Delegated on the persistent #player-info
     // (its children are fully rebuilt every renderPlayerInfo call). Reads
@@ -1532,6 +1585,11 @@ class MonopolyBoard {
     this._showScreen('game');
     this._updateDialogueLedger(G, ctx);
     this.detectAndTriggerAI(G, ctx);
+    // MT2-SP5 direction C2 "舌战群儒" (T3): persuasion verdict bubbles +
+    // bot-plea popup triggers — a third independent event-driven pass, same
+    // family as the two calls just above. May set this._pleaPending, which
+    // the bot-driver guard at the bottom of this method reads.
+    this._processPersuasionEvents(G, ctx);
     this.renderBoard(G, ctx);
     this._renderLegend(G, ctx);
     this.renderTokens(G, ctx);
@@ -1571,7 +1629,15 @@ class MonopolyBoard {
     // Paced bot-turn stepper (local-bots wiring): single-flight internally, so
     // calling this every render is cheap (no-op unless the current acting seat
     // per deriveActingSeat is bot-controlled and no step is already in flight).
-    if (this._botDriver) this._botDriver.onUpdate();
+    // MT2-SP5 direction C2 "舌战群儒" (T3): PAUSED while a bot-plea popup is
+    // pending (this._pleaPending) — the paying bot is still ctx.currentPlayer
+    // and would otherwise auto-advance (endTurn, closing the 求情 window)
+    // via its own postRoll/think pacing before the human ever clicks
+    // ACCEPT/REJECT. No driver internals change: onUpdate() simply isn't
+    // called this tick, so its own single-flight `scheduled` flag stays
+    // false and the very next tick after the popup resolves picks up
+    // exactly where the bot would have been.
+    if (this._botDriver && !this._pleaPending) this._botDriver.onUpdate();
   }
 
   // Chrome-band sizing (Task 2 review fix; STATIC constants as of Redesign B).
@@ -1983,7 +2049,26 @@ class MonopolyBoard {
       else if (G.pendingCard) hint = t('turnbox.resolveCard');
       else if (G.auction) hint = t('turnbox.auctionInProgress');
       else if (G.trade) hint = t('turnbox.tradePending');
-      else hint = t('turnbox.endWhenReady');
+      else {
+        // MT2-SP5 direction C2 "舌战群儒" (T3): 求情 (rent mercy). This is
+        // the ONLY branch reached once nothing else is blocking the turn
+        // (buy/duel/card/auction/trade all take priority above), so it's
+        // the natural, uncontested place for the refund-window prompt —
+        // matches the buy/pass and duel prompts' own `centerslot__prompt`
+        // markup shape/pix-btn sizing exactly.
+        const rentMercyTarget = this._rentMercyWindow(G, ctx);
+        if (rentMercyTarget) {
+          const owner = G.players[rentMercyTarget];
+          const ownerName = owner.character ? owner.character.name : t('game.playerFallback', { n: parseInt(rentMercyTarget) + 1 });
+          body = `
+            <div class="centerslot__prompt">
+              <div class="cp__name">${t('persuasion.rentHint', { name: esc(ownerName) })}</div>
+              <div class="cp__btns"><button class="pix-btn pix-btn--ghost pix-btn--sm" id="btn-persuade-rent">${t('persuasion.rentButton')}</button></div>
+            </div>`;
+          return `<div class="centerslot"><div class="centerslot__dice">${diceHtml}</div>${total}${body}</div>`;
+        }
+        hint = t('turnbox.endWhenReady');
+      }
       body = `<div class="centerslot__hint">${hint}</div>`;
     }
 
@@ -2037,6 +2122,18 @@ class MonopolyBoard {
       return `<div class="centerslot__hint">${t('duel.waitingResponse', { name: esc(ownerName) })}</div>`;
     }
     const loseAmount = Math.round(RULES.duel.loseMultiplier * duel.rent);
+    // MT2-SP5 direction C2 "舌战群儒" (T3): 叫阵 (duel taunt) — the
+    // CHALLENGER's own OPTIONAL action, surfaced alongside the OWNER's
+    // FIGHT/DECLINE choice in the exact same prompt (hot-seat: both parties
+    // share this screen — see the file header's isOwnerSeat comment). Never
+    // disables/blocks FIGHT/DECLINE; canAttempt itself is what closes this
+    // window the instant the duel resolves (G.duel goes null), so a bot
+    // owner (or a fast human) resolving before this is clicked simply means
+    // the button never rendered on the NEXT tick — no separate lock needed.
+    const canTaunt = this._persuasionUIEnabled() && !this._isBotSeat(duel.challengerId)
+      && canAttempt(G, ctx, 'duel', duel.challengerId, duel.ownerId, RULES).ok;
+    const tauntBtn = canTaunt
+      ? `<button class="pix-btn pix-btn--ghost pix-btn--sm" id="btn-persuade-duel">${t('persuasion.duelButton')}</button>` : '';
     return `
       <div class="centerslot__prompt">
         <div class="cp__name">${t('duel.challenged', { owner: esc(ownerName), space: esc(space.name) })}</div>
@@ -2044,6 +2141,7 @@ class MonopolyBoard {
         <div class="cp__btns">
           <button class="pix-btn pix-btn--danger pix-btn--sm" id="btn-fight">${t('duel.fight')}</button>
           <button class="pix-btn pix-btn--ghost pix-btn--sm" id="btn-decline">${t('duel.decline')}</button>
+          ${tauntBtn}
         </div>
       </div>`;
   }
@@ -3562,6 +3660,19 @@ class MonopolyBoard {
     click('btn-accept-card', () => this.client.moves.acceptCard());
     click('btn-redraw-card', () => this.client.moves.redrawCard());
     click('btn-propose-trade', () => this.showTradeModal(G, ctx));
+    // MT2-SP5 direction C2 "舌战群儒" (T3): 求情/叫阵 open the shared
+    // persuasion modal. 游说's own button lives inside the trade panel's
+    // own markup (renderStateModal wires it directly, next to accept/
+    // reject/cancel, since it only ever renders there) — these two are the
+    // ones that render inside _centerSlotHtml/turnbox, which funnel through
+    // this generic id-based rebind same as every other action button.
+    click('btn-persuade-rent', () => {
+      const target = this._rentMercyWindow(G, ctx);
+      if (target) this._openPersuasionModal(G, ctx, 'rent', target);
+    });
+    click('btn-persuade-duel', () => {
+      if (G.duel) this._openPersuasionModal(G, ctx, 'duel', G.duel.ownerId);
+    });
     click('btn-save', () => this.saveGame(G, ctx));
     if (this.saveBtnEl) this.saveBtnEl.onclick = () => this.saveGame(G, ctx);
 
@@ -3671,6 +3782,17 @@ class MonopolyBoard {
         if (mny > 0) h += `<div class="trade__prop"><span class="trade__propname">${money(mny)}</span></div>`;
         return h || `<div class="trade__empty">${t('trade.nothing')}</div>`;
       };
+      // MT2-SP5 direction C2 "舌战群儒" (T3): 游说 (trade lobby) — the
+      // PROPOSER's own optional action while their proposal is pending
+      // (never the bot target's — botMode only gates accept/reject/Cancel
+      // above, not this). Shown regardless of botMode: a human proposer
+      // lobbying a bot target is exactly the local-bots scenario the shift
+      // (G.trade.persuasionThresholdShift, already wired into bot-driver.js's
+      // decideTradeResponse) exists for.
+      const canLobby = this._persuasionUIEnabled() && !this._isBotSeat(tr.proposerId)
+        && canAttempt(G, ctx, 'trade', tr.proposerId, tr.targetPlayerId, RULES).ok;
+      const lobbyBtn = canLobby
+        ? `<button class="pix-btn pix-btn--ghost" id="btn-persuade-trade">${t('persuasion.tradeButton')}</button>` : '';
       this.stateModalBoxEl.innerHTML = `
         <div class="trade">
           <div class="trade__head">${t('trade.proposalTitle')}</div>
@@ -3687,6 +3809,7 @@ class MonopolyBoard {
           </div>
           <div class="trade__actions">
             <button class="pix-btn pix-btn--ghost" id="btn-cancel-trade">${t('trade.cancel')}</button>
+            ${lobbyBtn}
             ${botMode === 'trade-cancel-only'
               // trade-cancel-only (see the gate at the top of this method):
               // accept/reject are the BOT target's decision — its driver
@@ -3705,6 +3828,8 @@ class MonopolyBoard {
       if (acceptBtn) acceptBtn.onclick = () => this.client.moves.acceptTrade();
       if (rejectBtn) rejectBtn.onclick = () => this.client.moves.rejectTrade();
       document.getElementById('btn-cancel-trade').onclick = () => this.client.moves.cancelTrade();
+      const lobbyBtnEl = document.getElementById('btn-persuade-trade');
+      if (lobbyBtnEl) lobbyBtnEl.onclick = () => this._openPersuasionModal(G, ctx, 'trade', tr.targetPlayerId);
       return;
     }
 
@@ -3784,6 +3909,17 @@ class MonopolyBoard {
     document.body.style.overflow = 'hidden';
   }
   closeUiModal() {
+    // MT2-SP5 direction C2 "舌战群儒" (T3): bump the persuasion-modal epoch
+    // on EVERY close (Cancel, Escape, scrim-click, or a completed Submit)
+    // — see _submitPersuasion's own doc comment for what this guards
+    // against. Harmless when no persuasion modal was ever open.
+    this._persuadeEpoch = (this._persuadeEpoch || 0) + 1;
+    // Bot-plea popup (plan item 7, "must not soft-lock"): any close path
+    // that isn't an explicit ACCEPT/REJECT click — Escape or a scrim-click,
+    // the only two ways to reach this method while a plea is still pending
+    // and unresolved (the button handlers and the auto-timeout all resolve
+    // FIRST, then call this) — is treated as a REJECT.
+    if (this._pleaPending && !this._pleaPending.resolved) this._resolvePlea(false);
     this.uiModalEl.classList.remove('open');
     this.uiModalBoxEl.innerHTML = '';
     document.body.style.overflow = '';
@@ -4087,6 +4223,253 @@ class MonopolyBoard {
       diaryLines: getRecentDiaryLines(this.dialogueDiaries, seatId, RULES.dialogue.diaryPromptLines),
       dialogueRules: RULES.dialogue,
     };
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Persuasion (MT2-SP5 direction C2 "舌战群儒", T3) — the three seam
+  // buttons (求情/叫阵/游说, each rendered where its own seam already
+  // renders — see _rentMercyWindow/_duelPromptHtml/renderStateModal), the
+  // shared free-text modal (judged path optional, keyless fallback
+  // ALWAYS available — src/persuasion/judge.js's judgePersuasion never
+  // throws and a null result dispatches attemptPersuasion with no score,
+  // same as T1's original keyless-only path), the verdict speech bubble +
+  // log line, and the bot-plea popup (owner-as-judge, zero LLM spend).
+  // ─────────────────────────────────────────────────────────
+
+  // Master gate for every persuasion UI surface (plan item 8): the RULES
+  // flag, AND online play — v1 disables persuasion online entirely, so
+  // `this.onlinePlayerID != null` (a real online seat OR a spectator of an
+  // online match) blanks every surface this method gates, mirroring every
+  // other online-vs-local branch in this file (`!this.onlinePlayerID || ...`).
+  _persuasionUIEnabled() {
+    return !!(RULES.persuasion && RULES.persuasion.enabled) && this.onlinePlayerID == null;
+  }
+
+  // Returns the OWNER seat id if the 求情 (rent-mercy refund) window is
+  // currently open for the human ctx.currentPlayer, or null otherwise. Bot
+  // seats never get a button here (their side of this seam is the OPPOSITE
+  // flow — _maybeTriggerBotPlea, a bot pleading TO a human) — gated by
+  // _isBotSeat, the same bot-gate convention renderTurnbox/renderManage use
+  // for every other human-only action surface.
+  _rentMercyWindow(G, ctx) {
+    if (!this._persuasionUIEnabled()) return null;
+    if (this._isBotSeat(ctx.currentPlayer)) return null;
+    const lrp = G.lastRentPayment;
+    if (!lrp) return null;
+    const check = canAttempt(G, ctx, 'rent', ctx.currentPlayer, lrp.ownerSeat, RULES);
+    return check.ok ? lrp.ownerSeat : null;
+  }
+
+  // Opens the shared persuasion modal for one (kind, targetSeat) attempt.
+  // Re-checks canAttempt itself (defense in depth — a caller could be
+  // stale by a render tick) rather than trusting the button's own render-
+  // time gate. Shows the character-appropriate title, a maxlength-capped
+  // textarea (mirrors RULES.persuasion.maxTextLength), and the remaining-
+  // attempts readout (per-seam AND global, plan item 4).
+  _openPersuasionModal(G, ctx, kind, targetSeat) {
+    if (!this._persuasionUIEnabled()) return;
+    const actorSeat = ctx.currentPlayer;
+    const check = canAttempt(G, ctx, kind, actorSeat, targetSeat, RULES);
+    if (!check.ok) return;
+    const target = G.players[targetSeat];
+    const targetChar = target && target.character;
+    const targetName = targetChar ? targetChar.name : t('game.playerFallback', { n: parseInt(targetSeat) + 1 });
+    const rules = resolvePersuasionRules(RULES);
+    const seamLeft = Math.max(0, rules.perOpponentSeamLimit - attemptCount(G.persuasion.attempts, kind, actorSeat, targetSeat));
+    const globalLeft = Math.max(0, rules.globalCapPerGame - globalAttemptCount(G.persuasion.globalUsed, actorSeat));
+    const titleKey = { rent: 'persuasion.rentTitle', duel: 'persuasion.duelTitle', trade: 'persuasion.tradeTitle' }[kind];
+    const myEpoch = ++this._persuadeEpoch;
+    this.openUiModal(`
+      <div class="persuade">
+        <div class="persuade__head">${t(titleKey, { name: esc(targetName) })}</div>
+        <textarea id="persuade-text" class="persuade__text" maxlength="${rules.maxTextLength}" placeholder="${esc(t('persuasion.placeholder'))}" rows="4"></textarea>
+        <div class="persuade__meta">${t('persuasion.remaining', { seam: seamLeft, global: globalLeft })}</div>
+        <div class="persuade__actions">
+          <button class="pix-btn pix-btn--ghost" id="btn-persuade-cancel">${t('persuasion.cancel')}</button>
+          <button class="pix-btn pix-btn--primary" id="btn-persuade-submit">${t('persuasion.submit')}</button>
+        </div>
+      </div>`);
+    const textEl = document.getElementById('persuade-text');
+    if (textEl) textEl.focus();
+    document.getElementById('btn-persuade-cancel').onclick = () => this.closeUiModal();
+    document.getElementById('btn-persuade-submit').onclick = () => this._submitPersuasion(kind, targetSeat, myEpoch);
+  }
+
+  // Submits a persuasion attempt: tries the judged path (T2) FIRST when the
+  // AI is actually usable (isEnabled() = has a key AND verbosity != OFF)
+  // AND the active RULES config carries a judge table at all, then ALWAYS
+  // dispatches attemptPersuasion — with the judged score if one came back,
+  // or with none at all (undefined) on every soft-failure path (no key,
+  // timeout, malformed JSON — see judgePersuasion's own doc comment), which
+  // Game.js resolves via the SAME keyless charisma check T1 always used.
+  // The game never blocks on the LLM. `myEpoch` (captured at modal-open
+  // time) guards against a stale continuation: if the modal was dismissed
+  // (Cancel/Escape/scrim-click, or a DIFFERENT persuasion modal opened) any
+  // time after this call started awaiting the judge, closeUiModal() has
+  // already bumped _persuadeEpoch and this submit silently no-ops instead
+  // of dispatching a move for a conversation the player already walked
+  // away from.
+  async _submitPersuasion(kind, targetSeat, myEpoch) {
+    if (!this.client) return;
+    const textEl = document.getElementById('persuade-text');
+    const submitEl = document.getElementById('btn-persuade-submit');
+    const cancelEl = document.getElementById('btn-persuade-cancel');
+    const text = textEl ? textEl.value : '';
+    if (submitEl) { submitEl.disabled = true; submitEl.textContent = t('persuasion.judging'); }
+    if (cancelEl) cancelEl.disabled = true;
+
+    const state = this.client.getState();
+    const g = state && state.G;
+    const ctx = state && state.ctx;
+    let score;
+    if (g && ctx) {
+      const target = g.players[targetSeat];
+      const targetChar = target && target.character;
+      if (targetChar && RULES.persuasion.judge && this.characterAI.isEnabled()) {
+        const attitude = getAttitude(this.dialogueLedger, targetSeat, ctx.currentPlayer);
+        try {
+          const result = await judgePersuasion({
+            character: targetChar,
+            kind,
+            attitude,
+            gameContext: `Turn ${g.totalTurns}`,
+            playerText: text,
+            aiClient: (prompt) => this.characterAI.judgeCall(prompt),
+            rulesLike: RULES,
+          });
+          if (result && Number.isFinite(result.score)) score = result.score;
+        } catch (e) {
+          // judgePersuasion itself never throws (see its doc comment) —
+          // this catch is belt-and-braces only; `score` simply stays
+          // undefined either way, which is the T1 keyless fallback.
+          console.warn('persuasion judge failed:', e && e.message);
+        }
+      }
+    }
+
+    if (myEpoch !== this._persuadeEpoch) return; // superseded — see doc comment above
+    this.closeUiModal();
+    this.client.moves.attemptPersuasion(kind, targetSeat, text, score);
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Persuasion event watcher (T3) — a THIRD independent lazy-cursor pass
+  // over G.events (mirrors _updateDialogueLedger/detectAndTriggerAI's own
+  // cursors), consumed unconditionally every render so it can never fall
+  // out of sync with which events have already been seen:
+  //   - persuasion_resolved -> a keyless canned-line speech bubble from the
+  //     TARGET character (reuses _showSpeechBubble verbatim, including its
+  //     own apiKey/verbosity gate — same "the bubble is bonus AI-flavor
+  //     display, the i18n-log LINE is the keyless source of truth"
+  //     precedent every other bubble in this file already follows; the log
+  //     line itself is T1's i18n-log.js formatter, unaffected by this).
+  //   - rent_paid where the payer is a BOT and the owner is a local human
+  //     -> maybe pop the bot-plea popup (owner-as-judge, plan item 7).
+  // ─────────────────────────────────────────────────────────
+  _processPersuasionEvents(G, ctx) {
+    const { newEvents, nextSeq } = consumeNewEvents(G.events, this._lastPersuasionSeq);
+    this._lastPersuasionSeq = nextSeq;
+    if (newEvents.length === 0) return;
+    newEvents.forEach(ev => {
+      if (ev.type === 'persuasion_resolved') this._showPersuasionVerdictBubble(G, ev);
+      else if (ev.type === 'rent_paid') this._maybeTriggerBotPlea(G, ctx, ev);
+    });
+  }
+
+  _showPersuasionVerdictBubble(G, ev) {
+    const { kind, tier, targetSeat } = ev.data;
+    const target = G.players[targetSeat];
+    const char = target && target.character;
+    if (!char) return;
+    const tierKey = tier > 0 ? `tier${tier}` : 'fail';
+    const line = t(`persuasion.verdict.${kind}.${tierKey}`);
+    this._showSpeechBubble(targetSeat, char, line);
+  }
+
+  // Bot plea (owner-as-judge, plan item 7): a bot just paid rent
+  // (ev.data = {propertyId, ownerId, amount}, ev.actor = the payer). Only
+  // offers when the payer is a BOT, the owner is a LOCAL HUMAN (never
+  // another bot — a bot has no UI to judge with), persuasion UI is enabled
+  // overall, the refund window is genuinely open (canAttempt — the SAME
+  // gate the human-initiated 求情 button itself checks), botPlea itself is
+  // enabled, no OTHER popup is already showing, AND a probability roll
+  // hits. Math.random() here is a purely COSMETIC "does the bot bother"
+  // coin flip (mirrors this file's existing dice-tumble-animation
+  // Math.random() precedent) — NOT engine-authoritative: the actual verdict
+  // is the human's own ACCEPT/REJECT click, resolved through the SAME
+  // server-validated attemptPersuasion move as every other seam.
+  _maybeTriggerBotPlea(G, ctx, ev) {
+    if (!this._persuasionUIEnabled()) return;
+    const rules = resolvePersuasionRules(RULES);
+    if (!rules.botPlea || !rules.botPlea.enabled) return;
+    const payerSeat = ev.actor;
+    const ownerSeat = ev.data.ownerId;
+    if (!this._isBotSeat(payerSeat)) return;
+    if (this._isBotSeat(ownerSeat)) return; // no human to judge — never plea to another bot
+    if (this._pleaPending) return; // one popup at a time
+    if (!canAttempt(G, ctx, 'rent', payerSeat, ownerSeat, rules).ok) return;
+    // E2E test seam (mirrors __MP_FAST_ROLL's convention): forces the
+    // probability roll to always hit, so a spec can deterministically reach
+    // the popup without depending on Math.random() — set via
+    // page.addInitScript, same wiring as every other __MP_ flag in this file.
+    const forcePlea = typeof window !== 'undefined' && window.__MP_FORCE_PLEA === true;
+    if (!forcePlea && Math.random() >= rules.botPlea.probability) return;
+    this._showBotPleaPopup(G, payerSeat, ownerSeat, ev.data.amount, rules);
+  }
+
+  // `rules` (already-resolved RULES.persuasion, passed by the only caller
+  // above) avoids re-resolving it twice in one trigger. Portrait resolved
+  // via _clientChar — G-state characters never carry one (see that
+  // method's own doc comment); falls back to a colored letter avatar, same
+  // as _renderAIResponses' aibubble.
+  _showBotPleaPopup(G, botSeat, humanSeat, amount, rules) {
+    const bot = G.players[botSeat];
+    const char = bot && bot.character;
+    if (!char) return;
+    const cchar = this._clientChar(char);
+    const pleaText = t('persuasion.pleaLine', { amount: money(amount) });
+    this._pleaPending = { botSeat, humanSeat, pleaText, resolved: false };
+    const avatar = cchar && cchar.portrait
+      ? `<div class="pleapop__av"><img src="${esc(cchar.portrait)}" alt="" /></div>`
+      : `<div class="pleapop__av pleapop__avph" style="background:${char.color}">${esc(char.name[0])}</div>`;
+    this.openUiModal(`
+      <div class="pleapop">
+        ${avatar}
+        <div class="pleapop__name" style="color:${readableNameColor(char.color)}">${esc(char.name)}</div>
+        <div class="pleapop__line">${esc(pleaText)}</div>
+        <div class="pleapop__actions">
+          <button class="pix-btn pix-btn--danger" id="btn-plea-reject">${t('persuasion.pleaReject')}</button>
+          <button class="pix-btn pix-btn--success" id="btn-plea-accept">${t('persuasion.pleaAccept')}</button>
+        </div>
+      </div>`);
+    document.getElementById('btn-plea-accept').onclick = () => { this._resolvePlea(true); this.closeUiModal(); };
+    document.getElementById('btn-plea-reject').onclick = () => { this._resolvePlea(false); this.closeUiModal(); };
+    const seconds = Number.isFinite(rules.botPlea.timeoutSeconds) && rules.botPlea.timeoutSeconds > 0
+      ? rules.botPlea.timeoutSeconds : 12;
+    this._pleaTimer = setTimeout(() => { this._resolvePlea(false); this.closeUiModal(); }, seconds * 1000);
+  }
+
+  // ACCEPT/REJECT (button click, the auto-timeout above, or the Escape/
+  // scrim-click fallback via closeUiModal — see that method's own doc
+  // comment) all funnel here. `resolved` is a one-shot guard so the SAME
+  // popup can never dispatch twice (e.g. a button click racing the timeout
+  // firing in the same tick). Resolves through the EXACT same
+  // attemptPersuasion move every human-initiated seam uses, dispatched
+  // while it's still the BOT's own turn (ctx.currentPlayer IS the bot —
+  // the plea fires right after IT paid rent), so no seat-authorization
+  // wrinkle exists here at all. score 10 (ACCEPT) maps to the top tier band
+  // (still subject to the SAME attitude clamp any judged call would face);
+  // score 0 (REJECT, including every auto-reject path) is a guaranteed
+  // tier-0 failure, burning the bot's attempt and letting the failure-cost
+  // ledger consequence (grudge+1 toward the human) flow naturally through
+  // the existing event->ledger path. Zero LLM spend either way.
+  _resolvePlea(accept) {
+    if (!this._pleaPending || this._pleaPending.resolved) return;
+    this._pleaPending.resolved = true;
+    if (this._pleaTimer) { clearTimeout(this._pleaTimer); this._pleaTimer = null; }
+    const { humanSeat, pleaText } = this._pleaPending;
+    this._pleaPending = null;
+    if (this.client) this.client.moves.attemptPersuasion('rent', humanSeat, pleaText, accept ? 10 : 0);
   }
 
   // ─────────────────────────────────────────────────────────
@@ -4572,6 +4955,14 @@ class MonopolyBoard {
     this.chatHistories = {};
     this.activeChatCharId = null;
     this._lastEventSeq = undefined;
+    this._lastPersuasionSeq = undefined; // T3: per-GAME cursor, same reasoning as _lastEventSeq
+    // T3: a stray bot-plea popup/timer must never survive into the next
+    // game — belt-and-braces here even though closeUiModal() a few lines
+    // below already resolves any pending plea as a reject (this.client is
+    // already null by the time it runs, so _resolvePlea's dispatch is a
+    // safe no-op either way).
+    if (this._pleaTimer) { clearTimeout(this._pleaTimer); this._pleaTimer = null; }
+    this._pleaPending = null;
     // Dialogue memory is per-GAME, not per-boot (MT2-SP4 T2): a fresh game
     // (including "Play Again", which routes here) starts with a clean
     // attitude ledger AND diary store — grudges/entries from a finished
@@ -4671,6 +5062,12 @@ class MonopolyBoard {
     this._logSeenCount = 0;
     this.activeChatCharId = null;
     this._lastEventSeq = undefined;
+    this._lastPersuasionSeq = undefined; // T3: lazy re-init against savedG.events, mirroring _lastEventSeq
+    // T3: loadGame has no closeUiModal() call of its own (unlike
+    // exitToMenu) — explicit clear so a stray popup/timer from whatever was
+    // showing right before Load was clicked can never survive the swap.
+    if (this._pleaTimer) { clearTimeout(this._pleaTimer); this._pleaTimer = null; }
+    this._pleaPending = null;
     // MT2-SP4 T2: restore dialogue memory from the save envelope. A save
     // with no `dialogueMemory` field at all (pre-T2 save) -> deserializeDialogueMemory(undefined)
     // -> fresh empty ledger/diaries/spentEstimate — same "the save predates

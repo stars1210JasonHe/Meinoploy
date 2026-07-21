@@ -304,6 +304,35 @@ export const STRINGS = {
     'trade.balEven': '大致均衡',
     'trade.send': '发出提案',
 
+    // Persuasion (MT2-SP5 direction C2 "舌战群儒", T3): the three seam
+    // buttons (求情/叫阵/游说), the shared free-text modal, keyless canned
+    // verdict lines per tier (speech bubble from the TARGET), and the
+    // bot-plea popup (owner-as-judge).
+    'persuasion.rentButton': '求情',
+    'persuasion.duelButton': '叫阵',
+    'persuasion.tradeButton': '游说',
+    'persuasion.rentHint': '向 {name} 求情，追回部分租金？',
+    'persuasion.rentTitle': '向 {name} 求情',
+    'persuasion.duelTitle': '向 {name} 叫阵',
+    'persuasion.tradeTitle': '游说 {name}',
+    'persuasion.placeholder': '输入你的说辞……',
+    'persuasion.submit': '发送',
+    'persuasion.cancel': '取消',
+    'persuasion.judging': '判定中……',
+    'persuasion.remaining': '本场景剩余 {seam} 次 · 本局总剩余 {global} 次',
+    'persuasion.verdict.rent.fail': '……不行。',
+    'persuasion.verdict.rent.tier1': '……好吧，八折。',
+    'persuasion.verdict.rent.tier2': '算你说得动听，七折吧。',
+    'persuasion.verdict.duel.fail': '牙尖嘴利，没用。',
+    'persuasion.verdict.duel.tier1': '哼，算你说得有点道理。',
+    'persuasion.verdict.duel.tier2': '……好，我让你三分。',
+    'persuasion.verdict.trade.fail': '这笔交易，免谈。',
+    'persuasion.verdict.trade.tier1': '……那就再考虑一下吧。',
+    'persuasion.verdict.trade.tier2': '你说得有道理，我松口了。',
+    'persuasion.pleaLine': '……租金 {amount}，能否高抬贵手？',
+    'persuasion.pleaAccept': '答应',
+    'persuasion.pleaReject': '拒绝',
+
     // AI settings modal (showAISettings).
     'aiset.title': 'AI 角色设置',
     'aiset.connected': '已连接',
@@ -620,6 +649,35 @@ export const STRINGS = {
     'trade.balNeg': 'FAVOURS RIVAL',
     'trade.balEven': 'ROUGHLY EVEN',
     'trade.send': 'PROPOSE',
+
+    // Persuasion (MT2-SP5 direction C2 "舌战群儒", T3): the three seam
+    // buttons (求情/叫阵/游说), the shared free-text modal, keyless canned
+    // verdict lines per tier (speech bubble from the TARGET), and the
+    // bot-plea popup (owner-as-judge).
+    'persuasion.rentButton': 'PLEAD',
+    'persuasion.duelButton': 'TAUNT',
+    'persuasion.tradeButton': 'LOBBY',
+    'persuasion.rentHint': 'Plead with {name} for a rent refund?',
+    'persuasion.rentTitle': 'Plead with {name}',
+    'persuasion.duelTitle': 'Taunt {name}',
+    'persuasion.tradeTitle': 'Lobby {name}',
+    'persuasion.placeholder': 'Type your words…',
+    'persuasion.submit': 'SEND',
+    'persuasion.cancel': 'CANCEL',
+    'persuasion.judging': 'JUDGING…',
+    'persuasion.remaining': '{seam} left for this seam · {global} left this game',
+    'persuasion.verdict.rent.fail': '…No.',
+    'persuasion.verdict.rent.tier1': '…Fine, 10% off.',
+    'persuasion.verdict.rent.tier2': 'Well said. 20% off.',
+    'persuasion.verdict.duel.fail': 'Sharp tongue, no effect.',
+    'persuasion.verdict.duel.tier1': 'Hmph. Fair point.',
+    'persuasion.verdict.duel.tier2': "…Fine, I'll go easy on you.",
+    'persuasion.verdict.trade.fail': 'Not a chance.',
+    'persuasion.verdict.trade.tier1': '…Let me reconsider.',
+    'persuasion.verdict.trade.tier2': "You've got a point. Deal's better now.",
+    'persuasion.pleaLine': '…{amount} rent — any chance of mercy?',
+    'persuasion.pleaAccept': 'ACCEPT',
+    'persuasion.pleaReject': 'REJECT',
 
     // AI settings modal.
     'aiset.title': 'AI CHARACTER SETTINGS',

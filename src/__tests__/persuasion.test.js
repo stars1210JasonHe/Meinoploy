@@ -184,6 +184,16 @@ describe('defaults drift guard — three copies stay in sync (mirrors dialogue-m
     expect(RULES.dialogue.callPriceUSD.judge).toBe(DEFAULT_DIALOGUE_RULES.callPriceUSD.judge);
     expect(DEFAULT_RULES.dialogue.callPriceUSD.judge).toBe(DEFAULT_DIALOGUE_RULES.callPriceUSD.judge);
   });
+  // T3 (bot pleas, owner-as-judge) — persuasion.botPlea is already covered
+  // by the whole-object equality assertions above (same `persuasion` block);
+  // pins the new sub-fields explicitly for readability, same precedent as
+  // persuasion.judge right above.
+  test('persuasion.botPlea fields present + in sync across all three copies', () => {
+    expect(RULES.persuasion.botPlea).toEqual(DEFAULT_PERSUASION_RULES.botPlea);
+    expect(DominionRules.persuasion.botPlea).toEqual(DEFAULT_PERSUASION_RULES.botPlea);
+    expect(DEFAULT_RULES.persuasion.botPlea).toEqual(DEFAULT_PERSUASION_RULES.botPlea);
+    expect(RULES.persuasion.botPlea).toEqual({ enabled: true, probability: 0.35, timeoutSeconds: 12 });
+  });
 });
 
 describe('sanitizeText', () => {
