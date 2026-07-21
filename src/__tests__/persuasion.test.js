@@ -21,7 +21,7 @@ import { decideTradeResponse } from '../bot-driver';
 import {
   DEFAULT_PERSUASION_RULES, resolvePersuasionRules, sanitizeText, canAttempt,
   freshAttemptsState, attemptCount, recordAttempt, globalAttemptCount, recordGlobalAttempt,
-  rollTier, rentDiscountForTier, applyRentDiscount, duelEffectForTier, tradeShiftForTier,
+  rollTier, rentRefundPctForTier, computeRentRefund, duelEffectForTier, tradeShiftForTier,
 } from '../persuasion/engine';
 import {
   createLedgerState, applyEvent, getAttitude, DEFAULT_DIALOGUE_RULES,
@@ -71,9 +71,6 @@ function makeCtx(currentPlayer, opts = {}) {
   };
 }
 
-function offerDuel(overrides) {
-  return { phase: 'offer', propertyId: 3, ownerId: '1', challengerId: '0', rent: 100, ...overrides };
-}
 function responseDuel(overrides) {
   return { phase: 'response', propertyId: 3, ownerId: '1', challengerId: '0', rent: 100, ...overrides };
 }
@@ -84,10 +81,16 @@ function tradeState(overrides) {
     ...overrides,
   };
 }
-
-function withDuelOffer(G, overrides) {
-  G.duel = offerDuel(overrides);
-  G.turnPhase = 'duel';
+// T1.5 (追回制/refund model): a G.lastRentPayment fixture — the rent seam's
+// window predicate (src/persuasion/engine.js canAttempt) no longer touches
+// G.duel at all; it opens purely off this record. `turn` defaults to the
+// fresh G's own G.totalTurns (0) so canAttempt's same-turn check passes
+// out of the box.
+function rentPayment(overrides) {
+  return { payerSeat: '0', ownerSeat: '1', amount: 100, turn: 0, ...overrides };
+}
+function withRentPayment(G, overrides) {
+  G.lastRentPayment = rentPayment({ turn: G.totalTurns, ...overrides });
   return G;
 }
 function withDuelResponse(G, overrides) {
@@ -263,23 +266,30 @@ describe('rollTier — deterministic charisma check', () => {
 });
 
 describe('tier -> effect calculators', () => {
-  test('rentDiscountForTier / applyRentDiscount: tiers 0/1/2 under RULES defaults', () => {
-    expect(rentDiscountForTier(0, RULES)).toBe(0);
-    expect(rentDiscountForTier(1, RULES)).toBe(0.10);
-    expect(rentDiscountForTier(2, RULES)).toBe(0.20);
-    expect(applyRentDiscount(100, 0, RULES)).toBe(100);
-    expect(applyRentDiscount(100, 1, RULES)).toBe(90);
-    expect(applyRentDiscount(100, 2, RULES)).toBe(80);
+  test('rentRefundPctForTier / computeRentRefund: tiers 0/1/2 under RULES defaults', () => {
+    expect(rentRefundPctForTier(0, RULES)).toBe(0);
+    expect(rentRefundPctForTier(1, RULES)).toBe(0.10);
+    expect(rentRefundPctForTier(2, RULES)).toBe(0.20);
+    expect(computeRentRefund(100, 0, RULES)).toBe(0);
+    expect(computeRentRefund(100, 1, RULES)).toBe(10);
+    expect(computeRentRefund(100, 2, RULES)).toBe(20);
   });
 
-  test('applyRentDiscount floors at 0 dollars and rounds down to whole dollars', () => {
-    expect(applyRentDiscount(3, 2, RULES)).toBe(2); // 3*0.8=2.4 -> floor 2
-    expect(applyRentDiscount(0, 2, RULES)).toBe(0);
-    expect(applyRentDiscount(-5, 1, RULES)).toBe(0); // never negative
+  test('computeRentRefund rounds (not floors) and floors at 0 dollars', () => {
+    expect(computeRentRefund(15, 1, RULES)).toBe(2); // 15*0.10=1.5 -> round 2
+    expect(computeRentRefund(3, 2, RULES)).toBe(1);  // 3*0.20=0.6 -> round 1
+    expect(computeRentRefund(0, 2, RULES)).toBe(0);
+    expect(computeRentRefund(-5, 1, RULES)).toBe(0); // never negative
   });
 
-  test('applyRentDiscount is NaN-safe', () => {
-    expect(applyRentDiscount(NaN, 1, RULES)).toBe(0);
+  test('computeRentRefund is NaN-safe', () => {
+    expect(computeRentRefund(NaN, 1, RULES)).toBe(0);
+  });
+
+  test('computeRentRefund does NOT itself cap against any live balance — that is Game.js\'s job', () => {
+    // A refund larger than any plausible balance is still returned uncapped
+    // — this pure function has no G to read the owner's current cash from.
+    expect(computeRentRefund(1000000, 2, RULES)).toBe(200000);
   });
 
   test('duelEffectForTier: lever + amount, default targetMinus lever', () => {
@@ -302,66 +312,77 @@ describe('tier -> effect calculators', () => {
 
 describe('canAttempt — window predicate', () => {
   test('disabled -> reason disabled, before any other check', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     const disabledRules = resolvePersuasionRules({ persuasion: { enabled: false } });
     expect(canAttempt(G, {}, 'rent', '0', '1', disabledRules)).toEqual({ ok: false, reason: 'disabled' });
   });
 
   test('unknown kind -> reason unknown_kind', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     expect(canAttempt(G, {}, 'bribery', '0', '1', RULES)).toEqual({ ok: false, reason: 'unknown_kind' });
   });
 
   test('wrong G.phase -> window_closed', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     G.phase = 'characterSelect';
     expect(canAttempt(G, {}, 'rent', '0', '1', RULES)).toEqual({ ok: false, reason: 'window_closed' });
   });
 
   test('self-target -> reason self_target', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     expect(canAttempt(G, {}, 'rent', '0', '0', RULES).reason).toBe('self_target');
   });
 
   test('missing/bankrupt target -> reason invalid_target', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     expect(canAttempt(G, {}, 'rent', '0', null, RULES).reason).toBe('invalid_target');
     expect(canAttempt(G, {}, 'rent', '0', '9', RULES).reason).toBe('invalid_target'); // no such seat
     G.players[1].bankrupt = true;
     expect(canAttempt(G, {}, 'rent', '0', '1', RULES).reason).toBe('invalid_target');
   });
 
+  // T1.5 (追回制/refund model): the rent window no longer touches G.duel at
+  // all — it opens purely off G.lastRentPayment, uniformly across every mod
+  // config (duel enabled or not).
   describe('rent kind window', () => {
-    test('no G.duel at all -> window_closed', () => {
+    test('no G.lastRentPayment at all -> window_closed', () => {
       const G = freshG();
       expect(canAttempt(G, {}, 'rent', '0', '1', RULES).reason).toBe('window_closed');
     });
-    test('G.duel.phase response (already escalated) -> window_closed', () => {
-      const G = withDuelResponse(freshG());
+    test('a G.lastRentPayment from an EARLIER turn -> window_closed', () => {
+      const G = withRentPayment(freshG(), { turn: 0 });
+      G.totalTurns = 3; // the payer's turn has since ended (multiple turns later)
       expect(canAttempt(G, {}, 'rent', '0', '1', RULES).reason).toBe('window_closed');
     });
-    test('G.duel offer but turnPhase not duel -> window_closed', () => {
-      const G = withDuelOffer(freshG());
-      G.turnPhase = 'roll';
-      expect(canAttempt(G, {}, 'rent', '0', '1', RULES).reason).toBe('window_closed');
+    test('turnPhase is IRRELEVANT to the rent window now (unlike duel/trade)', () => {
+      const G = withRentPayment(freshG());
+      G.turnPhase = 'roll'; // whatever it happens to be after landing/auto-pay
+      expect(canAttempt(G, {}, 'rent', '0', '1', RULES)).toEqual({ ok: true, reason: null });
     });
-    test('wrong actor (not the challenger) -> wrong_actor', () => {
-      const G = withDuelOffer(freshG());
+    test('wrong actor (not the payer) -> wrong_actor', () => {
+      const G = withRentPayment(freshG());
       expect(canAttempt(G, {}, 'rent', '2', '1', RULES).reason).toBe('wrong_actor');
     });
     test('wrong target (not the owner) -> wrong_target', () => {
-      const G = withDuelOffer(freshG());
+      const G = withRentPayment(freshG());
       expect(canAttempt(G, {}, 'rent', '0', '2', RULES).reason).toBe('wrong_target');
     });
-    test('open window, correct actor/target -> ok', () => {
-      const G = withDuelOffer(freshG());
+    test('open window, correct actor/target, same turn -> ok', () => {
+      const G = withRentPayment(freshG());
+      expect(canAttempt(G, {}, 'rent', '0', '1', RULES)).toEqual({ ok: true, reason: null });
+    });
+    test('a pending G.duel (duel-enabled mod) has NO bearing on the rent window either way', () => {
+      const G = withRentPayment(freshG());
+      G.duel = { phase: 'response', propertyId: 9, ownerId: '2', challengerId: '2' }; // unrelated, stale-shaped duel
       expect(canAttempt(G, {}, 'rent', '0', '1', RULES)).toEqual({ ok: true, reason: null });
     });
   });
 
-  describe('duel kind window', () => {
+  describe('duel kind window (unchanged from T1 — still G.duel-based)', () => {
     test('G.duel.phase offer (not yet escalated) -> window_closed', () => {
-      const G = withDuelOffer(freshG());
+      const G = freshG();
+      G.duel = { phase: 'offer', propertyId: 3, ownerId: '1', challengerId: '0', rent: 100 };
+      G.turnPhase = 'duel';
       expect(canAttempt(G, {}, 'duel', '0', '1', RULES).reason).toBe('window_closed');
     });
     test('open response window, correct actor/target -> ok', () => {
@@ -396,17 +417,17 @@ describe('canAttempt — window predicate', () => {
 
   describe('accounting caps', () => {
     test('seam already used (per-opponent-per-seam) -> seam_exhausted', () => {
-      const G = withDuelOffer(freshG());
+      const G = withRentPayment(freshG());
       G.persuasion.attempts = recordAttempt(G.persuasion.attempts, 'rent', '0', '1');
       expect(canAttempt(G, {}, 'rent', '0', '1', RULES).reason).toBe('seam_exhausted');
     });
     test('a DIFFERENT kind/target pair is unaffected by another pair being exhausted', () => {
-      const G = withDuelOffer(freshG());
+      const G = withRentPayment(freshG());
       G.persuasion.attempts = recordAttempt(G.persuasion.attempts, 'trade', '0', '1');
       expect(canAttempt(G, {}, 'rent', '0', '1', RULES)).toEqual({ ok: true, reason: null });
     });
     test('perOpponentSeamLimit is a REAL configurable count, not just boolean', () => {
-      const G = withDuelOffer(freshG());
+      const G = withRentPayment(freshG());
       const looser = resolvePersuasionRules({ persuasion: { perOpponentSeamLimit: 2 } });
       G.persuasion.attempts = recordAttempt(G.persuasion.attempts, 'rent', '0', '1');
       expect(canAttempt(G, {}, 'rent', '0', '1', looser)).toEqual({ ok: true, reason: null }); // 1 < 2, still ok
@@ -414,12 +435,12 @@ describe('canAttempt — window predicate', () => {
       expect(canAttempt(G, {}, 'rent', '0', '1', looser).reason).toBe('seam_exhausted'); // 2 >= 2
     });
     test('global cap reached -> global_cap_reached, even on a fresh seam', () => {
-      const G = withDuelOffer(freshG());
+      const G = withRentPayment(freshG());
       G.persuasion.globalUsed = { 0: RULES.persuasion.globalCapPerGame };
       expect(canAttempt(G, {}, 'rent', '0', '1', RULES).reason).toBe('global_cap_reached');
     });
     test('below global cap -> ok', () => {
-      const G = withDuelOffer(freshG());
+      const G = withRentPayment(freshG());
       G.persuasion.globalUsed = { 0: RULES.persuasion.globalCapPerGame - 1 };
       expect(canAttempt(G, {}, 'rent', '0', '1', RULES)).toEqual({ ok: true, reason: null });
     });
@@ -492,6 +513,47 @@ describe('G.persuasion — setup() + save/load', () => {
     const rehydrated = rehydrateSavedG(savedG);
     rehydrated.players.forEach(p => expect(p.persuasionDuelPenalty).toBe(0));
   });
+
+  // T1.5 (追回制/refund model) — G.lastRentPayment.
+  describe('G.lastRentPayment', () => {
+    test('setup() seeds it to null', () => {
+      const G = freshG();
+      expect(G.lastRentPayment).toBeNull();
+    });
+
+    test('rehydrateSavedG: old save with NO lastRentPayment field at all -> null', () => {
+      const G = freshG();
+      const savedG = JSON.parse(JSON.stringify(G));
+      delete savedG.lastRentPayment;
+      expect(rehydrateSavedG(savedG).lastRentPayment).toBeNull();
+    });
+
+    test('rehydrateSavedG: a save with lastRentPayment explicitly null -> stays null', () => {
+      const G = freshG();
+      const savedG = JSON.parse(JSON.stringify(G));
+      expect(savedG.lastRentPayment).toBeNull();
+      expect(rehydrateSavedG(savedG).lastRentPayment).toBeNull();
+    });
+
+    test('rehydrateSavedG: a LIVE lastRentPayment round-trips exactly (JSON-plain, lossless)', () => {
+      const G = withRentPayment(freshG(), { payerSeat: '0', ownerSeat: '1', amount: 42, turn: 3 });
+      G.totalTurns = 3;
+      const savedG = JSON.parse(JSON.stringify(G));
+      const rehydrated = rehydrateSavedG(savedG);
+      expect(rehydrated.lastRentPayment).toEqual({ payerSeat: '0', ownerSeat: '1', amount: 42, turn: 3 });
+      // And the round-tripped window is still genuinely usable — canAttempt
+      // agrees the window is open against the rehydrated G.
+      expect(canAttempt(rehydrated, {}, 'rent', '0', '1', RULES)).toEqual({ ok: true, reason: null });
+    });
+
+    test('rehydrateSavedG: a malformed (non-object) lastRentPayment falls back to null rather than throwing', () => {
+      const G = freshG();
+      const savedG = JSON.parse(JSON.stringify(G));
+      savedG.lastRentPayment = 'not an object';
+      expect(() => rehydrateSavedG(savedG)).not.toThrow();
+      expect(rehydrateSavedG(savedG).lastRentPayment).toBeNull();
+    });
+  });
 });
 
 // =============================================================================
@@ -500,7 +562,7 @@ describe('G.persuasion — setup() + save/load', () => {
 
 describe('attemptPersuasion — malformed args (blind-dispatch safety)', () => {
   test('no args at all -> INVALID_MOVE, no G mutation, ctx.random never called', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     const before = JSON.parse(JSON.stringify(G));
     const ctx = makeCtx('0');
     const result = Monopoly.moves.attemptPersuasion(G, ctx);
@@ -510,12 +572,12 @@ describe('attemptPersuasion — malformed args (blind-dispatch safety)', () => {
   });
 
   test('unknown kind -> INVALID_MOVE', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'bribery', '1', 'text')).toBe(INVALID_MOVE);
   });
 
   test('missing targetSeat -> INVALID_MOVE', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'rent', undefined, 'text')).toBe(INVALID_MOVE);
     expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'rent', null, 'text')).toBe(INVALID_MOVE);
   });
@@ -523,14 +585,14 @@ describe('attemptPersuasion — malformed args (blind-dispatch safety)', () => {
 
 describe('attemptPersuasion — seat authorization', () => {
   test('enforceSeats off (hot-seat): any ctx.playerID accepted', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     G.enforceSeats = false;
     const ctx = makeCtx('0', { playerID: '9', randomValue: TIER1_R });
     expect(Monopoly.moves.attemptPersuasion(G, ctx, 'rent', '1', 'please')).not.toBe(INVALID_MOVE);
   });
 
   test('enforceSeats on: ctx.playerID must match ctx.currentPlayer (the actor)', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     G.enforceSeats = true;
     const wrongSeat = makeCtx('0', { playerID: '1', randomValue: TIER1_R });
     expect(Monopoly.moves.attemptPersuasion(G, wrongSeat, 'rent', '1', 'please')).toBe(INVALID_MOVE);
@@ -544,18 +606,20 @@ describe('attemptPersuasion — RULES.persuasion.enabled gate', () => {
   afterEach(() => { RULES.persuasion.enabled = true; });
 
   test('disabled -> INVALID_MOVE regardless of an otherwise-open window', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'rent', '1', 'please')).toBe(INVALID_MOVE);
   });
 });
 
 describe('attemptPersuasion — window guards route through canAttempt (INVALID_MOVE end-to-end)', () => {
   test('rent kind outside its window -> INVALID_MOVE', () => {
-    const G = freshG(); // no G.duel at all
+    const G = freshG(); // no G.lastRentPayment at all
     expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'rent', '1', 'x')).toBe(INVALID_MOVE);
   });
   test('duel kind outside its window (still offer phase) -> INVALID_MOVE', () => {
-    const G = withDuelOffer(freshG());
+    const G = freshG();
+    G.duel = { phase: 'offer', propertyId: 3, ownerId: '1', challengerId: '0', rent: 100 };
+    G.turnPhase = 'duel';
     expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'duel', '1', 'x')).toBe(INVALID_MOVE);
   });
   test('trade kind outside its window -> INVALID_MOVE', () => {
@@ -563,7 +627,7 @@ describe('attemptPersuasion — window guards route through canAttempt (INVALID_
     expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'trade', '1', 'x')).toBe(INVALID_MOVE);
   });
   test('wrong target seat -> INVALID_MOVE, no G mutation', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     const before = JSON.parse(JSON.stringify(G));
     expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0'), 'rent', '2', 'x')).toBe(INVALID_MOVE);
     expect(JSON.parse(JSON.stringify(G))).toEqual(before);
@@ -572,19 +636,18 @@ describe('attemptPersuasion — window guards route through canAttempt (INVALID_
 
 describe('attemptPersuasion — accounting caps enforced end-to-end', () => {
   test('a second attempt at the SAME (kind, actor, target) is rejected (seam exhausted)', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     const first = Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER0_R }), 'rent', '1', 'please');
     expect(first).not.toBe(INVALID_MOVE);
-    // Re-open an identical window (as if landing on the same property again later).
-    G.duel = offerDuel();
-    G.turnPhase = 'duel';
+    // Re-open an identical window (as if paying rent to the same owner AGAIN later, same turn).
+    withRentPayment(G);
     const second = Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER1_R }), 'rent', '1', 'again');
     expect(second).toBe(INVALID_MOVE);
   });
 
   test('global cap (default 3) blocks a 4th attempt across different kinds/targets', () => {
     const G = freshG();
-    withDuelOffer(G, { challengerId: '0', ownerId: '1' });
+    withRentPayment(G, { payerSeat: '0', ownerSeat: '1' });
     expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER0_R }), 'rent', '1', 'a')).not.toBe(INVALID_MOVE);
 
     withTrade(G, { proposerId: '0', targetPlayerId: '1' });
@@ -601,7 +664,7 @@ describe('attemptPersuasion — accounting caps enforced end-to-end', () => {
   });
 
   test('accounting is consumed on a FAILURE too (not a free reroll)', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER0_R }), 'rent', '1', 'please'); // tier 0
     expect(attemptCount(G.persuasion.attempts, 'rent', '0', '1')).toBe(1);
     expect(globalAttemptCount(G.persuasion.globalUsed, '0')).toBe(1);
@@ -610,7 +673,7 @@ describe('attemptPersuasion — accounting caps enforced end-to-end', () => {
 
 describe('attemptPersuasion — event payloads', () => {
   test('persuasion_attempted carries {kind, targetSeat, text} and is emitted BEFORE resolution', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER1_R }), 'rent', '1', '  please, my lord  ');
     const attempted = G.events.filter(e => e.type === 'persuasion_attempted');
     expect(attempted).toHaveLength(1);
@@ -621,7 +684,7 @@ describe('attemptPersuasion — event payloads', () => {
   });
 
   test('text is sanitized (trimmed + capped) before landing on the event', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     const long = 'z'.repeat(500);
     Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER1_R }), 'rent', '1', long);
     const attempted = G.events.find(e => e.type === 'persuasion_attempted');
@@ -629,7 +692,7 @@ describe('attemptPersuasion — event payloads', () => {
   });
 
   test('persuasion_resolved carries {kind, tier, score: null, actorSeat, targetSeat, effect}', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER2_R }), 'rent', '1', 'please');
     const resolved = G.events.find(e => e.type === 'persuasion_resolved');
     expect(resolved.actor).toBe('0');
@@ -638,54 +701,119 @@ describe('attemptPersuasion — event payloads', () => {
     expect(resolved.data.score).toBeNull();
     expect(resolved.data.actorSeat).toBe('0');
     expect(resolved.data.targetSeat).toBe('1');
-    expect(resolved.data.effect).toEqual({ type: 'rentDiscount', discountPct: 0.20, originalRent: 100, discountedRent: 80 });
+    expect(resolved.data.effect).toEqual({ type: 'rentRefund', pct: 0.20, originalPaid: 100, refunded: 20 });
   });
 
   test('an omitted text arg resolves to an empty string, not a crash', () => {
-    const G = withDuelOffer(freshG());
+    const G = withRentPayment(freshG());
     expect(() => Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER1_R }), 'rent', '1')).not.toThrow();
     expect(G.events.find(e => e.type === 'persuasion_attempted').data.text).toBe('');
   });
 });
 
-describe('attemptPersuasion — rent kind effect math', () => {
-  test('tier 0 (failure): G.duel.rent unchanged, effect null', () => {
-    const G = withDuelOffer(freshG(), { rent: 100 });
+// T1.5 (追回制/refund model): rent already transferred payer -> owner in
+// full (G.lastRentPayment.amount) BEFORE any of these tests begin — a
+// success here refunds owner -> payer, a fraction of that already-paid
+// amount, capped at the owner's CURRENT cash.
+describe('attemptPersuasion — rent kind effect math (refund model)', () => {
+  test('tier 0 (failure): no money moves, effect null', () => {
+    const G = withRentPayment(freshG(), { amount: 100 });
+    const payerBefore = G.players[0].money;
+    const ownerBefore = G.players[1].money;
     Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER0_R }), 'rent', '1', 'x');
-    expect(G.duel.rent).toBe(100); // never nulled — payRent/declineDuel still need it
+    expect(G.players[0].money).toBe(payerBefore);
+    expect(G.players[1].money).toBe(ownerBefore);
     const resolved = G.events.find(e => e.type === 'persuasion_resolved');
     expect(resolved.data.tier).toBe(0);
     expect(resolved.data.effect).toBeNull();
   });
 
-  test('tier 1: -10% discount, stacks AFTER the already-computed (charisma-discounted) rent', () => {
-    const G = withDuelOffer(freshG(), { rent: 100 }); // stands in for a rent already charisma-discounted upstream
+  test('tier 1: refunds round(amount * 0.10), owner -> payer', () => {
+    const G = withRentPayment(freshG(), { amount: 100 });
+    const payerBefore = G.players[0].money;
+    const ownerBefore = G.players[1].money;
     Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER1_R }), 'rent', '1', 'x');
-    expect(G.duel.rent).toBe(90);
+    expect(G.players[0].money).toBe(payerBefore + 10);
+    expect(G.players[1].money).toBe(ownerBefore - 10);
+    const resolved = G.events.find(e => e.type === 'persuasion_resolved');
+    expect(resolved.data.effect).toEqual({ type: 'rentRefund', pct: 0.10, originalPaid: 100, refunded: 10 });
   });
 
-  test('tier 2: -20% discount', () => {
-    const G = withDuelOffer(freshG(), { rent: 100 });
+  test('tier 2: refunds round(amount * 0.20), owner -> payer', () => {
+    const G = withRentPayment(freshG(), { amount: 100 });
+    const payerBefore = G.players[0].money;
+    const ownerBefore = G.players[1].money;
     Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER2_R }), 'rent', '1', 'x');
-    expect(G.duel.rent).toBe(80);
+    expect(G.players[0].money).toBe(payerBefore + 20);
+    expect(G.players[1].money).toBe(ownerBefore - 20);
+    const resolved = G.events.find(e => e.type === 'persuasion_resolved');
+    expect(resolved.data.effect).toEqual({ type: 'rentRefund', pct: 0.20, originalPaid: 100, refunded: 20 });
   });
 
-  test('floors at 0 dollars for a small rent', () => {
-    const G = withDuelOffer(freshG(), { rent: 2 });
-    Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER2_R }), 'rent', '1', 'x'); // 2*0.8=1.6 -> floor 1
-    expect(G.duel.rent).toBe(1);
-    expect(G.duel.rent).toBeGreaterThanOrEqual(0);
+  test('exact rounding: round(), not floor (15 * 0.10 = 1.5 -> 2)', () => {
+    const G = withRentPayment(freshG(), { amount: 15 });
+    Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER1_R }), 'rent', '1', 'x');
+    const resolved = G.events.find(e => e.type === 'persuasion_resolved');
+    expect(resolved.data.effect.refunded).toBe(2);
   });
 
-  test('the discounted rent actually flows to payRent (real downstream payment)', () => {
-    const G = withDuelOffer(freshG(), { rent: 100 });
-    Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER2_R }), 'rent', '1', 'x'); // -> 80
-    const p0Before = G.players[0].money;
-    const p1Before = G.players[1].money;
+  test('refund capped at the owner\'s CURRENT cash — never driven negative', () => {
+    const G = withRentPayment(freshG(), { amount: 100 }); // raw tier-2 refund would be 20
+    G.players[1].money = 12; // owner has since spent most of it — only 12 left
+    Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER2_R }), 'rent', '1', 'x');
+    expect(G.players[1].money).toBe(0); // capped, floored at 0 — never negative
+    expect(G.players[0].money).toBe(RULES.core.baseStartingMoney + 12); // payer got only what was available
+    const resolved = G.events.find(e => e.type === 'persuasion_resolved');
+    expect(resolved.data.effect).toEqual({ type: 'rentRefund', pct: 0.20, originalPaid: 100, refunded: 12 });
+  });
+
+  test('window closes after the payer\'s endTurn — a later attempt is INVALID_MOVE', () => {
+    const G = withRentPayment(freshG());
+    G.hasRolled = true; // endTurn's own precondition
+    const endResult = Monopoly.moves.endTurn(G, makeCtx('0'));
+    expect(endResult).not.toBe(INVALID_MOVE);
+    expect(G.lastRentPayment).toBeNull();
+    const attemptResult = Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER1_R }), 'rent', '1', 'too late');
+    expect(attemptResult).toBe(INVALID_MOVE);
+  });
+
+  test('window closes once G.totalTurns advances even WITHOUT an explicit endTurn (belt-and-braces same-turn guard)', () => {
+    const G = withRentPayment(freshG(), { turn: 0 });
+    G.totalTurns = 1; // simulates a later turn's onBegin having incremented it
+    expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER1_R }), 'rent', '1', 'x')).toBe(INVALID_MOVE);
+  });
+
+  test('a fresh attempt after the SAME turn\'s SECOND rent payment (to a different owner) targets the LATEST payment only', () => {
+    const G = withRentPayment(freshG(), { payerSeat: '0', ownerSeat: '1', amount: 50 });
+    withRentPayment(G, { payerSeat: '0', ownerSeat: '2', amount: 200 }); // a second, later payment overwrites it
+    // The FIRST (owner 1) payment's window is gone — overwritten, not stacked.
+    expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER1_R }), 'rent', '1', 'x')).toBe(INVALID_MOVE);
+    // The SECOND (owner 2) payment's window is open.
+    expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER1_R }), 'rent', '2', 'x')).not.toBe(INVALID_MOVE);
+  });
+
+  test('uniform across mods: the refund window ALSO opens when rent is paid via payRent (duel-enabled path)', () => {
+    // payRentAmount is the ONE shared choke point for every rent-shaped
+    // transfer — auto-pay-at-landing, payRent (after a duel OFFER is
+    // accepted-as-paid), AND declineDuel all route through it, so a
+    // duel-enabled mod gets the identical refund window, not a special case.
+    const G = freshG();
+    G.duel = { phase: 'offer', propertyId: 3, ownerId: '1', challengerId: '0', rent: 100 };
+    G.turnPhase = 'duel';
     const result = Monopoly.moves.payRent(G, makeCtx('0'));
     expect(result).not.toBe(INVALID_MOVE);
-    expect(G.players[0].money).toBe(p0Before - 80);
-    expect(G.players[1].money).toBe(p1Before + 80);
+    expect(G.lastRentPayment).toEqual({ payerSeat: '0', ownerSeat: '1', amount: 100, turn: 0 });
+    expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER1_R }), 'rent', '1', 'x')).not.toBe(INVALID_MOVE);
+  });
+
+  test('uniform across mods: the refund window ALSO opens when rent is paid via declineDuel', () => {
+    const G = freshG();
+    G.duel = { phase: 'response', propertyId: 3, ownerId: '1', challengerId: '0', rent: 100 };
+    G.turnPhase = 'duel';
+    const result = Monopoly.moves.declineDuel(G, makeCtx('1'));
+    expect(result).not.toBe(INVALID_MOVE);
+    expect(G.lastRentPayment).toEqual({ payerSeat: '0', ownerSeat: '1', amount: 100, turn: 0 });
+    expect(Monopoly.moves.attemptPersuasion(G, makeCtx('0', { randomValue: TIER1_R }), 'rent', '1', 'x')).not.toBe(INVALID_MOVE);
   });
 });
 
@@ -908,49 +1036,47 @@ describe('AttitudeLedger.applyEvent — persuasion_resolved', () => {
 
 describe('determinism — same ctx.random sequence -> same tier/effect', () => {
   test('two independent attemptPersuasion calls with identical mocked randomness produce identical results', () => {
-    const G1 = withDuelOffer(freshG(), { rent: 100 });
-    const G2 = withDuelOffer(freshG(), { rent: 100 });
+    const G1 = withRentPayment(freshG(), { amount: 100 });
+    const G2 = withRentPayment(freshG(), { amount: 100 });
     Monopoly.moves.attemptPersuasion(G1, makeCtx('0', { randomValue: 0.62 }), 'rent', '1', 'same text');
     Monopoly.moves.attemptPersuasion(G2, makeCtx('0', { randomValue: 0.62 }), 'rent', '1', 'same text');
     const r1 = G1.events.find(e => e.type === 'persuasion_resolved').data;
     const r2 = G2.events.find(e => e.type === 'persuasion_resolved').data;
     expect(r1.tier).toBe(r2.tier);
     expect(r1.effect).toEqual(r2.effect);
-    expect(G1.duel.rent).toBe(G2.duel.rent);
+    expect(G1.players[0].money).toBe(G2.players[0].money);
   });
 
   // End-to-end through the REAL seeded boardgame.io PRNG (not a mocked
   // ctx.random) — mirrors engine-duel-seats.test.js's seed-96 fixture
   // (marcus-grayline P0 buys Oriental Ave; sophia-ember P1 lands there next,
-  // rent due -> a duel OFFER when RULES.duel.enabled). Two FRESH clients on
-  // the identical seed + script must reach an identical persuasion outcome.
+  // rent due -> auto-pays atomically at landing, RULES.duel left at its
+  // dominion DEFAULT of disabled — the refund window no longer needs the
+  // duel mechanism at all, T1.5's whole point). Two FRESH clients on the
+  // identical seed + script must reach an identical persuasion outcome.
   describe('real seeded Client', () => {
-    beforeEach(() => { RULES.duel.enabled = true; });
-    afterEach(() => { RULES.duel.enabled = false; });
-
-    function driveToOfferAndPersuade() {
+    function driveToPaymentAndPersuade() {
       const client = makeClient(2, 96);
       client.moves.selectCharacter('marcus-grayline'); // P0, owner
-      client.moves.selectCharacter('sophia-ember');     // P1, challenger
+      client.moves.selectCharacter('sophia-ember');     // P1, challenger/payer
       client.moves.rollDice();
       client.moves.buyProperty();
       client.moves.endTurn();
-      client.moves.rollDice(); // P1 lands on P0's property -> duel OFFER
+      client.moves.rollDice(); // P1 lands on P0's property -> rent auto-pays
       const preState = client.getState();
-      expect(preState.G.duel).not.toBeNull();
-      expect(preState.G.duel.phase).toBe('offer');
-      client.moves.attemptPersuasion('rent', preState.G.duel.ownerId, 'have mercy');
+      expect(preState.G.lastRentPayment).not.toBeNull();
+      client.moves.attemptPersuasion('rent', preState.G.lastRentPayment.ownerSeat, 'have mercy');
       return client.getState().G;
     }
 
     test('identical seed + script -> byte-identical persuasion outcome across two fresh clients', () => {
-      const G1 = driveToOfferAndPersuade();
-      const G2 = driveToOfferAndPersuade();
+      const G1 = driveToPaymentAndPersuade();
+      const G2 = driveToPaymentAndPersuade();
       const r1 = G1.events.find(e => e.type === 'persuasion_resolved').data;
       const r2 = G2.events.find(e => e.type === 'persuasion_resolved').data;
       expect(r1.tier).toBe(r2.tier);
       expect(r1.effect).toEqual(r2.effect);
-      expect(G1.duel.rent).toBe(G2.duel.rent);
+      expect(G1.players[1].money).toBe(G2.players[1].money); // payer's final money
     });
   });
 });
@@ -966,20 +1092,17 @@ describe('determinism — same ctx.random sequence -> same tier/effect', () => {
 // engine-duel.test.js's Task 3 landing-interception test calls out for
 // G.turnPhase) needs the REAL boardgame.io Client, not direct move invocation.
 describe('attemptPersuasion — accounting survives the REAL Client/Immer path', () => {
-  beforeEach(() => { RULES.duel.enabled = true; });
-  afterEach(() => { RULES.duel.enabled = false; });
-
   test('G.persuasion.attempts/globalUsed reassignment is visible after the move fully returns', () => {
     const client = makeClient(2, 96);
     client.moves.selectCharacter('marcus-grayline'); // P0, owner
-    client.moves.selectCharacter('sophia-ember');     // P1, challenger
+    client.moves.selectCharacter('sophia-ember');     // P1, challenger/payer
     client.moves.rollDice();
     client.moves.buyProperty();
     client.moves.endTurn();
-    client.moves.rollDice(); // P1 lands on P0's property -> duel OFFER
-    expect(client.getState().G.duel.phase).toBe('offer');
+    client.moves.rollDice(); // P1 lands on P0's property -> rent auto-pays
+    expect(client.getState().G.lastRentPayment).not.toBeNull();
 
-    client.moves.attemptPersuasion('rent', client.getState().G.duel.ownerId, 'have mercy');
+    client.moves.attemptPersuasion('rent', client.getState().G.lastRentPayment.ownerSeat, 'have mercy');
 
     const G = client.getState().G;
     expect(attemptCount(G.persuasion.attempts, 'rent', '1', '0')).toBe(1);
@@ -992,5 +1115,38 @@ describe('attemptPersuasion — accounting survives the REAL Client/Immer path',
     const before = JSON.stringify(client.getState().G);
     client.moves.attemptPersuasion('rent', '0', 'again');
     expect(JSON.stringify(client.getState().G)).toBe(before);
+  });
+
+  // Proves the refund window ALSO survives Immer's produce() when reached
+  // through the deferred payRent path in a duel-enabled mod (not just the
+  // direct-landing auto-pay above) — the same "uniform across mods" claim
+  // as the direct-move-invocation tests above, over the REAL reducer.
+  test('the refund window opens identically when duel-enabled rent flows through payRent', () => {
+    const restore = RULES.duel.enabled;
+    RULES.duel.enabled = true;
+    try {
+      const client = makeClient(2, 96);
+      client.moves.selectCharacter('marcus-grayline'); // P0, owner
+      client.moves.selectCharacter('sophia-ember');     // P1, challenger/payer
+      client.moves.rollDice();
+      client.moves.buyProperty();
+      client.moves.endTurn();
+      client.moves.rollDice(); // P1 lands on P0's property -> duel OFFER (duel enabled)
+      expect(client.getState().G.duel.phase).toBe('offer');
+      expect(client.getState().G.lastRentPayment).toBeNull(); // not paid yet — still an offer
+
+      client.moves.payRent(); // P1 pays normally instead of dueling
+      const G = client.getState().G;
+      expect(G.duel).toBeNull();
+      expect(G.lastRentPayment).not.toBeNull();
+      expect(G.lastRentPayment.payerSeat).toBe('1');
+      expect(G.lastRentPayment.ownerSeat).toBe('0');
+
+      const result = client.moves.attemptPersuasion('rent', '0', 'have mercy');
+      expect(result).not.toBe('INVALID_MOVE'); // dispatch doesn't throw/no-op
+      expect(client.getState().G.events.some(e => e.type === 'persuasion_resolved')).toBe(true);
+    } finally {
+      RULES.duel.enabled = restore;
+    }
   });
 });

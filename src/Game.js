@@ -10,7 +10,7 @@ import { logEvent, resetMessages, playerName, isDuelCooldownBlocked } from './ev
 import {
   ATTEMPT_KINDS, resolvePersuasionRules, sanitizeText, canAttempt,
   freshAttemptsState, recordAttempt, recordGlobalAttempt,
-  rollTier, rentDiscountForTier, applyRentDiscount, duelEffectForTier, tradeShiftForTier,
+  rollTier, rentRefundPctForTier, computeRentRefund, duelEffectForTier, tradeShiftForTier,
 } from './persuasion/engine';
 
 // Active map data — defaults to classic mod, can be overridden via setActiveMap().
@@ -183,6 +183,17 @@ export function freshPersuasionState() {
 // player.persuasionDuelPenalty gets the same per-player backfill treatment
 // as luckRedraws immediately below (a save from before this wave has no
 // such field on any player object).
+//
+// G.lastRentPayment (T1.5, 追回制/refund model): optional/nullable by
+// design — most saves are taken between rent payments. A save from before
+// this wave, or one taken with no refund window open, both correctly
+// backfill to null (same "absent field -> safe default" posture as
+// everything else here, just a nullable single object rather than a
+// populated collection). No field-by-field partial-shape defense needed
+// (unlike G.persuasion above): a malformed/partial lastRentPayment is no
+// more dangerous than a missing one — canAttempt's 'rent' branch
+// (src/persuasion/engine.js) reads payerSeat/ownerSeat/turn defensively
+// either way, and a bad shape simply fails the window check.
 export function rehydrateSavedG(savedG) {
   const savedPersuasion = savedG.persuasion || {};
   const savedAttempts = savedPersuasion.attempts || {};
@@ -205,6 +216,7 @@ export function rehydrateSavedG(savedG) {
       pending: savedPersuasion.pending || null,
       activeModifier: savedPersuasion.activeModifier || null,
     },
+    lastRentPayment: (savedG.lastRentPayment && typeof savedG.lastRentPayment === 'object') ? savedG.lastRentPayment : null,
     _resumeLoad: true,
   };
 }
@@ -631,6 +643,23 @@ function payRentAmount(G, ctx, payerId, ownerId, propertyId, amount) {
   payer.money -= amount;
   G.players[ownerId].money += amount;
   logEvent(G, 'rent_paid', payerId, { propertyId, ownerId, amount });
+  // T1.5 (MT2-SP5 direction C2, rent seam redesign — 追回制/refund model):
+  // opens the 求情 (rent mercy) refund window for the REST OF THE PAYER'S
+  // TURN. `amount` here IS the true paid figure — OBSERVED (not
+  // hypothesized): this function transfers the FULL `amount` to the owner
+  // unconditionally (no partial-payment clamp exists anywhere in this
+  // codebase); a payer who can't afford it goes negative and is bankrupted
+  // BELOW, but the owner has already received the entire amount by then.
+  // Single shared choke point (this helper, not each of its 3 call sites)
+  // so the window opens uniformly for the ordinary auto-pay landing AND for
+  // payRent/declineDuel's deferred payments in duel-enabled mods, AND for a
+  // lost duel's stakes payout (also routed through here, also logged as
+  // 'rent_paid') — "uniform across all mods" per the owner's T1.5 decision,
+  // rather than special-casing the direct-landing path only. Overwritten by
+  // a later same-turn rent payment (only the MOST RECENT one is refundable)
+  // — see canAttempt's 'rent' branch (src/persuasion/engine.js) for the
+  // window predicate this state feeds.
+  G.lastRentPayment = { payerSeat: payerId, ownerSeat: ownerId, amount, turn: G.totalTurns };
   if (payer.money <= 0) {
     handleBankruptcy(G, ctx, payer, ownerId);
   }
@@ -1381,6 +1410,11 @@ export const Monopoly = {
       // cross-move modifier (duel-kind) a later move still needs to consume
       // — see freshPersuasionState's own doc comment for the field shapes.
       persuasion: freshPersuasionState(),
+      // T1.5 (追回制/refund model): the most recent rent transfer, open for
+      // a 求情 (rent mercy) refund attempt for the rest of THIS turn — see
+      // payRentAmount (where it's set/overwritten) and canAttempt's 'rent'
+      // branch (src/persuasion/engine.js) for the window this feeds.
+      lastRentPayment: null,
       freeParkingPot: 0,
       victory: resolveVictory(),
       _resumeLoad: false, // one-shot: set true by loadGame so the first onBegin doesn't bump turn/season
@@ -2247,15 +2281,23 @@ export const Monopoly = {
 
       let effect = null;
       if (kind === 'rent') {
-        // Anchor: the ALREADY-COMPUTED rent for the pending payment
-        // (G.duel.rent — calculateRent's own charisma discount already
-        // baked in at landing time) is what gets discounted here, so this
-        // stacks AFTER that discount. Floored at 0 dollars (applyRentDiscount).
+        // T1.5 (追回制/refund model, owner decision — supersedes T1's
+        // pre-payment discount): the actor (payer) already paid
+        // G.lastRentPayment.amount IN FULL (payRentAmount transfers the
+        // whole amount unconditionally — no partial-payment clamp exists
+        // anywhere in this engine, verified by reading it). A success here
+        // refunds a FRACTION of that back, owner (target) -> payer (actor),
+        // capped at the owner's CURRENT cash — they may have spent or lost
+        // money since the original payment, and must never be driven
+        // negative by a refund they can no longer fully afford.
         if (tier > 0) {
-          const originalRent = G.duel.rent;
-          const discountedRent = applyRentDiscount(originalRent, tier, rules);
-          G.duel.rent = discountedRent;
-          effect = { type: 'rentDiscount', discountPct: rentDiscountForTier(tier, rules), originalRent, discountedRent };
+          const owner = target;
+          const originalPaid = G.lastRentPayment.amount;
+          const rawRefund = computeRentRefund(originalPaid, tier, rules);
+          const refunded = Math.min(rawRefund, Math.max(0, owner.money));
+          owner.money -= refunded;
+          actor.money += refunded;
+          effect = { type: 'rentRefund', pct: rentRefundPctForTier(tier, rules), originalPaid, refunded };
         }
         // tier 0 (failure): no G mutation here — the target's grudge toward
         // the actor reacts to the emitted event below, ledger-side
@@ -2305,6 +2347,20 @@ export const Monopoly = {
       if (G.trade) return INVALID_MOVE;
       if (G.auction) return INVALID_MOVE;
       G.turnPhase = 'roll';
+      // T1.5 (追回制/refund model): explicit close of the 求情 window on the
+      // PAYER's own endTurn — endTurn can only be dispatched by
+      // ctx.currentPlayer (requireActor above), who IS the payer whenever a
+      // same-turn G.lastRentPayment exists (rent only ever gets paid by the
+      // player currently landing/moving), so an unconditional clear here is
+      // exactly "clear on the payer's endTurn". Belt-and-braces on top of
+      // canAttempt's own `lrp.turn !== G.totalTurns` check (which already
+      // closes the window the moment the NEXT turn's onBegin increments
+      // totalTurns) — searched for every OTHER way a turn can end
+      // (OBSERVED, not hypothesized): this is the ONLY `ctx.events.endTurn()`
+      // call site reachable from live gameplay (selectCharacter's own
+      // endTurn() call is character-select-phase only, before G.lastRentPayment
+      // can exist); handleBankruptcy never force-ends a turn.
+      G.lastRentPayment = null;
       ctx.events.endTurn();
     },
   }),

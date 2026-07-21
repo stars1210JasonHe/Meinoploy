@@ -342,9 +342,12 @@ export const RULES = {
       perPointDiffBonus: 0.02,
       maxDiffBonus: 0.30,
     },
-    // 求情 (rent mercy): fraction knocked off the pending rent, by tier.
+    // 求情 (rent mercy) — T1.5 REFUND model (追回制, owner decision): rent
+    // transfers atomically at landing in every mod uniformly; this is the
+    // fraction of the ALREADY-PAID rent refunded back (owner -> payer) on a
+    // successful attempt, by tier, for the rest of the payer's turn.
     rent: {
-      tierDiscounts: [0, 0.10, 0.20],
+      tierRefundPct: [0, 0.10, 0.20],
     },
     // 叫阵 (duel taunt): this-duel-only dice adjustment, by tier. lever picks
     // ONE side (design brief): 'targetMinus' (default) subtracts from the

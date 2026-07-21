@@ -65,11 +65,14 @@ export const DEFAULT_PERSUASION_RULES = {
     perPointDiffBonus: 0.02,
     maxDiffBonus: 0.30,
   },
-  // 求情 (rent mercy): fraction knocked off the ALREADY-COMPUTED pending
-  // rent, indexed by tier (index 0 unused — tier 0 is the failure branch,
-  // which applies no rent discount at all).
+  // 求情 (rent mercy) — T1.5 REFUND model (追回制, owner decision superseding
+  // T1's pre-payment discount): rent transfers atomically at landing, in
+  // EVERY mod, exactly as before this feature ever existed; the payer then
+  // has the rest of THEIR turn to ask the owner to refund a fraction of what
+  // was already paid. tierRefundPct is that fraction, indexed by tier (index
+  // 0 unused — tier 0 is the failure branch, no refund).
   rent: {
-    tierDiscounts: [0, 0.10, 0.20],
+    tierRefundPct: [0, 0.10, 0.20],
   },
   // 叫阵 (duel taunt): a this-duel-only dice adjustment, indexed by tier.
   // `lever` picks ONE side to move (design brief: "pick ONE lever") —
@@ -191,9 +194,19 @@ export function canAttempt(G, ctx, kind, actorSeat, targetSeat, rulesLike) {
   if (!targetPlayer || targetPlayer.bankrupt) return { ok: false, reason: 'invalid_target' };
 
   if (kind === 'rent') {
-    if (!G.duel || G.duel.phase !== 'offer' || G.turnPhase !== 'duel') return { ok: false, reason: 'window_closed' };
-    if (String(G.duel.challengerId) !== String(actorSeat)) return { ok: false, reason: 'wrong_actor' };
-    if (String(G.duel.ownerId) !== String(targetSeat)) return { ok: false, reason: 'wrong_target' };
+    // T1.5 (追回制/refund model, owner decision — supersedes T1's
+    // pre-payment discount): rent already transferred atomically at
+    // landing, in every mod uniformly (payRentAmount, unconditionally, no
+    // duel-enabled special case) — this window is "ask for a refund of what
+    // you already paid, for the rest of THIS turn". G.lastRentPayment is
+    // set/overwritten by every payRentAmount call (src/Game.js); `turn`
+    // pins it to the SAME G.totalTurns the payment happened on, so it
+    // closes automatically once the payer's turn ends (endTurn also clears
+    // it explicitly — see Game.js's own comment there).
+    const lrp = G.lastRentPayment;
+    if (!lrp || lrp.turn !== G.totalTurns) return { ok: false, reason: 'window_closed' };
+    if (String(lrp.payerSeat) !== String(actorSeat)) return { ok: false, reason: 'wrong_actor' };
+    if (String(lrp.ownerSeat) !== String(targetSeat)) return { ok: false, reason: 'wrong_target' };
   } else if (kind === 'duel') {
     if (!G.duel || G.duel.phase !== 'response' || G.turnPhase !== 'duel') return { ok: false, reason: 'window_closed' };
     if (String(G.duel.challengerId) !== String(actorSeat)) return { ok: false, reason: 'wrong_actor' };
@@ -244,21 +257,24 @@ export function rollTier(rng, actorCharisma, targetCharisma, rulesLike) {
 // index out of bounds into a malformed/partial RULES override.
 // ---------------------------------------------------------------------------
 
-export function rentDiscountForTier(tier, rulesLike) {
+export function rentRefundPctForTier(tier, rulesLike) {
   const rules = resolvePersuasionRules(rulesLike);
-  const arr = rules.rent.tierDiscounts;
+  const arr = rules.rent.tierRefundPct;
   return Number.isFinite(arr[tier]) ? arr[tier] : 0;
 }
 
-// Applies the tier's discount to `amount` (the already-computed pending
-// rent — charisma's own payer-side discount, if any, has already run by the
-// time this is called; this stacks AFTER it), floored at 0 dollars, rounded
-// down to a whole dollar (money is always integer dollars elsewhere in the
-// engine — calculateRent's own final `Math.floor`).
-export function applyRentDiscount(amount, tier, rulesLike) {
-  const discount = rentDiscountForTier(tier, rulesLike);
-  const discounted = Math.floor((Number.isFinite(amount) ? amount : 0) * (1 - discount));
-  return Math.max(0, discounted);
+// T1.5: raw refund owed on `originalPaid` (G.lastRentPayment.amount) at this
+// tier — round() per the owner's spec (NOT floor, unlike the old discount
+// math), floored at 0 dollars as a defensive lower bound (originalPaid/pct
+// are both always >= 0 in practice, so this is belt-and-braces). This is the
+// UNCAPPED figure — Game.js's attemptPersuasion additionally caps it against
+// the owner's CURRENT cash (which may have dropped since the rent was paid)
+// before actually moving any money; this pure function has no access to
+// live G state to apply that cap itself.
+export function computeRentRefund(originalPaid, tier, rulesLike) {
+  const pct = rentRefundPctForTier(tier, rulesLike);
+  const raw = Math.round((Number.isFinite(originalPaid) ? originalPaid : 0) * pct);
+  return Math.max(0, raw);
 }
 
 export function duelEffectForTier(tier, rulesLike) {

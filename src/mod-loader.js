@@ -184,7 +184,7 @@ export const DEFAULT_RULES = {
       maxDiffBonus: 0.30,
     },
     rent: {
-      tierDiscounts: [0, 0.10, 0.20],
+      tierRefundPct: [0, 0.10, 0.20],
     },
     duel: {
       lever: 'targetMinus',
